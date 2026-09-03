@@ -19,6 +19,8 @@
     "@firebase/util@1.15.3": true,
     "msgpackr-extract@3.0.4": true,
     "protobufjs@7.6.6": true,
-    "bcrypt@6.0.0": true
+    "bcrypt@6.0.0": true,
+    "esbuild@0.19.12": true,
+    "es5-ext@0.10.64": true
   }
 }
