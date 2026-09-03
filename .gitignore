@@ -1,0 +1,15 @@
+node_modules
+.env
+.env.local
+dist
+build
+.next
+uploads
+*.log
+.expo
+android/build
+ios/build
+*.keystore
+*.p12
+*.tsbuildinfo
+.turbo
