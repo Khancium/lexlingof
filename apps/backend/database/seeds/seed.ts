@@ -13,6 +13,7 @@ import {
   gamificationConfig,
   languages,
   permissions,
+  rolePermissions,
   scenes,
   sentences,
   concepts,
@@ -127,6 +128,54 @@ const PERMISSIONS: { code: string; description: string }[] = [
   { code: "analytics.read", description: "View analytics and reporting dashboards" },
   { code: "audit.read", description: "View the audit log" },
 ];
+
+const CONTRIBUTOR_PERMISSION_CODES = [
+  "contributions.create",
+  "contributions.read",
+  "contributions.update.own",
+  "contributions.delete.own",
+  "users.read",
+  "users.update.own",
+];
+
+const ADMIN_PERMISSION_CODES = [
+  "contributions.create",
+  "contributions.read",
+  "contributions.update.own",
+  "contributions.delete.own",
+  "contributions.review",
+  "contributions.verify",
+  "contributions.reject",
+  "contributions.manage",
+  "users.read",
+  "users.update.own",
+  "users.suspend",
+  "users.delete",
+  "users.manage",
+  "categories.manage",
+  "concepts.manage",
+  "scenes.manage",
+  "sentences.manage",
+  "languages.manage",
+  "gamification.manage",
+  "exports.create",
+  "exports.manage",
+  "analytics.read",
+  "audit.read",
+];
+
+/**
+ * super_admin bypasses requirePermission() entirely in the auth middleware,
+ * but is seeded with every permission anyway so role_permissions stays a
+ * complete source of truth for any code path that queries it directly.
+ */
+const SUPER_ADMIN_PERMISSION_CODES = [...new Set([...ADMIN_PERMISSION_CODES, "admins.manage", "system.manage"])];
+
+const ROLE_PERMISSION_CODES: Record<"contributor" | "admin" | "super_admin", string[]> = {
+  contributor: CONTRIBUTOR_PERMISSION_CODES,
+  admin: ADMIN_PERMISSION_CODES,
+  super_admin: SUPER_ADMIN_PERMISSION_CODES,
+};
 
 const DIALECTS: { code: string; nameEnglish: string }[] = [
   { code: "ps-yousafzai", nameEnglish: "Yousafzai" },
@@ -318,6 +367,22 @@ async function main() {
         };
       }),
     );
+
+    const allPermissions = await tx.select({ id: permissions.id, code: permissions.code }).from(permissions);
+    const idByCode = new Map(allPermissions.map((p) => [p.code, p.id]));
+
+    const roleRows = (Object.entries(ROLE_PERMISSION_CODES) as [keyof typeof ROLE_PERMISSION_CODES, string[]][]).flatMap(
+      ([role, codes]) =>
+        codes.map((code) => {
+          const permissionId = idByCode.get(code);
+          if (!permissionId) {
+            throw new Error(`Unknown permission code in ROLE_PERMISSION_CODES: ${code}`);
+          }
+          return { role, permissionId };
+        }),
+    );
+
+    await tx.insert(rolePermissions).values(roleRows);
   });
 
   const { pashtoId } = await runSection("languages", async (tx) => {
