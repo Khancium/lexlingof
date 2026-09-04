@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "mobile",
+    "slug": "mobile",
+    "version": "1.0.0",
+    "ios": {
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Lexlingo needs microphone access to record your voice contributions."
+      }
+    },
+    "android": {
+      "permissions": ["RECORD_AUDIO"]
+    }
+  }
+}

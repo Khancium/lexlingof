@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "718941977341",
+    "project_id": "lexlingo-ec076",
+    "storage_bucket": "lexlingo-ec076.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:718941977341:android:9fa552f169215b91e1dc94",
+        "android_client_info": {
+          "package_name": "com.lexlingo.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB9Qycz_hKmGSTjL4jEKPKBZgC6wHvnVPw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

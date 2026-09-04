@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import "./globals.css";
+import AuthProvider from "@/components/providers";
 
 export const metadata: Metadata = {
   title: "Lexlingo",
@@ -10,7 +12,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

@@ -21,6 +21,7 @@
     "protobufjs@7.6.6": true,
     "bcrypt@6.0.0": true,
     "esbuild@0.19.12": true,
-    "es5-ext@0.10.64": true
+    "es5-ext@0.10.64": true,
+    "@firebase/util@1.15.2": true
   }
 }
