@@ -49,29 +49,33 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
   fastify.get("/concepts/:id", async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [row] = await db
-      .select({
-        id: concepts.id,
-        slug: concepts.slug,
-        labelEnglish: concepts.labelEnglish,
-        description: concepts.description,
-        difficulty: concepts.difficulty,
-        isActive: concepts.isActive,
-        deletedAt: concepts.deletedAt,
-        categoryId: categories.id,
-        categoryName: categories.nameEnglish,
-        categorySlug: categories.slug,
-      })
-      .from(concepts)
-      .innerJoin(categories, eq(categories.id, concepts.categoryId))
-      .where(eq(concepts.id, id))
-      .limit(1);
+    // These two don't depend on each other -- both only need `id`, which is
+    // already known from the path param -- so they run in parallel instead
+    // of as two sequential round trips.
+    const [[row], media] = await Promise.all([
+      db
+        .select({
+          id: concepts.id,
+          slug: concepts.slug,
+          labelEnglish: concepts.labelEnglish,
+          description: concepts.description,
+          difficulty: concepts.difficulty,
+          isActive: concepts.isActive,
+          deletedAt: concepts.deletedAt,
+          categoryId: categories.id,
+          categoryName: categories.nameEnglish,
+          categorySlug: categories.slug,
+        })
+        .from(concepts)
+        .innerJoin(categories, eq(categories.id, concepts.categoryId))
+        .where(eq(concepts.id, id))
+        .limit(1),
+      db.select().from(conceptMedia).where(eq(conceptMedia.conceptId, id)),
+    ]);
 
     if (!row || !row.isActive || row.deletedAt) {
       throw new HttpError(404, "NOT_FOUND", "Concept not found");
     }
-
-    const media = await db.select().from(conceptMedia).where(eq(conceptMedia.conceptId, id));
 
     return {
       id: row.id,

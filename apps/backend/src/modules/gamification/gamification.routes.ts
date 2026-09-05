@@ -250,26 +250,28 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
   fastify.get("/corpus/categories", async () => {
     // scene_concepts is admin-only annotation data and must never appear
     // here -- only Module 1 (word) verified-recording coverage is shown.
-    const categoryRows = await db
-      .select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish })
-      .from(categories)
-      .where(eq(categories.isActive, true))
-      .orderBy(categories.sortOrder);
-
-    const totalConceptRows = await db
-      .select({ categoryId: concepts.categoryId, value: sql<number>`count(*)`.mapWith(Number) })
-      .from(concepts)
-      .where(and(eq(concepts.isActive, true), isNull(concepts.deletedAt)))
-      .groupBy(concepts.categoryId);
+    // None of these three depend on each other's results -- run them
+    // concurrently instead of as three sequential round trips.
+    const [categoryRows, totalConceptRows, coveredConceptRows] = await Promise.all([
+      db
+        .select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish })
+        .from(categories)
+        .where(eq(categories.isActive, true))
+        .orderBy(categories.sortOrder),
+      db
+        .select({ categoryId: concepts.categoryId, value: sql<number>`count(*)`.mapWith(Number) })
+        .from(concepts)
+        .where(and(eq(concepts.isActive, true), isNull(concepts.deletedAt)))
+        .groupBy(concepts.categoryId),
+      db
+        .select({ categoryId: concepts.categoryId, value: sql<number>`count(distinct ${concepts.id})`.mapWith(Number) })
+        .from(concepts)
+        .innerJoin(wordRecordings, and(eq(wordRecordings.conceptId, concepts.id), isNull(wordRecordings.deletedAt)))
+        .innerJoin(contributions, and(eq(contributions.id, wordRecordings.contributionId), eq(contributions.status, "verified")))
+        .where(and(eq(concepts.isActive, true), isNull(concepts.deletedAt)))
+        .groupBy(concepts.categoryId),
+    ]);
     const totalByCategory = new Map(totalConceptRows.map((r) => [r.categoryId, r.value]));
-
-    const coveredConceptRows = await db
-      .select({ categoryId: concepts.categoryId, value: sql<number>`count(distinct ${concepts.id})`.mapWith(Number) })
-      .from(concepts)
-      .innerJoin(wordRecordings, and(eq(wordRecordings.conceptId, concepts.id), isNull(wordRecordings.deletedAt)))
-      .innerJoin(contributions, and(eq(contributions.id, wordRecordings.contributionId), eq(contributions.status, "verified")))
-      .where(and(eq(concepts.isActive, true), isNull(concepts.deletedAt)))
-      .groupBy(concepts.categoryId);
     const coveredByCategory = new Map(coveredConceptRows.map((r) => [r.categoryId, r.value]));
 
     return categoryRows.map((category) => {

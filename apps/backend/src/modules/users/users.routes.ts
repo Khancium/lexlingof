@@ -192,8 +192,10 @@ export default async function usersRoutes(fastify: FastifyInstance) {
   fastify.get("/me/stats", { preHandler: verifyToken }, async (request) => {
     const userId = request.user!.id;
 
-    const [stats] = await db.select().from(userStats).where(eq(userStats.userId, userId)).limit(1);
-    const [streak] = await db.select().from(streaks).where(eq(streaks.userId, userId)).limit(1);
+    const [[stats], [streak]] = await Promise.all([
+      db.select().from(userStats).where(eq(userStats.userId, userId)).limit(1),
+      db.select().from(streaks).where(eq(streaks.userId, userId)).limit(1),
+    ]);
 
     return { stats: stats ?? null, streak: streak ?? null };
   });
