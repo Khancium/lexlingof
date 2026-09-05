@@ -240,7 +240,7 @@ export default function ConceptPage() {
                 <>
                   <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-surface py-10 shadow-sm">
                     <AudioRecorder
-                      maxDurationMs={3000}
+                      maxDurationMs={5000}
                       onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
                       onError={(message) => setSubmitError(message)}
                     />

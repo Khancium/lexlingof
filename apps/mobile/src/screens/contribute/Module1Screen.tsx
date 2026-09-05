@@ -241,7 +241,7 @@ export default function Module1Screen({ navigation }: Props) {
                 <>
                   <View style={styles.recorderCard}>
                     <AudioRecorder
-                      maxDurationMs={3000}
+                      maxDurationMs={5000}
                       onRecordingComplete={(path, durationMs, checksum) => setRecording({ path, durationMs, checksum })}
                       onError={(message) => setSubmitError(message)}
                     />

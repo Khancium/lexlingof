@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   PermissionsAndroid,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -56,15 +57,21 @@ function formatMmSs(elapsedMs: number): string {
   return recorderPlayer.mmss(Math.floor(elapsedMs / 1000));
 }
 
-function ringColorForElapsed(elapsedMs: number): string {
-  if (elapsedMs >= 2700) {
+function ringColorForElapsed(elapsedMs: number, maxDurationMs: number): string {
+  const ratio = elapsedMs / maxDurationMs;
+  if (ratio >= 0.9) {
     return COLORS.danger;
   }
-  if (elapsedMs >= 2000) {
+  if (ratio >= 0.67) {
     return COLORS.warning;
   }
   return COLORS.success;
 }
+
+// A press shorter than this is treated as "tap to start" (recording keeps
+// going after release, stopped by a later tap); longer counts as "hold to
+// record", where releasing stops it immediately.
+const HOLD_THRESHOLD_MS = 350;
 
 const RING_SIZE = 140;
 const RING_STROKE = 10;
@@ -140,6 +147,18 @@ export default function AudioRecorder({
   // between the threshold being crossed and the recorder actually stopping).
   const stoppingRef = useRef(false);
   const elapsedMsRef = useRef(0);
+  const statusRef = useRef<Status>('idle');
+
+  // True only for the specific press that started the current recording --
+  // used to tell "held past the threshold, then released" (stop on release)
+  // apart from "quick tap, released immediately" (keep recording; a later
+  // tap stops it) in handlePressOut below.
+  const holdGestureActiveRef = useRef(false);
+  const pressStartRef = useRef(0);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
 
   useEffect(() => {
     elapsedMsRef.current = elapsedMs;
@@ -219,6 +238,7 @@ export default function AudioRecorder({
         // Module 1 auto-stop -- second enforcement layer after the UI
         // countdown; the server also caps durationMs on confirm.
         if (maxDurationMs && current >= maxDurationMs) {
+          holdGestureActiveRef.current = false;
           stopRecording();
         }
       });
@@ -231,6 +251,32 @@ export default function AudioRecorder({
       onError(message);
     }
   }, [maxDurationMs, onDurationUpdate, onError, stopRecording]);
+
+  // Combined tap-to-toggle / hold-to-record gesture, used only in the
+  // maxDurationMs (Module 1) mode's record button below. A tap starts
+  // recording and releases without stopping it; a second tap (press-in)
+  // while already recording stops it. Holding past HOLD_THRESHOLD_MS and
+  // then releasing also stops it, for a press-and-hold-to-record feel.
+  const handlePressIn = useCallback(() => {
+    if (statusRef.current === 'idle') {
+      holdGestureActiveRef.current = true;
+      pressStartRef.current = Date.now();
+      startRecording();
+    } else if (statusRef.current === 'recording' && !holdGestureActiveRef.current) {
+      stopRecording();
+    }
+  }, [startRecording, stopRecording]);
+
+  const handlePressOut = useCallback(() => {
+    if (!holdGestureActiveRef.current) {
+      return;
+    }
+    holdGestureActiveRef.current = false;
+    const heldMs = Date.now() - pressStartRef.current;
+    if (heldMs >= HOLD_THRESHOLD_MS && statusRef.current === 'recording') {
+      stopRecording();
+    }
+  }, [stopRecording]);
 
   const pauseRecording = useCallback(async () => {
     await recorderPlayer.pauseRecorder();
@@ -271,14 +317,24 @@ export default function AudioRecorder({
   }
 
   if (status === 'idle') {
+    if (maxDurationMs) {
+      return (
+        <View style={styles.centered}>
+          <Pressable style={styles.recordButton} onPressIn={handlePressIn} onPressOut={handlePressOut}>
+            <Ionicons name="mic" size={36} color="#FFFFFF" />
+          </Pressable>
+          <Text style={styles.mutedText}>
+            Tap to record, or hold and release to stop (max {(maxDurationMs / 1000).toFixed(0)} seconds)
+          </Text>
+        </View>
+      );
+    }
     return (
       <View style={styles.centered}>
         <TouchableOpacity style={styles.recordButton} onPress={startRecording}>
           <Ionicons name="mic" size={36} color="#FFFFFF" />
         </TouchableOpacity>
-        <Text style={styles.mutedText}>
-          {maxDurationMs ? 'Tap to record (max 3 seconds)' : 'Tap to start recording'}
-        </Text>
+        <Text style={styles.mutedText}>Tap to start recording</Text>
       </View>
     );
   }
@@ -287,12 +343,20 @@ export default function AudioRecorder({
     const remainingSeconds = Math.max(0, (maxDurationMs - elapsedMs) / 1000).toFixed(1);
     return (
       <View style={styles.centered}>
-        <ProgressRing progress={elapsedMs / maxDurationMs} color={ringColorForElapsed(elapsedMs)}>
-          <Text style={styles.ringText}>{remainingSeconds}</Text>
-        </ProgressRing>
+        <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut}>
+          <ProgressRing progress={elapsedMs / maxDurationMs} color={ringColorForElapsed(elapsedMs, maxDurationMs)}>
+            <Text style={styles.ringText}>{remainingSeconds}</Text>
+          </ProgressRing>
+        </Pressable>
         <Text style={styles.remainingText}>seconds remaining</Text>
         <MicLevelBar metering={metering} />
-        <Text style={styles.mutedText}>Recording... auto-stops at 3 seconds</Text>
+        <TouchableOpacity style={[styles.actionButton, styles.stopButton]} onPress={stopRecording}>
+          <Ionicons name="stop" size={20} color="#FFFFFF" />
+          <Text style={styles.actionButtonText}>Stop</Text>
+        </TouchableOpacity>
+        <Text style={styles.mutedText}>
+          Tap the ring or button to stop, or it auto-stops at {(maxDurationMs / 1000).toFixed(0)} seconds
+        </Text>
       </View>
     );
   }

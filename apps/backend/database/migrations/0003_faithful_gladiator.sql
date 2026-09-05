@@ -1,0 +1,2 @@
+ALTER TABLE "word_recordings" DROP CONSTRAINT "ck_word_recording_max_duration";--> statement-breakpoint
+ALTER TABLE "word_recordings" ADD CONSTRAINT "ck_word_recording_max_duration" CHECK ("word_recordings"."duration_ms" <= 5000);

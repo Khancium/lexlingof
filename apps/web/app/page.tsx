@@ -7,7 +7,7 @@ const MODULES = [
   {
     title: "Record Words",
     color: "border-brand",
-    description: "Record individual words in your language, 3 seconds at a time.",
+    description: "Record individual words in your language, 5 seconds at a time.",
   },
   {
     title: "Upload Audio",

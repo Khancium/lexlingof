@@ -458,7 +458,7 @@ export const audioFiles = pgTable(
 /**
  * Module 1 word recordings.
  *
- * The 3-second cap (`ck_word_recording_max_duration`) applies to THIS TABLE ONLY.
+ * The 5-second cap (`ck_word_recording_max_duration`) applies to THIS TABLE ONLY.
  * NEVER apply a duration limit to audio_uploads, translations or
  * scene_contributions — those modules accept audio of any length.
  */
@@ -491,7 +491,7 @@ export const wordRecordings = pgTable(
       .on(t.contributionId, t.conceptId, t.synonymIndex, t.takeIndex)
       .where(sql`${t.deletedAt} is null`),
     /** Module 1 ONLY. 3-second limit. NEVER apply to other tables. */
-    check("ck_word_recording_max_duration", sql`${t.durationMs} <= 3000`),
+    check("ck_word_recording_max_duration", sql`${t.durationMs} <= 5000`),
     check("ck_word_recording_min_duration", sql`${t.durationMs} > 0`),
     check("ck_word_recording_synonym_index", sql`${t.synonymIndex} between 1 and 3`),
     check("ck_word_recording_take_index", sql`${t.takeIndex} between 1 and 3`),

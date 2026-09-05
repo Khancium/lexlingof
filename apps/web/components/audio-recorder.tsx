@@ -245,6 +245,9 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         </div>
         {micMeter}
         <p className="text-sm font-semibold text-brand">Recording... auto-stops at {(maxDurationMs / 1000).toFixed(0)} seconds</p>
+        <button onClick={stopRecording} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
+          Stop
+        </button>
       </div>
     );
   }

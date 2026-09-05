@@ -23,7 +23,7 @@ const submitSchema = z.object({
   ipa: z.string().optional(),
   synonymIndex: z.number().int().min(1).max(3),
   takeIndex: z.number().int().min(1).max(3),
-  durationMs: z.number().int().min(1).max(3000), // FIRST enforcement layer
+  durationMs: z.number().int().min(1).max(5000), // FIRST enforcement layer
   deviceId: z.string().optional(),
   appVersion: z.string().optional(),
   clientType: z.string().optional(),
