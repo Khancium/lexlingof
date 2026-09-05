@@ -1,14 +1,17 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "Lexlingo",
     "slug": "mobile",
     "version": "1.0.0",
+    "plugins": ["@react-native-firebase/app"],
     "ios": {
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Lexlingo needs microphone access to record your voice contributions."
       }
     },
     "android": {
+      "package": "com.lexlingo.app",
+      "googleServicesFile": "./google-services.json",
       "permissions": ["RECORD_AUDIO"]
     }
   }

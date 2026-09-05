@@ -1,4 +1,4 @@
-package com.mobile
+package com.lexlingo.app
 
 import android.os.Build
 import android.os.Bundle

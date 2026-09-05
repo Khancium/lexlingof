@@ -62,7 +62,7 @@ export function getCurrentUserId(): string | null {
 }
 
 export const apiClient = axios.create({
-  baseURL: process.env.API_URL || 'http://10.0.2.2:3001',
+  baseURL: process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:3001',
   timeout: 30000,
 });
 
