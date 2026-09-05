@@ -791,10 +791,24 @@ export const api = {
     createConcept: (data: AdminConceptInput) => apiClient.post<ConceptDetail>("/api/v1/admin/concepts", data).then((r) => r.data),
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>
       apiClient.put<ConceptDetail>(`/api/v1/admin/concepts/${id}`, data).then((r) => r.data),
+    uploadConceptMedia: (id: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient
+        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media`, form)
+        .then((r) => r.data);
+    },
 
     createScene: (data: AdminSceneInput) => apiClient.post<Scene>("/api/v1/admin/scenes", data).then((r) => r.data),
     updateScene: (id: string, data: AdminSceneUpdateInput) =>
       apiClient.put<Scene>(`/api/v1/admin/scenes/${id}`, data).then((r) => r.data),
+    uploadSceneMedia: (id: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient
+        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media`, form)
+        .then((r) => r.data);
+    },
     createSceneConcept: (data: AdminSceneConceptInput) =>
       apiClient.post<{ id: string }>("/api/v1/admin/scene-concepts", data).then((r) => r.data),
 

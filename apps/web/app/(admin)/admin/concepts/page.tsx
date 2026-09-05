@@ -22,6 +22,9 @@ export default function AdminConceptsPage() {
   const [editCategoryId, setEditCategoryId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+
   async function load() {
     setLoading(true);
     const [cats, res] = await Promise.all([api.categories.getAll(), api.concepts.getAll({ limit: 200 })]);
@@ -53,6 +56,20 @@ export default function AdminConceptsPage() {
       setCreateError(err instanceof Error ? err.message : "Failed to create concept");
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function handleUploadImage(conceptId: string, file: File | undefined) {
+    if (!file) return;
+    setUploadingId(conceptId);
+    setUploadMessage(null);
+    try {
+      await api.admin.uploadConceptMedia(conceptId, file);
+      setUploadMessage({ id: conceptId, text: "Image uploaded" });
+    } catch (err) {
+      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Upload failed", error: true });
+    } finally {
+      setUploadingId(null);
     }
   }
 
@@ -144,6 +161,7 @@ export default function AdminConceptsPage() {
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Description</th>
                 <th className="px-4 py-3">Difficulty</th>
+                <th className="px-4 py-3">Image</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
@@ -191,6 +209,7 @@ export default function AdminConceptsPage() {
                         ))}
                       </select>
                     </td>
+                    <td className="px-4 py-2 text-xs text-ink-muted">--</td>
                     <td className="px-4 py-2">
                       <div className="flex gap-2">
                         <button
@@ -215,6 +234,23 @@ export default function AdminConceptsPage() {
                     <td className="px-4 py-3 text-ink-muted">{concept.categoryName}</td>
                     <td className="px-4 py-3 text-ink-muted">{concept.description ?? "--"}</td>
                     <td className="px-4 py-3 text-ink-muted">{concept.difficulty}</td>
+                    <td className="px-4 py-3">
+                      <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
+                        {uploadingId === concept.id ? "Uploading..." : "Upload Image"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={uploadingId === concept.id}
+                          onChange={(e) => handleUploadImage(concept.id, e.target.files?.[0])}
+                        />
+                      </label>
+                      {uploadMessage?.id === concept.id ? (
+                        <p className={`mt-1 text-xs ${uploadMessage.error ? "text-red-600" : "text-emerald-600"}`}>
+                          {uploadMessage.text}
+                        </p>
+                      ) : null}
+                    </td>
                     <td className="px-4 py-3">
                       <button onClick={() => startEdit(concept)} className="text-xs font-semibold text-brand hover:underline">
                         Edit

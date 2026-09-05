@@ -24,6 +24,9 @@ export default function AdminScenesPage() {
   const [coverageMessage, setCoverageMessage] = useState<string | null>(null);
   const [isAddingCoverage, setIsAddingCoverage] = useState(false);
 
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+
   async function load() {
     setLoading(true);
     const [sceneList, conceptRes] = await Promise.all([api.scenes.getAll(), api.concepts.getAll({ limit: 200 })]);
@@ -58,6 +61,20 @@ export default function AdminScenesPage() {
       setCreateError(err instanceof Error ? err.message : "Failed to create scene");
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function handleUploadImage(sceneId: string, file: File | undefined) {
+    if (!file) return;
+    setUploadingId(sceneId);
+    setUploadMessage(null);
+    try {
+      await api.admin.uploadSceneMedia(sceneId, file);
+      setUploadMessage({ id: sceneId, text: "Image uploaded" });
+    } catch (err) {
+      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Upload failed", error: true });
+    } finally {
+      setUploadingId(null);
     }
   }
 
@@ -149,16 +166,32 @@ export default function AdminScenesPage() {
                     {scene.slug} · {scene.difficulty}
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    setCoverageSceneId(coverageSceneId === scene.id ? null : scene.id);
-                    setCoverageMessage(null);
-                  }}
-                  className="text-xs font-semibold text-brand hover:underline"
-                >
-                  {coverageSceneId === scene.id ? "Close" : "Add Concept Coverage"}
-                </button>
+                <div className="flex items-center gap-4">
+                  <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
+                    {uploadingId === scene.id ? "Uploading..." : "Upload Image"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={uploadingId === scene.id}
+                      onChange={(e) => handleUploadImage(scene.id, e.target.files?.[0])}
+                    />
+                  </label>
+                  <button
+                    onClick={() => {
+                      setCoverageSceneId(coverageSceneId === scene.id ? null : scene.id);
+                      setCoverageMessage(null);
+                    }}
+                    className="text-xs font-semibold text-brand hover:underline"
+                  >
+                    {coverageSceneId === scene.id ? "Close" : "Add Concept Coverage"}
+                  </button>
+                </div>
               </div>
+
+              {uploadMessage?.id === scene.id ? (
+                <p className={`text-xs ${uploadMessage.error ? "text-red-600" : "text-emerald-600"}`}>{uploadMessage.text}</p>
+              ) : null}
 
               {coverageSceneId === scene.id ? (
                 <div className="mt-4 space-y-2 border-t border-border pt-4">
