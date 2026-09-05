@@ -1,0 +1,41 @@
+// Mirrors apps/backend/src/modules/users/demographics.constants.ts -- kept in
+// sync manually since there's no shared package wired into the build yet.
+export const MOTHER_TONGUE_LANGUAGES = [
+  "Pashto",
+  "Gojri",
+  "Torwali",
+  "Gawri",
+  "Ushojo",
+  "Kalkoti",
+  "Palula",
+  "Gawar-Bati",
+  "Dameli",
+  "Kalasha",
+  "Kamviri",
+  "Kativiri",
+  "Madaklashti",
+  "Khowar",
+  "Wakhi",
+  "Sarikoli",
+  "Kyrgyz",
+  "Yidgha",
+  "Badeshi",
+  "Indus Kohistani",
+  "Ormuri",
+  "Seraiki",
+  "Tirahi",
+  "Kohati",
+  "Hindko (Peshawar, Kohat, Hazara)",
+  "Farsi",
+  "Sanglechi",
+  "Chiliso",
+  "Shina",
+  "Pahari-Potohari",
+] as const;
+
+export const GENDER_OPTIONS: { value: "male" | "female" | "other" | "prefer_not_to_say"; label: string }[] = [
+  { value: "male", label: "Male" },
+  { value: "female", label: "Female" },
+  { value: "other", label: "Other" },
+  { value: "prefer_not_to_say", label: "Prefer not to say" },
+];

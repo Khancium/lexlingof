@@ -1027,6 +1027,88 @@ export const contributorProfiles = pgTable("contributor_profiles", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * Growable taxonomies for the onboarding demographics form. Each is a
+ * user-extensible lookup: the form offers existing rows in a combobox, but a
+ * contributor can also add a new one that becomes available to everyone
+ * afterward (tribes/villages don't have a fixed enumerable list up front).
+ */
+export const tribes = pgTable("tribes", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull().unique(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export const subTribes = pgTable(
+  "sub_tribes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tribeId: uuid("tribe_id")
+      .notNull()
+      .references(() => tribes.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("sub_tribes_tribe_id_name_key").on(table.tribeId, table.name)],
+);
+
+export const villages = pgTable(
+  "villages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    country: text("country").notNull(),
+    city: text("city").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("villages_country_city_name_key").on(table.country, table.city, table.name)],
+);
+
+export const quarters = pgTable(
+  "quarters",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    villageId: uuid("village_id")
+      .notNull()
+      .references(() => villages.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [uniqueIndex("quarters_village_id_name_key").on(table.villageId, table.name)],
+);
+
+export const genderEnum = pgEnum("gender", ["male", "female", "other", "prefer_not_to_say"]);
+
+/**
+ * The onboarding form shown right after registration. Kept separate from
+ * contributorProfiles (which predates this form and serves the
+ * profile-settings page) rather than folding fields in, since this table's
+ * columns are all required at signup time and profile settings' fields are
+ * all optional/editable later.
+ */
+export const contributorDemographics = pgTable("contributor_demographics", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  fullName: text("full_name").notNull(),
+  age: integer("age").notNull(),
+  gender: genderEnum("gender").notNull(),
+  motherTongue: text("mother_tongue").notNull(),
+  tribeId: uuid("tribe_id")
+    .notNull()
+    .references(() => tribes.id),
+  subTribeId: uuid("sub_tribe_id").references(() => subTribes.id),
+  country: text("country").notNull(),
+  city: text("city").notNull(),
+  villageId: uuid("village_id")
+    .notNull()
+    .references(() => villages.id),
+  quarterId: uuid("quarter_id").references(() => quarters.id),
+  dialect: text("dialect"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 /* -------------------------------------------------------------------------- */
 /*                                  Relations                                 */
 /* -------------------------------------------------------------------------- */
@@ -1357,4 +1439,28 @@ export const contributorProfilesRelations = relations(contributorProfiles, ({ on
     fields: [contributorProfiles.primaryDialectId],
     references: [dialects.id],
   }),
+}));
+
+export const tribesRelations = relations(tribes, ({ many }) => ({
+  subTribes: many(subTribes),
+}));
+
+export const subTribesRelations = relations(subTribes, ({ one }) => ({
+  tribe: one(tribes, { fields: [subTribes.tribeId], references: [tribes.id] }),
+}));
+
+export const villagesRelations = relations(villages, ({ many }) => ({
+  quarters: many(quarters),
+}));
+
+export const quartersRelations = relations(quarters, ({ one }) => ({
+  village: one(villages, { fields: [quarters.villageId], references: [villages.id] }),
+}));
+
+export const contributorDemographicsRelations = relations(contributorDemographics, ({ one }) => ({
+  user: one(users, { fields: [contributorDemographics.userId], references: [users.id] }),
+  tribe: one(tribes, { fields: [contributorDemographics.tribeId], references: [tribes.id] }),
+  subTribe: one(subTribes, { fields: [contributorDemographics.subTribeId], references: [subTribes.id] }),
+  village: one(villages, { fields: [contributorDemographics.villageId], references: [villages.id] }),
+  quarter: one(quarters, { fields: [contributorDemographics.quarterId], references: [quarters.id] }),
 }));

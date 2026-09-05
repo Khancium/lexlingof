@@ -181,6 +181,39 @@ export type UpdateMeInput = Partial<{
   showLocation: boolean;
 }>;
 
+export type NamedOption = { id: string; name: string };
+
+export type GenderOption = "male" | "female" | "other" | "prefer_not_to_say";
+
+export type ContributorDemographics = {
+  userId: string;
+  fullName: string;
+  age: number;
+  gender: GenderOption;
+  motherTongue: string;
+  tribeId: string;
+  subTribeId: string | null;
+  country: string;
+  city: string;
+  villageId: string;
+  quarterId: string | null;
+  dialect: string | null;
+};
+
+export type SubmitDemographicsInput = {
+  fullName: string;
+  age: number;
+  gender: GenderOption;
+  motherTongue: string;
+  tribe: string;
+  subTribe?: string;
+  country: string;
+  city: string;
+  village: string;
+  quarter?: string;
+  dialect?: string;
+};
+
 export type UserStatsResponse = {
   stats: {
     totalContributions: number;
@@ -630,6 +663,36 @@ export const api = {
 
   languages: {
     getAll: () => apiClient.get<Language[]>("/api/v1/languages").then((r) => r.data),
+  },
+
+  geo: {
+    getCountries: () =>
+      apiClient.get<{ items: { code: string; name: string }[] }>("/api/v1/geo/countries").then((r) => r.data.items),
+    getCities: (country: string) =>
+      apiClient.get<{ items: string[] }>("/api/v1/geo/cities", { params: { country } }).then((r) => r.data.items),
+  },
+
+  demographics: {
+    getMotherTongues: () =>
+      apiClient.get<{ items: string[] }>("/api/v1/users/mother-tongues").then((r) => r.data.items),
+    getTribes: () =>
+      apiClient.get<{ items: NamedOption[] }>("/api/v1/users/tribes").then((r) => r.data.items),
+    getSubTribes: (tribeId: string) =>
+      apiClient
+        .get<{ items: NamedOption[] }>(`/api/v1/users/tribes/${tribeId}/sub-tribes`)
+        .then((r) => r.data.items),
+    getVillages: (country: string, city: string) =>
+      apiClient
+        .get<{ items: NamedOption[] }>("/api/v1/users/villages", { params: { country, city } })
+        .then((r) => r.data.items),
+    getQuarters: (villageId: string) =>
+      apiClient
+        .get<{ items: NamedOption[] }>(`/api/v1/users/villages/${villageId}/quarters`)
+        .then((r) => r.data.items),
+    getMe: () =>
+      apiClient.get<ContributorDemographics | null>("/api/v1/users/me/demographics").then((r) => r.data),
+    submit: (data: SubmitDemographicsInput) =>
+      apiClient.post<ContributorDemographics>("/api/v1/users/me/demographics", data).then((r) => r.data),
   },
 
   categories: {

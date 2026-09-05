@@ -36,7 +36,7 @@ export default function RegisterPage() {
     setServerError(null);
     try {
       await registerUser(values.email, values.password, values.displayName);
-      router.push("/dashboard");
+      router.push("/onboarding");
     } catch (err) {
       setServerError(getErrorMessage(err, "Registration failed"));
     }

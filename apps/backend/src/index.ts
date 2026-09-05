@@ -13,6 +13,8 @@ import languagesRoutes from "./modules/languages/languages.routes.js";
 import deviceRoutes from "./modules/notifications/device.routes.js";
 import notificationsRoutes from "./modules/notifications/notifications.routes.js";
 import usersRoutes from "./modules/users/users.routes.js";
+import demographicsRoutes from "./modules/users/demographics.routes.js";
+import geoRoutes from "./modules/users/geo.routes.js";
 import audioUploadRoutes from "./modules/contributions/audio/audio-upload.routes.js";
 import sceneRoutes from "./modules/contributions/scene/scene.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
@@ -86,6 +88,8 @@ server.setErrorHandler((err, request, reply) => {
 await server.register(authRoutes, { prefix: "/api/v1/auth" });
 await server.register(deviceRoutes, { prefix: "/api/v1" });
 await server.register(usersRoutes, { prefix: "/api/v1/users" });
+await server.register(demographicsRoutes, { prefix: "/api/v1/users" });
+await server.register(geoRoutes, { prefix: "/api/v1" });
 await server.register(languagesRoutes, { prefix: "/api/v1" });
 await server.register(categoriesModule, { prefix: "/api/v1" });
 await server.register(audioRoutes, { prefix: "/api/v1/audio" });
