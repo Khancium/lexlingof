@@ -3,7 +3,16 @@ import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { contributorDemographics, quarters, subTribes, tribes, users, villages } from "../../db/schema.js";
+import {
+  contributorDemographics,
+  contributorProfiles,
+  languages,
+  quarters,
+  subTribes,
+  tribes,
+  users,
+  villages,
+} from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 import { GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from "./demographics.constants.js";
@@ -97,6 +106,43 @@ async function getOrCreateQuarter(villageId: string, name: string): Promise<stri
     .where(and(eq(quarters.villageId, villageId), eq(quarters.name, name)))
     .limit(1);
   if (!row) throw new HttpError(500, "QUARTER_LOOKUP_FAILED", "Failed to resolve quarter");
+  return row.id;
+}
+
+function slugifyLanguageCode(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[()]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+/**
+ * The onboarding form's mother-tongue list (MOTHER_TONGUE_LANGUAGES) is
+ * mostly minority languages with no existing row in `languages` -- that
+ * table only had Pashto/English seeded for contribution content. Creating
+ * one here (rather than requiring it pre-seeded) is what lets a
+ * contributor's onboarding language selection immediately become their
+ * primary contribution language.
+ */
+async function getOrCreateLanguageByName(name: string): Promise<string> {
+  const [existing] = await db
+    .select({ id: languages.id })
+    .from(languages)
+    .where(eq(languages.nameEnglish, name))
+    .limit(1);
+  if (existing) return existing.id;
+
+  const code = slugifyLanguageCode(name);
+  const [created] = await db
+    .insert(languages)
+    .values({ code, nameEnglish: name, nameNative: name })
+    .onConflictDoNothing({ target: languages.code })
+    .returning({ id: languages.id });
+  if (created) return created.id;
+
+  const [row] = await db.select({ id: languages.id }).from(languages).where(eq(languages.code, code)).limit(1);
+  if (!row) throw new HttpError(500, "LANGUAGE_LOOKUP_FAILED", "Failed to resolve language");
   return row.id;
 }
 
@@ -226,6 +272,19 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
     // The signup form no longer collects a name -- this is the first real
     // name the user provides, so it becomes their display name too.
     await db.update(users).set({ displayName: body.fullName, updatedAt: new Date() }).where(eq(users.id, userId));
+
+    // The language picked here becomes the contributor's primary
+    // contribution language -- every module submission requires one, and
+    // asking for it again separately on a profile screen would be
+    // redundant with what was just chosen on this form.
+    const languageId = await getOrCreateLanguageByName(body.motherTongue);
+    await db
+      .insert(contributorProfiles)
+      .values({ userId, primaryLanguageId: languageId })
+      .onConflictDoUpdate({
+        target: contributorProfiles.userId,
+        set: { primaryLanguageId: languageId, updatedAt: new Date() },
+      });
 
     const [row] = await db
       .select()

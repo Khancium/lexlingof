@@ -10,6 +10,8 @@ import {
 } from "@/lib/api";
 import { uploadAudioBlob } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
+import { useAuthStore } from "@/lib/store";
+import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
@@ -17,6 +19,7 @@ type Step = "categories" | "concepts" | "record";
 
 export default function ConceptPage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+  const userId = useAuthStore((state) => state.user?.id);
 
   const [step, setStep] = useState<Step>("categories");
 
@@ -42,8 +45,10 @@ export default function ConceptPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    api.categories.getAll().then(setCategories);
-  }, []);
+    api.categories.getAll().then((all) => {
+      setCategories(userId ? seededShuffle(all, userId) : all);
+    });
+  }, [userId]);
 
   function openCategory(c: Category) {
     setCategory(c);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
@@ -7,10 +7,12 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { api } from '../../services/api.service';
 import { uploadAudioFile } from '../../services/upload.service';
 import { useAppStore } from '../../store/app.store';
+import { useAuthStore } from '../../store/auth.store';
 import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
 import { colors } from '../../theme/colors';
+import { seededShuffle } from '../../utils/shuffle';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module1Screen'>;
 
@@ -41,9 +43,15 @@ type RecordingState = { path: string; durationMs: number; checksum: string };
 type Step = 'categories' | 'concepts' | 'record';
 
 export default function Module1Screen({ navigation }: Props) {
-  const categories = useAppStore((state) => state.categories) as Category[];
+  const rawCategories = useAppStore((state) => state.categories) as Category[];
   const loadCategories = useAppStore((state) => state.loadCategories);
+  const userId = useAuthStore((state) => state.user?.id);
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+
+  const categories = useMemo(
+    () => (userId ? seededShuffle(rawCategories, userId) : rawCategories),
+    [rawCategories, userId],
+  );
 
   const [step, setStep] = useState<Step>('categories');
 
