@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
 import { api, setAccessToken } from '../services/api.service';
 
 const REFRESH_TOKEN_KEY = 'lexlingo_refresh_token';
@@ -38,6 +39,10 @@ type AuthState = {
 };
 
 function errorMessage(err: unknown): string {
+  if (axios.isAxiosError(err)) {
+    const message = (err.response?.data as { message?: string } | undefined)?.message;
+    if (message) return message;
+  }
   return err instanceof Error ? err.message : 'Something went wrong';
 }
 

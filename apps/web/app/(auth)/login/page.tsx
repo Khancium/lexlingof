@@ -7,6 +7,7 @@ import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { getErrorMessage } from "@/lib/api";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -30,7 +31,7 @@ export default function LoginPage() {
       await login(values.email, values.password);
       router.push("/dashboard");
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Login failed");
+      setServerError(getErrorMessage(err, "Login failed"));
     }
   }
 

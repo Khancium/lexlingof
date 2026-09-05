@@ -7,6 +7,7 @@ import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
+import { getErrorMessage } from "@/lib/api";
 
 const schema = z
   .object({
@@ -37,7 +38,7 @@ export default function RegisterPage() {
       await registerUser(values.email, values.password, values.displayName);
       router.push("/dashboard");
     } catch (err) {
-      setServerError(err instanceof Error ? err.message : "Registration failed");
+      setServerError(getErrorMessage(err, "Registration failed"));
     }
   }
 

@@ -11,6 +11,14 @@ const REFRESH_TOKEN_KEY = "lexlingo_refresh_token";
 // (the refresh token in sessionStorage is what re-establishes a session).
 let accessToken: string | null = null;
 
+export function getErrorMessage(err: unknown, fallback: string): string {
+  if (axios.isAxiosError(err)) {
+    const message = (err.response?.data as { message?: string } | undefined)?.message;
+    if (message) return message;
+  }
+  return err instanceof Error ? err.message : fallback;
+}
+
 export function setAccessToken(token: string | null): void {
   accessToken = token;
 }

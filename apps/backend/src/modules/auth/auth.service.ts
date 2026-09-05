@@ -32,7 +32,7 @@ class AuthService {
       .limit(1);
 
     if (existing) {
-      throw new HttpError(409, "EMAIL_TAKEN", "This email is already registered");
+      throw new HttpError(409, "EMAIL_TAKEN", "Account on this email already exists");
     }
 
     const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
@@ -81,7 +81,7 @@ class AuthService {
       .limit(1);
 
     if (!user) {
-      throw new HttpError(401, "INVALID_CREDENTIALS");
+      throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid email/password");
     }
 
     if (user.isSuspended) {
@@ -90,7 +90,7 @@ class AuthService {
 
     const passwordMatches = user.passwordHash ? await bcrypt.compare(password, user.passwordHash) : false;
     if (!passwordMatches) {
-      throw new HttpError(401, "INVALID_CREDENTIALS");
+      throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid email/password");
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
