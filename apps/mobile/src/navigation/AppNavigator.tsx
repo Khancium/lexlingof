@@ -29,13 +29,13 @@ const TAB_BAR_BACKGROUND = colors.surfaceCard;
 const ACTIVE_COLOR = colors.brand;
 const INACTIVE_COLOR = colors.inkMuted;
 
-function isGoldOrAbove(level: string | undefined): boolean {
-  return level === 'GOLD' || level === 'PLATINUM';
+function isSilverOrAbove(level: string | undefined): boolean {
+  return level === 'SILVER' || level === 'GOLD' || level === 'PLATINUM';
 }
 
 export default function AppNavigator() {
   const level = useAuthStore((state) => state.user?.level);
-  const canReview = isGoldOrAbove(level);
+  const canReview = isSilverOrAbove(level);
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   useEffect(() => {

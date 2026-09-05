@@ -60,7 +60,7 @@ function formatDate(iso: string): string {
 }
 
 function UnlockReviewAccess({ navigation, verifiedContributions }: { navigation: Props['navigation']; verifiedContributions: number }) {
-  const threshold = LEVEL_THRESHOLDS.GOLD;
+  const threshold = LEVEL_THRESHOLDS.SILVER;
   const progress = Math.min(1, verifiedContributions / threshold);
 
   return (
@@ -68,7 +68,7 @@ function UnlockReviewAccess({ navigation, verifiedContributions }: { navigation:
       <View style={styles.unlockContainer}>
         <Ionicons name="trophy" size={72} color={colors.warning} />
         <Text style={styles.unlockTitle}>Unlock Review Access</Text>
-        <Text style={styles.unlockSubtitle}>Review access requires GOLD level (500 verified contributions)</Text>
+        <Text style={styles.unlockSubtitle}>Review access requires SILVER level (100 verified contributions)</Text>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
@@ -95,7 +95,7 @@ export default function ReviewListScreen({ navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canReview = user?.level === 'GOLD' || user?.level === 'PLATINUM';
+  const canReview = user?.level === 'SILVER' || user?.level === 'GOLD' || user?.level === 'PLATINUM';
 
   const load = useCallback(async () => {
     setError(null);

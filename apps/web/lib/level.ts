@@ -24,5 +24,5 @@ export const LEVEL_COLOR: Record<ContributorLevel, string> = {
 };
 
 export function canReview(level: ContributorLevel | undefined): boolean {
-  return level === "GOLD" || level === "PLATINUM";
+  return level === "SILVER" || level === "GOLD" || level === "PLATINUM";
 }

@@ -39,13 +39,13 @@ export default function ReviewPage() {
 
   if (!canReview(user?.level)) {
     const verified = user?.verifiedContributions ?? 0;
-    const threshold = LEVEL_THRESHOLDS.GOLD;
+    const threshold = LEVEL_THRESHOLDS.SILVER;
     const progressPct = Math.min(100, Math.round((verified / threshold) * 100));
     return (
       <div className="mx-auto max-w-md space-y-4 py-16 text-center">
         <div className="text-6xl">🏆</div>
         <h1 className="text-2xl font-bold text-ink">Unlock Review Access</h1>
-        <p className="text-ink-muted">Review access requires GOLD level (500 verified contributions)</p>
+        <p className="text-ink-muted">Review access requires SILVER level (100 verified contributions)</p>
         <div className="h-2.5 overflow-hidden rounded-full bg-surface-card">
           <div className="h-full bg-yellow-500" style={{ width: `${progressPct}%` }} />
         </div>
