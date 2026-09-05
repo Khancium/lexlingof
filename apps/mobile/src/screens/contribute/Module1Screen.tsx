@@ -10,6 +10,7 @@ import { useAppStore } from '../../store/app.store';
 import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module1Screen'>;
 
@@ -142,7 +143,7 @@ export default function Module1Screen({ navigation }: Props) {
           style={[styles.chip, categoryId === undefined && styles.chipSelected]}
           onPress={() => setCategoryId(undefined)}
         >
-          <Text style={styles.chipText}>All</Text>
+          <Text style={[styles.chipText, categoryId === undefined && styles.chipTextSelected]}>All</Text>
         </TouchableOpacity>
         {categories.map((category) => (
           <TouchableOpacity
@@ -150,15 +151,21 @@ export default function Module1Screen({ navigation }: Props) {
             style={[styles.chip, categoryId === category.id && styles.chipSelected]}
             onPress={() => setCategoryId(category.id)}
           >
-            <Ionicons name={category.icon ?? 'pricetag-outline'} size={14} color="#FFFFFF" />
-            <Text style={styles.chipText}>{category.nameEnglish}</Text>
+            <Ionicons
+              name={category.icon ?? 'pricetag-outline'}
+              size={14}
+              color={categoryId === category.id ? colors.inkInverted : colors.ink}
+            />
+            <Text style={[styles.chipText, categoryId === category.id && styles.chipTextSelected]}>
+              {category.nameEnglish}
+            </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
 
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {loadingConcept ? (
-          <ActivityIndicator color="#2563EB" style={styles.loader} />
+          <ActivityIndicator color={colors.brand} style={styles.loader} />
         ) : conceptError || !data ? (
           <Text style={styles.errorText}>{conceptError ?? 'No concepts available'}</Text>
         ) : (
@@ -168,7 +175,7 @@ export default function Module1Screen({ navigation }: Props) {
                 <Image source={{ uri: data.publicUrl }} style={styles.conceptImage} contentFit="cover" />
               ) : (
                 <View style={[styles.conceptImage, styles.conceptImagePlaceholder]}>
-                  <Ionicons name="image-outline" size={48} color="#64748B" />
+                  <Ionicons name="image-outline" size={48} color={colors.inkMuted} />
                 </View>
               )}
               <Text style={styles.conceptLabel}>{data.concept.labelEnglish}</Text>
@@ -202,21 +209,21 @@ export default function Module1Screen({ navigation }: Props) {
                 <TextInput
                   style={styles.input}
                   placeholder="Your word *"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholder}
                   value={nativeWord}
                   onChangeText={setNativeWord}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="Romanization"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholder}
                   value={romanization}
                   onChangeText={setRomanization}
                 />
                 <TextInput
                   style={styles.input}
                   placeholder="IPA"
-                  placeholderTextColor="#64748B"
+                  placeholderTextColor={colors.placeholder}
                   value={ipa}
                   onChangeText={setIpa}
                 />
@@ -241,7 +248,7 @@ export default function Module1Screen({ navigation }: Props) {
                   disabled={!canSubmit}
                 >
                   {isSubmitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
+                    <ActivityIndicator color={colors.inkInverted} />
                   ) : (
                     <Text style={styles.submitButtonText}>Submit</Text>
                   )}
@@ -258,7 +265,7 @@ export default function Module1Screen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   headerRow: {
     flexDirection: 'row',
@@ -268,12 +275,12 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
   },
   skipText: {
-    color: '#2563EB',
+    color: colors.brand,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -289,19 +296,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
     marginRight: 8,
   },
   chipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.brand,
   },
   chipText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '600',
+  },
+  chipTextSelected: {
+    color: colors.inkInverted,
   },
   content: {
     padding: 20,
@@ -310,13 +320,13 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     textAlign: 'center',
     marginVertical: 10,
   },
   conceptCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceCard,
     borderRadius: 16,
     padding: 20,
     alignItems: 'center',
@@ -331,15 +341,15 @@ const styles = StyleSheet.create({
   conceptImagePlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surfaceMuted,
   },
   conceptLabel: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 26,
     fontWeight: '700',
   },
   conceptCategory: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     marginTop: 4,
   },
@@ -350,7 +360,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   indicatorLabel: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -363,42 +373,44 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#334155',
+    backgroundColor: colors.border,
   },
   dotFilled: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.brand,
   },
   completeText: {
-    color: '#059669',
+    color: colors.success,
     fontSize: 15,
     fontWeight: '600',
     textAlign: 'center',
     marginTop: 20,
   },
   input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   recorderLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     textAlign: 'center',
     marginTop: 8,
   },
   pointsPreview: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     textAlign: 'center',
     marginVertical: 12,
   },
   submitButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -408,7 +420,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },

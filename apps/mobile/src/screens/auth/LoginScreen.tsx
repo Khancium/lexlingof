@@ -13,6 +13,7 @@ import {
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../store/auth.store';
 import type { AuthStackParamList } from '../../navigation/AuthStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -41,7 +42,7 @@ export default function LoginScreen({ navigation }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Email"
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholder}
           value={email}
           onChangeText={setEmail}
           keyboardType="email-address"
@@ -50,7 +51,7 @@ export default function LoginScreen({ navigation }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Password"
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholder}
           value={password}
           onChangeText={setPassword}
           secureTextEntry
@@ -59,7 +60,7 @@ export default function LoginScreen({ navigation }: Props) {
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={isLoading}>
-          {isLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>Log In</Text>}
+          {isLoading ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.buttonText}>Log In</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('Register')}>
@@ -73,7 +74,7 @@ export default function LoginScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   content: {
     flexGrow: 1,
@@ -84,41 +85,43 @@ const styles = StyleSheet.create({
   logo: {
     fontSize: 40,
     fontWeight: '800',
-    color: '#2563EB',
+    color: colors.brand,
   },
   subtitle: {
     fontSize: 15,
-    color: '#FFFFFF',
+    color: colors.inkMuted,
     marginTop: 8,
     marginBottom: 32,
   },
   input: {
     width: '100%',
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     marginBottom: 14,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',
   },
   button: {
     width: '100%',
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
     minHeight: 50,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -126,7 +129,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
   },
   linkText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
   },
 });

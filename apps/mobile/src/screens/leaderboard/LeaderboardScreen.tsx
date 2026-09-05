@@ -5,6 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAuthStore, type ContributorLevel } from '../../store/auth.store';
 import { api } from '../../services/api.service';
+import { colors } from '../../theme/colors';
 
 type Period = 'all_time' | 'weekly' | 'monthly';
 
@@ -89,7 +90,7 @@ export default function LeaderboardScreen() {
         data={rows}
         keyExtractor={(item) => item.userId}
         contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FFFFFF" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.brand} />}
         renderItem={({ item }) => {
           const isMe = item.userId === currentUser?.id;
           return (
@@ -124,10 +125,10 @@ export default function LeaderboardScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     paddingHorizontal: 20,
@@ -142,31 +143,31 @@ const styles = StyleSheet.create({
   },
   periodTab: {
     flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
     paddingVertical: 10,
     alignItems: 'center',
   },
   periodTabSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.brand,
   },
   periodTabText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 11,
     fontWeight: '700',
   },
   periodTabTextSelected: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
   },
   myRankBanner: {
     marginHorizontal: 20,
-    backgroundColor: '#1E3A8A',
-    borderRadius: 10,
+    backgroundColor: colors.brandLight,
+    borderRadius: 16,
     padding: 12,
     marginBottom: 12,
   },
   myRankText: {
-    color: '#FFFFFF',
+    color: colors.brandDark,
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
@@ -178,19 +179,19 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 8,
     borderWidth: 1,
     borderColor: 'transparent',
   },
   rowHighlighted: {
-    borderColor: '#2563EB',
+    borderColor: colors.brand,
   },
   rankText: {
     width: 40,
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -198,7 +199,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   displayName: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -209,7 +210,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   metaText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
   },
   levelBadge: {
@@ -218,7 +219,7 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   levelBadgeText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 10,
     fontWeight: '700',
   },
@@ -226,7 +227,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   pointsText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
     fontWeight: '700',
   },

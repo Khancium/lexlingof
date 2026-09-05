@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'RecordingResultScreen'>;
 
@@ -19,7 +20,7 @@ export default function RecordingResultScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.content}>
         <Animated.View style={{ transform: [{ scale }] }}>
-          <Ionicons name="checkmark-circle" size={96} color="#059669" />
+          <Ionicons name="checkmark-circle" size={96} color={colors.success} />
         </Animated.View>
 
         <Text style={styles.title}>Contribution Submitted!</Text>
@@ -47,7 +48,7 @@ export default function RecordingResultScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   content: {
     flex: 1,
@@ -56,13 +57,13 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   title: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 24,
     fontWeight: '700',
     marginTop: 24,
   },
   points: {
-    color: '#059669',
+    color: colors.success,
     fontSize: 32,
     fontWeight: '800',
     marginTop: 8,
@@ -73,24 +74,24 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   primaryButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
   },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },
   secondaryButton: {
-    backgroundColor: '#1E293B',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
   },
   secondaryButtonText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '600',
   },

@@ -22,6 +22,7 @@ import { base64ToBytes, sha256Hex } from '../../utils/sha256';
 import { useAppStore } from '../../store/app.store';
 import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module2Screen'>;
 
@@ -224,7 +225,7 @@ export default function Module2Screen({ navigation }: Props) {
           {step === 1 ? (
             <>
               <TouchableOpacity style={styles.uploadBox} onPress={handlePickFile}>
-                <Ionicons name="cloud-upload-outline" size={36} color="#94A3B8" />
+                <Ionicons name="cloud-upload-outline" size={36} color={colors.inkMuted} />
                 <Text style={styles.uploadBoxText}>
                   {pickedFile ? pickedFile.name : 'Tap to select an audio file'}
                 </Text>
@@ -237,7 +238,7 @@ export default function Module2Screen({ navigation }: Props) {
               <TextInput
                 style={styles.input}
                 placeholder="Title *"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={title}
                 onChangeText={setTitle}
               />
@@ -271,7 +272,7 @@ export default function Module2Screen({ navigation }: Props) {
               <TextInput
                 style={[styles.input, styles.multiline]}
                 placeholder="Description"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={description}
                 onChangeText={setDescription}
                 multiline
@@ -279,14 +280,14 @@ export default function Module2Screen({ navigation }: Props) {
               <TextInput
                 style={styles.input}
                 placeholder="Location"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={location}
                 onChangeText={setLocation}
               />
               <TextInput
                 style={[styles.input, styles.multiline]}
                 placeholder="Cultural context"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={culturalContext}
                 onChangeText={setCulturalContext}
                 multiline
@@ -303,7 +304,7 @@ export default function Module2Screen({ navigation }: Props) {
                 disabled={!canUpload}
               >
                 {isUploading ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={colors.inkInverted} />
                 ) : (
                   <Text style={styles.submitButtonText}>Upload & Continue</Text>
                 )}
@@ -313,7 +314,7 @@ export default function Module2Screen({ navigation }: Props) {
             <>
               <View style={styles.playerBar}>
                 <TouchableOpacity onPress={togglePlayback}>
-                  <Ionicons name={isPlaying ? 'pause-circle' : 'play-circle'} size={40} color="#2563EB" />
+                  <Ionicons name={isPlaying ? 'pause-circle' : 'play-circle'} size={40} color={colors.accent} />
                 </TouchableOpacity>
                 <Text style={styles.playerDuration}>{recorderPlayer.mmss(Math.floor(uploadedDurationMs / 1000))}</Text>
               </View>
@@ -322,7 +323,7 @@ export default function Module2Screen({ navigation }: Props) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 placeholder="Native text"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={nativeText}
                 onChangeText={setNativeText}
                 multiline
@@ -330,14 +331,14 @@ export default function Module2Screen({ navigation }: Props) {
               <TextInput
                 style={styles.input}
                 placeholder="Romanization"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={romanization}
                 onChangeText={setRomanization}
               />
-              <TextInput style={styles.input} placeholder="IPA" placeholderTextColor="#64748B" value={ipa} onChangeText={setIpa} />
+              <TextInput style={styles.input} placeholder="IPA" placeholderTextColor={colors.placeholder} value={ipa} onChangeText={setIpa} />
 
               <TouchableOpacity style={styles.addSegmentButton} onPress={addSegment}>
-                <Ionicons name="add-circle-outline" size={18} color="#2563EB" />
+                <Ionicons name="add-circle-outline" size={18} color={colors.accent} />
                 <Text style={styles.addSegmentText}>Add Time Segments</Text>
               </TouchableOpacity>
 
@@ -346,14 +347,14 @@ export default function Module2Screen({ navigation }: Props) {
                   <View style={styles.segmentHeaderRow}>
                     <Text style={styles.segmentTitle}>Segment {index + 1}</Text>
                     <TouchableOpacity onPress={() => removeSegment(index)}>
-                      <Ionicons name="trash-outline" size={18} color="#DC2626" />
+                      <Ionicons name="trash-outline" size={18} color={colors.danger} />
                     </TouchableOpacity>
                   </View>
                   <View style={styles.segmentRow}>
                     <TextInput
                       style={[styles.input, styles.segmentInput]}
                       placeholder="Start (ms)"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={colors.placeholder}
                       keyboardType="numeric"
                       value={segment.startMs}
                       onChangeText={(v) => updateSegment(index, { startMs: v })}
@@ -361,7 +362,7 @@ export default function Module2Screen({ navigation }: Props) {
                     <TextInput
                       style={[styles.input, styles.segmentInput]}
                       placeholder="End (ms)"
-                      placeholderTextColor="#64748B"
+                      placeholderTextColor={colors.placeholder}
                       keyboardType="numeric"
                       value={segment.endMs}
                       onChangeText={(v) => updateSegment(index, { endMs: v })}
@@ -370,14 +371,14 @@ export default function Module2Screen({ navigation }: Props) {
                   <TextInput
                     style={styles.input}
                     placeholder="Native text"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={colors.placeholder}
                     value={segment.nativeText}
                     onChangeText={(v) => updateSegment(index, { nativeText: v })}
                   />
                   <TextInput
                     style={styles.input}
                     placeholder="Speaker label"
-                    placeholderTextColor="#64748B"
+                    placeholderTextColor={colors.placeholder}
                     value={segment.speakerLabel}
                     onChangeText={(v) => updateSegment(index, { speakerLabel: v })}
                   />
@@ -387,7 +388,7 @@ export default function Module2Screen({ navigation }: Props) {
               {step2Error ? <Text style={styles.errorText}>{step2Error}</Text> : null}
 
               <TouchableOpacity style={styles.submitButton} onPress={handleSubmitStep2} disabled={isSubmittingStep2}>
-                {isSubmittingStep2 ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>Submit</Text>}
+                {isSubmittingStep2 ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.submitButtonText}>Submit</Text>}
               </TouchableOpacity>
             </>
           )}
@@ -400,20 +401,20 @@ export default function Module2Screen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   flex: {
     flex: 1,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     paddingHorizontal: 20,
     paddingTop: 8,
   },
   stepIndicator: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     paddingHorizontal: 20,
     marginTop: 4,
@@ -425,7 +426,7 @@ const styles = StyleSheet.create({
   },
   uploadBox: {
     borderWidth: 2,
-    borderColor: '#334155',
+    borderColor: colors.border,
     borderStyle: 'dashed',
     borderRadius: 14,
     alignItems: 'center',
@@ -434,25 +435,25 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   uploadBoxText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
     marginTop: 10,
     textAlign: 'center',
     paddingHorizontal: 20,
   },
   uploadBoxSubtext: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     marginTop: 4,
   },
   fileSizeLimit: {
-    color: '#64748B',
+    color: colors.inkMuted,
     fontSize: 12,
     textAlign: 'center',
     marginBottom: 18,
   },
   fieldLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     fontWeight: '600',
     marginBottom: 8,
@@ -467,29 +468,31 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   chip: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
     marginRight: 8,
   },
   chipSelected: {
-    backgroundColor: '#7C3AED',
+    backgroundColor: colors.accent,
   },
   chipText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   multiline: {
     minHeight: 60,
@@ -500,14 +503,14 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',
   },
   submitButton: {
-    backgroundColor: '#7C3AED',
-    borderRadius: 8,
+    backgroundColor: colors.accent,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -518,7 +521,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -526,18 +529,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 20,
   },
   playerDuration: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '600',
   },
   sectionHeading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 12,
@@ -549,13 +552,13 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   addSegmentText: {
-    color: '#2563EB',
+    color: colors.accent,
     fontSize: 14,
     fontWeight: '600',
   },
   segmentCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 12,
     padding: 12,
     marginBottom: 12,
   },
@@ -566,7 +569,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   segmentTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
     fontWeight: '600',
   },

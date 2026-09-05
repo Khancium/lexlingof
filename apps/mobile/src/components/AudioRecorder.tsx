@@ -18,16 +18,17 @@ import recorderPlayer, {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { base64ToBytes, sha256Hex } from '../utils/sha256';
 import { stripFileScheme } from '../utils/path';
+import { colors } from '../theme/colors';
 
 const COLORS = {
-  primary: '#2563EB',
-  danger: '#DC2626',
-  success: '#059669',
-  background: '#0F172A',
-  surface: '#1E293B',
-  warning: '#CA8A04',
-  track: '#334155',
-  textMuted: '#94A3B8',
+  primary: colors.brand,
+  danger: colors.danger,
+  success: colors.success,
+  background: colors.surface,
+  surface: colors.inkMuted,
+  warning: colors.warning,
+  track: colors.border,
+  textMuted: colors.inkMuted,
 };
 
 // AudioSamplingRate/AVFormatIDKeyIOS are plain strings/numbers, not enums --
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: COLORS.danger,
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -405,7 +406,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   ringText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 32,
     fontWeight: '700',
   },
@@ -415,7 +416,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   timerText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 40,
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
@@ -441,7 +442,7 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 20,
-    borderRadius: 8,
+    borderRadius: 999,
   },
   actionButtonText: {
     color: '#FFFFFF',
@@ -464,7 +465,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surface,
   },
   doneText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '600',
   },

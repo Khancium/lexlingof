@@ -10,6 +10,7 @@ import LeaderboardScreen from '../screens/leaderboard/LeaderboardScreen';
 import ProfileStack, { type ProfileStackParamList } from './ProfileStack';
 import { useAuthStore } from '../store/auth.store';
 import { api } from '../services/api.service';
+import { colors } from '../theme/colors';
 
 export type AppTabParamList = {
   Home: undefined;
@@ -24,9 +25,9 @@ export type AppTabParamList = {
 
 const Tab = createBottomTabNavigator<AppTabParamList>();
 
-const TAB_BAR_BACKGROUND = '#0F172A';
-const ACTIVE_COLOR = '#2563EB';
-const INACTIVE_COLOR = '#64748B';
+const TAB_BAR_BACKGROUND = colors.surfaceCard;
+const ACTIVE_COLOR = colors.brand;
+const INACTIVE_COLOR = colors.inkMuted;
 
 function isGoldOrAbove(level: string | undefined): boolean {
   return level === 'GOLD' || level === 'PLATINUM';

@@ -16,6 +16,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import recorderPlayer, { type PlayBackType } from 'react-native-audio-recorder-player';
 import { api } from '../../services/api.service';
 import type { ReviewStackParamList, ReviewQueueItem } from '../../navigation/ReviewStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ReviewStackParamList, 'ReviewDetailScreen'>;
 
@@ -144,7 +145,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.ink} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Review</Text>
         <View style={{ width: 24 }} />
@@ -200,7 +201,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
               <Ionicons
                 name={isPlaying ? 'pause-circle' : 'play-circle'}
                 size={44}
-                color={item.detail.audioFileId ? '#2563EB' : '#334155'}
+                color={item.detail.audioFileId ? colors.brand : colors.border}
               />
             </TouchableOpacity>
             <Text style={styles.playerTime}>
@@ -215,18 +216,18 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
 
         <View style={styles.decisionColumn}>
           <TouchableOpacity style={[styles.decisionButton, styles.validButton]} onPress={() => setPendingDecision('valid')}>
-            <Ionicons name="checkmark" size={20} color="#FFFFFF" />
+            <Ionicons name="checkmark" size={20} color={colors.inkInverted} />
             <Text style={styles.decisionButtonText}>Valid</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.decisionButton, styles.correctionButton]}
             onPress={() => setPendingDecision('needs_correction')}
           >
-            <Ionicons name="warning" size={20} color="#0F172A" />
+            <Ionicons name="warning" size={20} color={colors.ink} />
             <Text style={[styles.decisionButtonText, styles.correctionButtonText]}>Needs Correction</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.decisionButton, styles.invalidButton]} onPress={() => setPendingDecision('invalid')}>
-            <Ionicons name="close" size={20} color="#FFFFFF" />
+            <Ionicons name="close" size={20} color={colors.inkInverted} />
             <Text style={styles.decisionButtonText}>Invalid</Text>
           </TouchableOpacity>
         </View>
@@ -241,7 +242,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
             <TextInput
               style={styles.sheetInput}
               placeholder="Optional reason / notes"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholder}
               value={notes}
               onChangeText={setNotes}
               multiline
@@ -251,7 +252,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
                 <Text style={styles.sheetCancelText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.sheetConfirmButton} onPress={confirmDecision} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.sheetConfirmText}>Confirm</Text>}
+                {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.sheetConfirmText}>Confirm</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -270,7 +271,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   headerRow: {
     flexDirection: 'row',
@@ -280,7 +281,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   headerTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -289,55 +290,55 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   contributorName: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '700',
   },
   contributorMeta: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     marginBottom: 16,
   },
   card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 14,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 18,
     marginBottom: 16,
   },
   detailImage: {
     width: '100%',
     height: 180,
-    borderRadius: 10,
+    borderRadius: 12,
     marginBottom: 14,
   },
   bigWord: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 24,
     fontWeight: '700',
   },
   englishText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 16,
   },
   divider: {
     height: 1,
-    backgroundColor: '#334155',
+    backgroundColor: colors.border,
     marginVertical: 12,
   },
   subText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
     marginTop: 6,
   },
   playerCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 14,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
   },
   waveformPlaceholder: {
     height: 2,
-    backgroundColor: '#334155',
+    backgroundColor: colors.border,
     borderRadius: 1,
     marginBottom: 14,
   },
@@ -347,17 +348,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   playerTime: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     fontWeight: '600',
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 13,
     marginTop: 8,
   },
   instruction: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     textAlign: 'center',
     marginBottom: 16,
@@ -370,25 +371,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderRadius: 10,
+    borderRadius: 999,
     paddingVertical: 16,
   },
   validButton: {
-    backgroundColor: '#059669',
+    backgroundColor: colors.success,
   },
   correctionButton: {
     backgroundColor: '#FACC15',
   },
   invalidButton: {
-    backgroundColor: '#DC2626',
+    backgroundColor: colors.danger,
   },
   decisionButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '700',
   },
   correctionButtonText: {
-    color: '#0F172A',
+    color: colors.ink,
   },
   sheetBackdrop: {
     flex: 1,
@@ -396,26 +397,28 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#1E293B',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: colors.surfaceCard,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 24,
   },
   sheetTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 16,
   },
   sheetInput: {
-    backgroundColor: '#0F172A',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    color: colors.ink,
+    borderRadius: 16,
     padding: 14,
     minHeight: 70,
     textAlignVertical: 'top',
     fontSize: 15,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   sheetButtonRow: {
     flexDirection: 'row',
@@ -423,25 +426,25 @@ const styles = StyleSheet.create({
   },
   sheetCancelButton: {
     flex: 1,
-    backgroundColor: '#334155',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
   },
   sheetCancelText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     fontWeight: '600',
   },
   sheetConfirmButton: {
     flex: 1,
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
   },
   sheetConfirmText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 15,
     fontWeight: '600',
   },
@@ -450,13 +453,13 @@ const styles = StyleSheet.create({
     bottom: 30,
     left: 24,
     right: 24,
-    backgroundColor: '#334155',
-    borderRadius: 10,
+    backgroundColor: colors.ink,
+    borderRadius: 16,
     padding: 14,
     alignItems: 'center',
   },
   toastText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 14,
     fontWeight: '600',
   },
@@ -467,19 +470,19 @@ const styles = StyleSheet.create({
     padding: 24,
   },
   doneText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 24,
   },
   doneButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     paddingHorizontal: 28,
   },
   doneButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },

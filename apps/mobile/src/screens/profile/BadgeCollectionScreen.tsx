@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { api } from '../../services/api.service';
+import { colors } from '../../theme/colors';
 
 type EarnedBadge = { id: string; name: string; description: string; icon: string; earnedAt: string };
 type LockedBadge = { id: string; name: string; description: string; icon: string };
@@ -30,7 +31,7 @@ export default function BadgeCollectionScreen() {
       <Text style={styles.heading}>Badges</Text>
 
       {loading ? (
-        <ActivityIndicator color="#2563EB" style={styles.loader} />
+        <ActivityIndicator color={colors.brand} style={styles.loader} />
       ) : (
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.sectionHeading}>Earned ({earned.length})</Text>
@@ -66,10 +67,10 @@ export default function BadgeCollectionScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     paddingHorizontal: 20,
@@ -84,7 +85,7 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   sectionHeading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 12,
@@ -98,8 +99,8 @@ const styles = StyleSheet.create({
   },
   card: {
     width: '31%',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 12,
@@ -115,17 +116,17 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   name: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 12,
     fontWeight: '600',
     textAlign: 'center',
     paddingHorizontal: 4,
   },
   nameLocked: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
   },
   date: {
-    color: '#64748B',
+    color: colors.inkMuted,
     fontSize: 10,
     marginTop: 4,
   },

@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '../../store/auth.store';
 import { useAppStore, type Dialect, type Language } from '../../store/app.store';
 import { api } from '../../services/api.service';
+import { colors } from '../../theme/colors';
 
 function PickerCard({
   title,
@@ -90,7 +91,7 @@ export default function OnboardingScreen() {
 
         <Text style={styles.sectionLabel}>Language</Text>
         {languagesLoading ? (
-          <ActivityIndicator color="#2563EB" style={styles.sectionLoader} />
+          <ActivityIndicator color={colors.brand} style={styles.sectionLoader} />
         ) : (
           <FlatList
             data={languages}
@@ -132,25 +133,25 @@ export default function OnboardingScreen() {
         <TextInput
           style={styles.input}
           placeholder="Country"
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholder}
           value={country}
           onChangeText={setCountry}
         />
         <TextInput
           style={styles.input}
           placeholder="City"
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholder}
           value={city}
           onChangeText={setCity}
         />
 
         <Text style={styles.sectionLabel}>Tribe (optional)</Text>
-        <TextInput style={styles.input} placeholder="Tribe" placeholderTextColor="#64748B" value={tribe} onChangeText={setTribe} />
+        <TextInput style={styles.input} placeholder="Tribe" placeholderTextColor={colors.placeholder} value={tribe} onChangeText={setTribe} />
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity style={styles.button} onPress={handleStart} disabled={isSubmitting}>
-          {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>Start Contributing</Text>}
+          {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.buttonText}>Start Contributing</Text>}
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -160,7 +161,7 @@ export default function OnboardingScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   skipButton: {
     position: 'absolute',
@@ -170,7 +171,7 @@ const styles = StyleSheet.create({
     padding: 8,
   },
   skipText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -182,18 +183,18 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 26,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.ink,
     marginBottom: 8,
   },
   subtitle: {
     fontSize: 14,
-    color: '#94A3B8',
+    color: colors.inkMuted,
     marginBottom: 24,
   },
   sectionLabel: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: colors.ink,
     marginBottom: 10,
     marginTop: 10,
   },
@@ -201,8 +202,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     paddingVertical: 12,
     paddingHorizontal: 16,
     marginRight: 10,
@@ -211,36 +212,38 @@ const styles = StyleSheet.create({
     minWidth: 120,
   },
   cardSelected: {
-    borderColor: '#2563EB',
+    borderColor: colors.brand,
   },
   cardTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     fontWeight: '600',
   },
   cardSubtitle: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     marginTop: 2,
   },
   input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',
   },
   button: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -248,7 +251,7 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },

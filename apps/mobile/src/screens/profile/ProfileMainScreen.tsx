@@ -8,6 +8,7 @@ import { useAuthStore, type ContributorLevel } from '../../store/auth.store';
 import { api } from '../../services/api.service';
 import { LEVEL_GRADIENT, LEVEL_THRESHOLDS, NEXT_LEVEL } from '../../utils/level';
 import type { ProfileStackParamList } from '../../navigation/ProfileStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMainScreen'>;
 
@@ -40,19 +41,19 @@ const MODULE_ICON: Record<RecentContribution['moduleType'], string> = {
 };
 
 const MODULE_BAR_COLOR: Record<RecentContribution['moduleType'], string> = {
-  WORD: '#2563EB',
-  TRANSCRIPTION: '#7C3AED',
-  TRANSLATION: '#059669',
-  SCENE: '#D97706',
+  WORD: colors.brand,
+  TRANSCRIPTION: colors.accent,
+  TRANSLATION: colors.success,
+  SCENE: colors.warning,
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  draft: '#64748B',
-  pending: '#CA8A04',
-  under_review: '#CA8A04',
-  verified: '#059669',
-  needs_correction: '#DC2626',
-  rejected: '#DC2626',
+  draft: colors.inkMuted,
+  pending: colors.warning,
+  under_review: colors.warning,
+  verified: colors.success,
+  needs_correction: colors.danger,
+  rejected: colors.danger,
 };
 
 export default function ProfileMainScreen({ navigation }: Props) {
@@ -138,7 +139,7 @@ export default function ProfileMainScreen({ navigation }: Props) {
         <View style={styles.headerRow}>
           <Text style={styles.displayName}>{user?.displayName}</Text>
           <TouchableOpacity onPress={() => navigation.navigate('SettingsScreen')}>
-            <Ionicons name="settings-outline" size={24} color="#FFFFFF" />
+            <Ionicons name="settings-outline" size={24} color={colors.ink} />
           </TouchableOpacity>
         </View>
 
@@ -170,7 +171,7 @@ export default function ProfileMainScreen({ navigation }: Props) {
         <View style={styles.moduleBarCard}>
           {moduleCounts.map((m) => (
             <View key={m.module} style={styles.moduleBarRow}>
-              <Ionicons name={MODULE_ICON[m.module]} size={14} color="#94A3B8" style={styles.moduleBarIcon} />
+              <Ionicons name={MODULE_ICON[m.module]} size={14} color={colors.inkMuted} style={styles.moduleBarIcon} />
               <View style={styles.moduleBarTrack}>
                 <View
                   style={[
@@ -213,8 +214,8 @@ export default function ProfileMainScreen({ navigation }: Props) {
         ) : (
           recent.map((item) => (
             <View key={item.id} style={styles.recentRow}>
-              <Ionicons name={MODULE_ICON[item.moduleType]} size={18} color="#FFFFFF" />
-              <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] ?? '#64748B' }]}>
+              <Ionicons name={MODULE_ICON[item.moduleType]} size={18} color={colors.ink} />
+              <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] ?? colors.inkMuted }]}>
                 <Text style={styles.statusBadgeText}>{item.status.replace('_', ' ')}</Text>
               </View>
               <Text style={styles.recentPoints}>+{item.totalPoints ?? 0}</Text>
@@ -227,14 +228,14 @@ export default function ProfileMainScreen({ navigation }: Props) {
             <TextInput
               style={styles.input}
               placeholder="Display name"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholder}
               value={displayName}
               onChangeText={setDisplayName}
             />
             <TextInput
               style={[styles.input, styles.multiline]}
               placeholder="Biography"
-              placeholderTextColor="#64748B"
+              placeholderTextColor={colors.placeholder}
               value={biography}
               onChangeText={setBiography}
               multiline
@@ -245,7 +246,7 @@ export default function ProfileMainScreen({ navigation }: Props) {
                 <Text style={styles.cancelButtonText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={isSaving}>
-                {isSaving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.saveButtonText}>Save</Text>}
+                {isSaving ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.saveButtonText}>Save</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -271,7 +272,7 @@ function StatCell({ label, value }: { label: string; value: number }) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   content: {
     padding: 20,
@@ -284,7 +285,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   displayName: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
   },
@@ -296,22 +297,22 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   levelBadgeText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '800',
   },
   progressTrack: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.brand,
   },
   progressLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     marginTop: 6,
     marginBottom: 18,
@@ -324,24 +325,24 @@ const styles = StyleSheet.create({
   },
   statCell: {
     width: '47%',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
   },
   statValue: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
   },
   statLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     marginTop: 4,
     textAlign: 'center',
   },
   sectionHeading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '700',
     marginBottom: 12,
@@ -352,14 +353,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   linkText: {
-    color: '#2563EB',
+    color: colors.brand,
     fontSize: 13,
     fontWeight: '600',
     marginBottom: 12,
   },
   moduleBarCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 20,
     gap: 10,
@@ -376,20 +377,20 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surfaceMuted,
     overflow: 'hidden',
   },
   moduleBarFill: {
     height: '100%',
   },
   moduleBarCount: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     width: 28,
     textAlign: 'right',
   },
   emptyText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     marginBottom: 20,
   },
@@ -405,7 +406,7 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceCard,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
@@ -414,7 +415,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
   },
   badgeName: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 11,
     textAlign: 'center',
   },
@@ -422,8 +423,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 12,
     marginBottom: 8,
   },
@@ -434,49 +435,51 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusBadgeText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 12,
     fontWeight: '600',
     textTransform: 'capitalize',
   },
   recentPoints: {
-    color: '#059669',
+    color: colors.success,
     fontSize: 14,
     fontWeight: '700',
   },
   editProfileButton: {
     marginTop: 20,
-    backgroundColor: '#1E293B',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
   },
   editProfileButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 15,
     fontWeight: '600',
   },
   editCard: {
     marginTop: 20,
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 16,
   },
   input: {
-    backgroundColor: '#0F172A',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     marginBottom: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   multiline: {
     minHeight: 70,
     textAlignVertical: 'top',
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 13,
     marginBottom: 10,
   },
@@ -486,25 +489,25 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     flex: 1,
-    backgroundColor: '#334155',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
     paddingVertical: 12,
     alignItems: 'center',
   },
   cancelButtonText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
     fontWeight: '600',
   },
   saveButton: {
     flex: 1,
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 12,
     alignItems: 'center',
   },
   saveButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 14,
     fontWeight: '600',
   },

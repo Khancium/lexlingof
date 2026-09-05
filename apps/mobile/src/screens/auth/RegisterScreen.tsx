@@ -14,6 +14,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAuthStore } from '../../store/auth.store';
 import type { AuthStackParamList } from '../../navigation/AuthStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
@@ -72,7 +73,7 @@ export default function RegisterScreen({ navigation }: Props) {
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+          <Ionicons name="arrow-back" size={24} color={colors.ink} />
         </TouchableOpacity>
 
         <Text style={styles.heading}>Create Account</Text>
@@ -81,7 +82,7 @@ export default function RegisterScreen({ navigation }: Props) {
           <TextInput
             style={styles.input}
             placeholder="Display name"
-            placeholderTextColor="#64748B"
+            placeholderTextColor={colors.placeholder}
             value={displayName}
             onChangeText={setDisplayName}
           />
@@ -92,7 +93,7 @@ export default function RegisterScreen({ navigation }: Props) {
           <TextInput
             style={styles.input}
             placeholder="Email"
-            placeholderTextColor="#64748B"
+            placeholderTextColor={colors.placeholder}
             value={email}
             onChangeText={setEmail}
             keyboardType="email-address"
@@ -105,7 +106,7 @@ export default function RegisterScreen({ navigation }: Props) {
           <TextInput
             style={styles.input}
             placeholder="Password"
-            placeholderTextColor="#64748B"
+            placeholderTextColor={colors.placeholder}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
@@ -117,7 +118,7 @@ export default function RegisterScreen({ navigation }: Props) {
           <TextInput
             style={styles.input}
             placeholder="Confirm password"
-            placeholderTextColor="#64748B"
+            placeholderTextColor={colors.placeholder}
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry
@@ -128,7 +129,7 @@ export default function RegisterScreen({ navigation }: Props) {
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
         <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={isLoading}>
-          {isLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>Register</Text>}
+          {isLoading ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.buttonText}>Register</Text>}
         </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -138,7 +139,7 @@ export default function RegisterScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   content: {
     flexGrow: 1,
@@ -153,34 +154,36 @@ const styles = StyleSheet.create({
   heading: {
     fontSize: 26,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.ink,
     marginBottom: 24,
   },
   field: {
     marginBottom: 14,
   },
   input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   fieldError: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 13,
     marginTop: 6,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',
   },
   button: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -188,7 +191,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   buttonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },

@@ -4,13 +4,14 @@ import { useAuthStore } from '../store/auth.store';
 import AuthStack from './AuthStack';
 import AppNavigator from './AppNavigator';
 import OnboardingScreen from '../screens/auth/OnboardingScreen';
+import { colors } from '../theme/colors';
 
 // TODO: swap for the real Lexlingo logo asset once one is added to the project.
 function LoadingScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.logo}>Lexlingo</Text>
-      <ActivityIndicator size="large" color="#2563EB" style={styles.spinner} />
+      <ActivityIndicator size="large" color={colors.brand} style={styles.spinner} />
     </View>
   );
 }
@@ -56,12 +57,12 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   logo: {
     fontSize: 32,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.ink,
     marginBottom: 24,
   },
   spinner: {

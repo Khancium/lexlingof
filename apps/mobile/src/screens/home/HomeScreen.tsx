@@ -10,6 +10,7 @@ import { useAppStore } from '../../store/app.store';
 import { api } from '../../services/api.service';
 import { LEVEL_GRADIENT, LEVEL_THRESHOLDS, NEXT_LEVEL } from '../../utils/level';
 import type { AppTabParamList } from '../../navigation/AppNavigator';
+import { colors } from '../../theme/colors';
 
 type Props = BottomTabScreenProps<AppTabParamList, 'Home'>;
 
@@ -46,19 +47,19 @@ const MODULE_ICON: Record<RecentContribution['moduleType'], string> = {
 };
 
 const STATUS_COLOR: Record<string, string> = {
-  draft: '#64748B',
-  pending: '#CA8A04',
-  under_review: '#CA8A04',
-  verified: '#059669',
-  needs_correction: '#DC2626',
-  rejected: '#DC2626',
+  draft: colors.inkMuted,
+  pending: colors.warning,
+  under_review: colors.warning,
+  verified: colors.success,
+  needs_correction: colors.danger,
+  rejected: colors.danger,
 };
 
 const DIFFICULTY_COLOR: Record<DailyScene['difficulty'], string> = {
-  easy: '#059669',
-  medium: '#CA8A04',
+  easy: colors.success,
+  medium: colors.warning,
   hard: '#EA580C',
-  expert: '#DC2626',
+  expert: colors.danger,
 };
 
 function greeting(): string {
@@ -127,7 +128,7 @@ export default function HomeScreen({ navigation }: Props) {
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <ScrollView
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FFFFFF" />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.brand} />}
       >
         <Text style={styles.greeting}>
           {greeting()}, {user?.displayName ?? 'contributor'}
@@ -135,7 +136,7 @@ export default function HomeScreen({ navigation }: Props) {
 
         {pendingUploadCount > 0 ? (
           <TouchableOpacity style={styles.pendingBanner}>
-            <Ionicons name="cloud-upload-outline" size={18} color="#0F172A" />
+            <Ionicons name="cloud-upload-outline" size={18} color={colors.ink} />
             <Text style={styles.pendingBannerText}>
               {pendingUploadCount} recording{pendingUploadCount === 1 ? '' : 's'} pending upload. Tap to sync.
             </Text>
@@ -185,7 +186,7 @@ export default function HomeScreen({ navigation }: Props) {
         <Text style={styles.sectionHeading}>Contribute</Text>
         <View style={styles.moduleGrid}>
           <ModuleCard
-            color="#2563EB"
+            color={colors.brand}
             icon="mic"
             title="Record Words"
             description="3-second word clips"
@@ -193,7 +194,7 @@ export default function HomeScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('Contribute', { screen: 'Module1Screen' })}
           />
           <ModuleCard
-            color="#7C3AED"
+            color={colors.accent}
             icon="cloud-upload"
             title="Upload Audio"
             description="Share recordings"
@@ -201,7 +202,7 @@ export default function HomeScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('Contribute', { screen: 'Module2Screen' })}
           />
           <ModuleCard
-            color="#059669"
+            color={colors.success}
             icon="language"
             title="Translate"
             description="English sentences"
@@ -209,7 +210,7 @@ export default function HomeScreen({ navigation }: Props) {
             onPress={() => navigation.navigate('Contribute', { screen: 'Module3Screen' })}
           />
           <ModuleCard
-            color="#D97706"
+            color={colors.warning}
             icon="image"
             title="Describe Scene"
             description="Picture descriptions"
@@ -224,9 +225,9 @@ export default function HomeScreen({ navigation }: Props) {
         ) : (
           recent.map((item) => (
             <View key={item.id} style={styles.recentRow}>
-              <Ionicons name={MODULE_ICON[item.moduleType]} size={20} color="#FFFFFF" style={styles.recentIcon} />
+              <Ionicons name={MODULE_ICON[item.moduleType]} size={20} color={colors.ink} style={styles.recentIcon} />
               <View style={styles.recentInfo}>
-                <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] ?? '#64748B' }]}>
+                <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] ?? colors.inkMuted }]}>
                   <Text style={styles.statusBadgeText}>{item.status.replace('_', ' ')}</Text>
                 </View>
                 <Text style={styles.recentDate}>{formatDate(item.submittedAt)}</Text>
@@ -281,7 +282,7 @@ function ModuleCard({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   content: {
     padding: 20,
@@ -290,7 +291,7 @@ const styles = StyleSheet.create({
   greeting: {
     fontSize: 22,
     fontWeight: '700',
-    color: '#FFFFFF',
+    color: colors.ink,
     marginBottom: 16,
   },
   pendingBanner: {
@@ -298,12 +299,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     backgroundColor: '#FACC15',
-    borderRadius: 10,
+    borderRadius: 16,
     padding: 12,
     marginBottom: 16,
   },
   pendingBannerText: {
-    color: '#0F172A',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '600',
     flexShrink: 1,
@@ -347,24 +348,24 @@ const styles = StyleSheet.create({
   },
   statCard: {
     flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
   },
   statValue: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 20,
     fontWeight: '700',
   },
   statLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     marginTop: 4,
   },
   dailyCard: {
-    backgroundColor: '#1E293B',
-    borderRadius: 14,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 18,
     marginBottom: 20,
   },
@@ -375,7 +376,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   dailyLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     fontWeight: '600',
     textTransform: 'uppercase',
@@ -386,24 +387,24 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   difficultyBadgeText: {
-    color: '#0F172A',
+    color: colors.inkInverted,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'capitalize',
   },
   dailyTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 8,
   },
   dailyCta: {
-    color: '#2563EB',
+    color: colors.brand,
     fontSize: 14,
     fontWeight: '600',
   },
   sectionHeading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 17,
     fontWeight: '700',
     marginBottom: 12,
@@ -417,8 +418,8 @@ const styles = StyleSheet.create({
   },
   moduleCard: {
     width: '47%',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     borderLeftWidth: 4,
     padding: 14,
     minHeight: 110,
@@ -435,30 +436,30 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
   },
   moduleBadgeText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 11,
     fontWeight: '700',
   },
   moduleTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     fontWeight: '700',
     marginTop: 10,
   },
   moduleDescription: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     marginTop: 4,
   },
   emptyText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
   },
   recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 12,
     marginBottom: 8,
   },
@@ -476,17 +477,17 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   statusBadgeText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 11,
     fontWeight: '700',
     textTransform: 'capitalize',
   },
   recentDate: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
   },
   recentPoints: {
-    color: '#059669',
+    color: colors.success,
     fontSize: 15,
     fontWeight: '700',
   },

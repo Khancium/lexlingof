@@ -1,4 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
+import { colors } from '../theme/colors';
 
 export default function PlaceholderScreen({ title }: { title: string }) {
   return (
@@ -13,11 +14,11 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surface,
   },
   title: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#0F172A',
+    color: colors.ink,
   },
 });

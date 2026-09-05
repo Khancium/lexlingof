@@ -3,6 +3,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'ContributeHub'>;
 
@@ -15,14 +16,14 @@ const CARDS: {
 }[] = [
   {
     screen: 'Module1Screen',
-    color: '#2563EB',
+    color: colors.brand,
     icon: 'mic',
     title: 'Record Words',
     description: 'Record individual words in your language',
   },
   {
     screen: 'Module2Screen',
-    color: '#7C3AED',
+    color: colors.accent,
     icon: 'cloud-upload',
     title: 'Upload Audio',
     description: 'Share existing recordings of conversations and stories',
@@ -60,7 +61,7 @@ export default function ContributeHubScreen({ navigation }: Props) {
               <Text style={styles.cardTitle}>{card.title}</Text>
               <Text style={styles.cardDescription}>{card.description}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={22} color="#64748B" />
+            <Ionicons name="chevron-forward" size={22} color={colors.inkMuted} />
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -71,13 +72,13 @@ export default function ContributeHubScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   content: {
     padding: 20,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 20,
@@ -85,8 +86,8 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     borderLeftWidth: 5,
     padding: 16,
     marginBottom: 14,
@@ -98,12 +99,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   cardTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '700',
   },
   cardDescription: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     marginTop: 4,
   },

@@ -18,6 +18,7 @@ import { useAppStore } from '../../store/app.store';
 import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module3Screen'>;
 
@@ -137,7 +138,7 @@ export default function Module3Screen({ navigation }: Props) {
           ) : null}
 
           {loadingSentence ? (
-            <ActivityIndicator color="#059669" style={styles.loader} />
+            <ActivityIndicator color={colors.success} style={styles.loader} />
           ) : sentenceError || !sentence ? (
             <Text style={styles.errorText}>{sentenceError ?? 'No sentences available'}</Text>
           ) : (
@@ -154,7 +155,7 @@ export default function Module3Screen({ navigation }: Props) {
               <TextInput
                 style={[styles.input, styles.textArea]}
                 placeholder="Translation *"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={translation}
                 onChangeText={setTranslation}
                 multiline
@@ -162,11 +163,11 @@ export default function Module3Screen({ navigation }: Props) {
               <TextInput
                 style={styles.input}
                 placeholder="Romanization"
-                placeholderTextColor="#64748B"
+                placeholderTextColor={colors.placeholder}
                 value={romanization}
                 onChangeText={setRomanization}
               />
-              <TextInput style={styles.input} placeholder="IPA" placeholderTextColor="#64748B" value={ipa} onChangeText={setIpa} />
+              <TextInput style={styles.input} placeholder="IPA" placeholderTextColor={colors.placeholder} value={ipa} onChangeText={setIpa} />
 
               <Text style={styles.recorderLabel}>Tap to record yourself reading your translation (optional)</Text>
               <AudioRecorder
@@ -192,7 +193,7 @@ export default function Module3Screen({ navigation }: Props) {
                   onPress={handleSubmit}
                   disabled={!canSubmit}
                 >
-                  {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>Submit</Text>}
+                  {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.submitButtonText}>Submit</Text>}
                 </TouchableOpacity>
               </View>
             </>
@@ -210,13 +211,13 @@ export default function Module3Screen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   flex: {
     flex: 1,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     paddingHorizontal: 20,
@@ -231,17 +232,17 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   chip: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 8,
     marginRight: 8,
   },
   chipSelected: {
-    backgroundColor: '#059669',
+    backgroundColor: colors.success,
   },
   chipText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '600',
   },
@@ -249,57 +250,59 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     textAlign: 'center',
     marginVertical: 10,
   },
   sentenceCard: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceCard,
     borderRadius: 16,
     padding: 20,
     marginBottom: 18,
   },
   categoryBadge: {
     alignSelf: 'flex-end',
-    backgroundColor: '#334155',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 3,
     marginBottom: 10,
   },
   categoryBadgeText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 11,
     fontWeight: '600',
   },
   sentenceText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     lineHeight: 30,
   },
   input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 16,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   textArea: {
     minHeight: 90,
     textAlignVertical: 'top',
   },
   recorderLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     textAlign: 'center',
     marginTop: 8,
   },
   pointsPreview: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     textAlign: 'center',
     marginVertical: 12,
@@ -310,21 +313,21 @@ const styles = StyleSheet.create({
   },
   skipButton: {
     flex: 1,
-    backgroundColor: '#1E293B',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   skipButtonText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 16,
     fontWeight: '600',
   },
   submitButton: {
     flex: 2,
-    backgroundColor: '#059669',
-    borderRadius: 8,
+    backgroundColor: colors.success,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -334,7 +337,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },

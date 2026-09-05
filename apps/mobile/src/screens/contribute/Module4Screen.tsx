@@ -8,6 +8,7 @@ import { uploadAudioFile } from '../../services/upload.service';
 import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
+import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module4Screen'>;
 
@@ -24,10 +25,10 @@ type Scene = {
 type RecordingState = { path: string; durationMs: number; checksum: string };
 
 const DIFFICULTY_COLOR: Record<Scene['difficulty'], string> = {
-  easy: '#059669',
-  medium: '#CA8A04',
+  easy: colors.success,
+  medium: colors.warning,
   hard: '#EA580C',
-  expert: '#DC2626',
+  expert: colors.danger,
 };
 
 const IMAGE_HEIGHT = Dimensions.get('window').height * 0.45;
@@ -94,7 +95,7 @@ export default function Module4Screen({ navigation }: Props) {
   if (loadingScene) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <ActivityIndicator color="#D97706" style={styles.loader} />
+        <ActivityIndicator color={colors.brand} style={styles.loader} />
       </SafeAreaView>
     );
   }
@@ -142,7 +143,7 @@ export default function Module4Screen({ navigation }: Props) {
         {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
         <TouchableOpacity style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={!canSubmit}>
-          {isSubmitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.submitButtonText}>Submit</Text>}
+          {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.submitButtonText}>Submit</Text>}
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.differentSceneButton} onPress={() => loadScene(scene.id)}>
@@ -156,13 +157,13 @@ export default function Module4Screen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   loader: {
     marginTop: 60,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 40,
@@ -176,7 +177,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFill,
   },
   imagePlaceholder: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
   },
   difficultyBadge: {
     position: 'absolute',
@@ -187,7 +188,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   difficultyBadgeText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'capitalize',
@@ -198,7 +199,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     textAlign: 'center',
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 20,
     fontWeight: '700',
     textShadowColor: 'rgba(0,0,0,0.75)',
@@ -209,21 +210,21 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   instructions: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     lineHeight: 22,
     marginBottom: 16,
     textAlign: 'center',
   },
   pointsPreview: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     textAlign: 'center',
     marginVertical: 14,
   },
   submitButton: {
-    backgroundColor: '#D97706',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     justifyContent: 'center',
@@ -233,7 +234,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   submitButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },
@@ -242,7 +243,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   differentSceneText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
     fontWeight: '600',
   },

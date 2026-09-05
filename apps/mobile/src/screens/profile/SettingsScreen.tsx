@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '../../store/auth.store';
 import { useAppStore, type Dialect, type Language } from '../../store/app.store';
 import { api } from '../../services/api.service';
+import { colors } from '../../theme/colors';
 
 // Tracks apps/mobile/package.json's "version" field -- no expo-constants
 // dependency is installed to read it at runtime, and adding one just for a
@@ -108,7 +109,7 @@ export default function SettingsScreen() {
   if (loading) {
     return (
       <SafeAreaView style={styles.safeArea}>
-        <ActivityIndicator color="#2563EB" style={styles.loader} />
+        <ActivityIndicator color={colors.brand} style={styles.loader} />
       </SafeAreaView>
     );
   }
@@ -133,15 +134,15 @@ export default function SettingsScreen() {
           value={displayName}
           onChangeText={setDisplayName}
           onBlur={saveDisplayName}
-          placeholderTextColor="#64748B"
+          placeholderTextColor={colors.placeholder}
         />
-        {isSavingName ? <ActivityIndicator color="#2563EB" style={styles.smallLoader} /> : null}
+        {isSavingName ? <ActivityIndicator color={colors.brand} style={styles.smallLoader} /> : null}
 
         <View style={styles.toggleRow}>
           <View style={styles.toggleTextWrap}>
             <Text style={styles.rowLabel}>Show location on public profile</Text>
           </View>
-          <Switch value={showLocation} onValueChange={toggleLocationPrivacy} trackColor={{ true: '#2563EB' }} />
+          <Switch value={showLocation} onValueChange={toggleLocationPrivacy} trackColor={{ true: colors.brand }} />
         </View>
 
         <Text style={styles.sectionLabel}>About</Text>
@@ -203,7 +204,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   loader: {
     marginTop: 60,
@@ -213,7 +214,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     paddingHorizontal: 20,
@@ -225,7 +226,7 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   sectionLabel: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 12,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -236,44 +237,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 8,
   },
   rowLabel: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
     flexShrink: 1,
   },
   rowAction: {
-    color: '#2563EB',
+    color: colors.brand,
     fontSize: 13,
     fontWeight: '600',
   },
   rowValue: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
   },
   rowValueMuted: {
-    color: '#64748B',
+    color: colors.inkMuted,
     fontSize: 13,
   },
   input: {
-    backgroundColor: '#1E293B',
-    color: '#FFFFFF',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    color: colors.ink,
+    borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     marginBottom: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#1E293B',
-    borderRadius: 10,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 14,
     marginTop: 20,
   },
@@ -282,14 +285,14 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   signOutButton: {
-    backgroundColor: '#DC2626',
-    borderRadius: 10,
+    backgroundColor: colors.danger,
+    borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 32,
   },
   signOutButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '700',
   },
@@ -298,7 +301,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   deleteAccountText: {
-    color: '#64748B',
+    color: colors.inkMuted,
     fontSize: 12,
   },
   sheetBackdrop: {
@@ -307,14 +310,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   sheet: {
-    backgroundColor: '#1E293B',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    backgroundColor: colors.surfaceCard,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     padding: 24,
     maxHeight: '70%',
   },
   sheetTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 18,
     fontWeight: '700',
     marginBottom: 14,
@@ -331,20 +334,20 @@ const styles = StyleSheet.create({
     paddingLeft: 26,
   },
   pickerRowSelected: {
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surfaceMuted,
   },
   pickerRowText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
   },
   sheetCloseButton: {
-    backgroundColor: '#334155',
-    borderRadius: 8,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: 999,
     paddingVertical: 12,
     alignItems: 'center',
   },
   sheetCloseText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 15,
     fontWeight: '600',
   },

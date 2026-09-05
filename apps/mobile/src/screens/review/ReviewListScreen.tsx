@@ -11,6 +11,7 @@ import type { ReviewStackParamList, ReviewQueueItem } from '../../navigation/Rev
 import type { AppTabParamList } from '../../navigation/AppNavigator';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import { colors } from '../../theme/colors';
 
 type Props = CompositeScreenProps<
   NativeStackScreenProps<ReviewStackParamList, 'ReviewListScreen'>,
@@ -65,7 +66,7 @@ function UnlockReviewAccess({ navigation, verifiedContributions }: { navigation:
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.unlockContainer}>
-        <Ionicons name="trophy" size={72} color="#FBBF24" />
+        <Ionicons name="trophy" size={72} color={colors.warning} />
         <Text style={styles.unlockTitle}>Unlock Review Access</Text>
         <Text style={styles.unlockSubtitle}>Review access requires GOLD level (500 verified contributions)</Text>
         <View style={styles.progressTrack}>
@@ -134,13 +135,13 @@ export default function ReviewListScreen({ navigation }: Props) {
             style={[styles.filterChip, filter === f.value && styles.filterChipSelected]}
             onPress={() => setFilter(f.value)}
           >
-            <Text style={styles.filterChipText}>{f.label}</Text>
+            <Text style={[styles.filterChipText, filter === f.value && styles.filterChipTextSelected]}>{f.label}</Text>
           </TouchableOpacity>
         ))}
       </View>
 
       {loading ? (
-        <ActivityIndicator color="#2563EB" style={styles.loader} />
+        <ActivityIndicator color={colors.brand} style={styles.loader} />
       ) : error ? (
         <Text style={styles.errorText}>{error}</Text>
       ) : (
@@ -148,12 +149,12 @@ export default function ReviewListScreen({ navigation }: Props) {
           data={items}
           keyExtractor={(item) => item.contributionId}
           contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#FFFFFF" />}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.brand} />}
           ListEmptyComponent={<Text style={styles.emptyText}>No pending reviews. All caught up!</Text>}
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('ReviewDetailScreen', { item })}>
               <View style={styles.cardTopRow}>
-                <Ionicons name={MODULE_ICON[item.moduleType]} size={18} color="#FFFFFF" />
+                <Ionicons name={MODULE_ICON[item.moduleType]} size={18} color={colors.ink} />
                 <Text style={styles.cardModuleName}>{MODULE_NAME[item.moduleType]}</Text>
                 <Text style={styles.cardDate}>{formatDate(item.submittedAt)}</Text>
               </View>
@@ -182,10 +183,10 @@ export default function ReviewListScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surface,
   },
   heading: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     paddingHorizontal: 20,
@@ -200,30 +201,33 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   filterChip: {
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 7,
   },
   filterChipSelected: {
-    backgroundColor: '#2563EB',
+    backgroundColor: colors.brand,
   },
   filterChipText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 12,
     fontWeight: '700',
+  },
+  filterChipTextSelected: {
+    color: colors.inkInverted,
   },
   loader: {
     marginTop: 40,
   },
   errorText: {
-    color: '#DC2626',
+    color: colors.danger,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 20,
   },
   emptyText: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 40,
@@ -233,8 +237,8 @@ const styles = StyleSheet.create({
     paddingTop: 0,
   },
   card: {
-    backgroundColor: '#1E293B',
-    borderRadius: 12,
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
     padding: 14,
     marginBottom: 12,
   },
@@ -245,34 +249,34 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   cardModuleName: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
     fontWeight: '700',
     flex: 1,
   },
   cardDate: {
-    color: '#64748B',
+    color: colors.inkMuted,
     fontSize: 12,
   },
   cardContributor: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 13,
     marginBottom: 8,
   },
   cardPreviewText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 14,
   },
   durationBadge: {
     alignSelf: 'flex-start',
-    backgroundColor: '#334155',
+    backgroundColor: colors.surfaceMuted,
     borderRadius: 6,
     paddingHorizontal: 8,
     paddingVertical: 2,
     marginTop: 8,
   },
   durationBadgeText: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 11,
     fontWeight: '600',
   },
@@ -283,14 +287,14 @@ const styles = StyleSheet.create({
     padding: 32,
   },
   unlockTitle: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
     marginTop: 20,
     textAlign: 'center',
   },
   unlockSubtitle: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
     textAlign: 'center',
     marginTop: 10,
@@ -300,33 +304,33 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 10,
     borderRadius: 5,
-    backgroundColor: '#1E293B',
+    backgroundColor: colors.surfaceMuted,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    backgroundColor: '#FBBF24',
+    backgroundColor: colors.warning,
   },
   progressLabel: {
-    color: '#FFFFFF',
+    color: colors.ink,
     fontSize: 13,
     fontWeight: '600',
     marginTop: 8,
   },
   unlockHint: {
-    color: '#94A3B8',
+    color: colors.inkMuted,
     fontSize: 14,
     marginTop: 20,
     marginBottom: 24,
   },
   contributeButton: {
-    backgroundColor: '#2563EB',
-    borderRadius: 8,
+    backgroundColor: colors.brand,
+    borderRadius: 999,
     paddingVertical: 14,
     paddingHorizontal: 32,
   },
   contributeButtonText: {
-    color: '#FFFFFF',
+    color: colors.inkInverted,
     fontSize: 16,
     fontWeight: '600',
   },
