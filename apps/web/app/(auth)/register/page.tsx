@@ -11,7 +11,6 @@ import { getErrorMessage } from "@/lib/api";
 
 const schema = z
   .object({
-    displayName: z.string().min(2, "Name must be at least 2 characters"),
     email: z.string().email("Enter a valid email"),
     password: z.string().min(8, "Password must be at least 8 characters"),
     confirmPassword: z.string(),
@@ -35,7 +34,7 @@ export default function RegisterPage() {
   async function onSubmit(values: FormValues) {
     setServerError(null);
     try {
-      await registerUser(values.email, values.password, values.displayName);
+      await registerUser(values.email, values.password);
       router.push("/onboarding");
     } catch (err) {
       setServerError(getErrorMessage(err, "Registration failed"));
@@ -48,15 +47,6 @@ export default function RegisterPage() {
         <h1 className="mb-6 text-2xl font-bold text-ink">Create Account</h1>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div>
-            <input
-              {...register("displayName")}
-              placeholder="Display name"
-              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand"
-            />
-            {errors.displayName && <p className="mt-1 text-xs text-red-600">{errors.displayName.message}</p>}
-          </div>
-
           <div>
             <input
               {...register("email")}

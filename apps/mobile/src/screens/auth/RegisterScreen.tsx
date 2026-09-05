@@ -19,18 +19,14 @@ import { colors } from '../../theme/colors';
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
 type FieldErrors = {
-  displayName?: string;
   email?: string;
   password?: string;
   confirmPassword?: string;
 };
 
-function validate(displayName: string, email: string, password: string, confirmPassword: string): FieldErrors {
+function validate(email: string, password: string, confirmPassword: string): FieldErrors {
   const errors: FieldErrors = {};
 
-  if (displayName.trim().length < 2) {
-    errors.displayName = 'Name must be at least 2 characters';
-  }
   if (email.trim().length === 0) {
     errors.email = 'Email is required';
   }
@@ -45,7 +41,6 @@ function validate(displayName: string, email: string, password: string, confirmP
 }
 
 export default function RegisterScreen({ navigation }: Props) {
-  const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -56,7 +51,7 @@ export default function RegisterScreen({ navigation }: Props) {
   const error = useAuthStore((state) => state.error);
 
   function handleSubmit() {
-    const errors = validate(displayName, email, password, confirmPassword);
+    const errors = validate(email, password, confirmPassword);
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) {
       return;
@@ -64,7 +59,7 @@ export default function RegisterScreen({ navigation }: Props) {
 
     // On success RootNavigator reactively routes to Onboarding once
     // isAuthenticated + justRegistered flip -- no explicit navigation here.
-    register(email.trim(), password, displayName.trim()).catch(() => {
+    register(email.trim(), password).catch(() => {
       // Surfaced via the store's `error` state below.
     });
   }
@@ -77,17 +72,6 @@ export default function RegisterScreen({ navigation }: Props) {
         </TouchableOpacity>
 
         <Text style={styles.heading}>Create Account</Text>
-
-        <View style={styles.field}>
-          <TextInput
-            style={styles.input}
-            placeholder="Display name"
-            placeholderTextColor={colors.placeholder}
-            value={displayName}
-            onChangeText={setDisplayName}
-          />
-          {fieldErrors.displayName ? <Text style={styles.fieldError}>{fieldErrors.displayName}</Text> : null}
-        </View>
 
         <View style={styles.field}>
           <TextInput

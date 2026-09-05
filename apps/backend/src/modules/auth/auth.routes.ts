@@ -7,7 +7,6 @@ import { authService } from "./auth.service.js";
 const registerSchema = z.object({
   email: z.string().email().min(1),
   password: z.string().min(8),
-  displayName: z.string().min(2),
 });
 
 const loginSchema = z.object({
@@ -26,7 +25,12 @@ const logoutSchema = z.object({
 export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/register", async (request, reply) => {
     const body = registerSchema.parse(request.body);
-    const result = await authService.register(body.email, body.password, body.displayName);
+    // The signup form only collects email/password -- the real name is
+    // collected right after, on the onboarding form (fullName), which also
+    // updates this. Default to the email's local part so there's always a
+    // sane display name in the meantime.
+    const displayName = body.email.split("@")[0]!;
+    const result = await authService.register(body.email, body.password, displayName);
     reply.code(201).send(result);
   });
 

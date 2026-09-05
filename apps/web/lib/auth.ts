@@ -15,8 +15,8 @@ export function useAuth() {
     setUser(me);
   }
 
-  async function register(email: string, password: string, displayName: string) {
-    await api.auth.register(email, password, displayName);
+  async function register(email: string, password: string) {
+    await api.auth.register(email, password);
     const me = await api.users.getMe();
     setUser(me);
   }

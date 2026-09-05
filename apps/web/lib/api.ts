@@ -186,18 +186,17 @@ export type NamedOption = { id: string; name: string };
 export type GenderOption = "male" | "female" | "other" | "prefer_not_to_say";
 
 export type ContributorDemographics = {
-  userId: string;
   fullName: string;
   age: number;
   gender: GenderOption;
   motherTongue: string;
-  tribeId: string;
-  subTribeId: string | null;
   country: string;
   city: string;
-  villageId: string;
-  quarterId: string | null;
   dialect: string | null;
+  tribeName: string | null;
+  subTribeName: string | null;
+  villageName: string | null;
+  quarterName: string | null;
 };
 
 export type SubmitDemographicsInput = {
@@ -612,9 +611,9 @@ export const api = {
     // user is logged in immediately, and without this, an immediate
     // api.users.getMe() call would have neither an in-memory access token
     // nor a stored refresh token to fall back on.
-    register: async (email: string, password: string, displayName: string) => {
+    register: async (email: string, password: string) => {
       const data = await apiClient
-        .post<AuthResponse>("/api/v1/auth/register", { email, password, displayName })
+        .post<AuthResponse>("/api/v1/auth/register", { email, password })
         .then((r) => r.data);
       setAccessToken(data.accessToken);
       setStoredRefreshToken(data.refreshToken);

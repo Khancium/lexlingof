@@ -3,7 +3,7 @@ import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { contributorDemographics, quarters, subTribes, tribes, villages } from "../../db/schema.js";
+import { contributorDemographics, quarters, subTribes, tribes, users, villages } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 import { GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from "./demographics.constants.js";
@@ -170,8 +170,24 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/me/demographics", { preHandler: verifyToken }, async (request) => {
     const [row] = await db
-      .select()
+      .select({
+        fullName: contributorDemographics.fullName,
+        age: contributorDemographics.age,
+        gender: contributorDemographics.gender,
+        motherTongue: contributorDemographics.motherTongue,
+        country: contributorDemographics.country,
+        city: contributorDemographics.city,
+        dialect: contributorDemographics.dialect,
+        tribeName: tribes.name,
+        subTribeName: subTribes.name,
+        villageName: villages.name,
+        quarterName: quarters.name,
+      })
       .from(contributorDemographics)
+      .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+      .leftJoin(subTribes, eq(subTribes.id, contributorDemographics.subTribeId))
+      .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+      .leftJoin(quarters, eq(quarters.id, contributorDemographics.quarterId))
       .where(eq(contributorDemographics.userId, request.user!.id))
       .limit(1);
     return row ?? null;
@@ -206,6 +222,10 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       .insert(contributorDemographics)
       .values(values)
       .onConflictDoUpdate({ target: contributorDemographics.userId, set: values });
+
+    // The signup form no longer collects a name -- this is the first real
+    // name the user provides, so it becomes their display name too.
+    await db.update(users).set({ displayName: body.fullName, updatedAt: new Date() }).where(eq(users.id, userId));
 
     const [row] = await db
       .select()

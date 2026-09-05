@@ -136,8 +136,8 @@ apiClient.interceptors.response.use(
 
 export const api = {
   auth: {
-    register: (email: string, password: string, displayName: string) =>
-      apiClient.post('/api/v1/auth/register', { email, password, displayName }).then((r) => r.data),
+    register: (email: string, password: string) =>
+      apiClient.post('/api/v1/auth/register', { email, password }).then((r) => r.data),
     login: (email: string, password: string) =>
       apiClient.post('/api/v1/auth/login', { email, password }).then((r) => r.data),
     refreshToken: (refreshToken: string) =>

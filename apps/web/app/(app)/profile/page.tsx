@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/store";
-import { api, type UserStatsResponse, type UserBadgesResponse } from "@/lib/api";
+import { api, type UserStatsResponse, type UserBadgesResponse, type ContributorDemographics } from "@/lib/api";
 import { LEVEL_COLOR, LEVEL_THRESHOLDS, NEXT_LEVEL } from "@/lib/level";
 
 export default function ProfilePage() {
@@ -12,6 +12,7 @@ export default function ProfilePage() {
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
   const [badges, setBadges] = useState<UserBadgesResponse["earned"]>([]);
+  const [demographics, setDemographics] = useState<ContributorDemographics | null>(null);
 
   const [isEditing, setIsEditing] = useState(false);
   const [displayName, setDisplayName] = useState(user?.displayName ?? "");
@@ -26,6 +27,7 @@ export default function ProfilePage() {
       setStreak(res.streak?.currentStreak ?? 0);
     });
     api.badges.getForUser(user.id).then((res) => setBadges(res.earned));
+    api.demographics.getMe().then(setDemographics).catch(() => setDemographics(null));
   }, [user]);
 
   if (!user) return null;
@@ -95,6 +97,25 @@ export default function ProfilePage() {
         )}
       </div>
 
+      {demographics && (
+        <div>
+          <h2 className="mb-3 text-lg font-bold text-ink">My Details</h2>
+          <div className="grid grid-cols-2 gap-4 rounded-2xl bg-surface p-5 shadow-sm sm:grid-cols-3">
+            <DetailField label="Full Name" value={demographics.fullName} />
+            <DetailField label="Age" value={String(demographics.age)} />
+            <DetailField label="Gender" value={GENDER_LABELS[demographics.gender]} />
+            <DetailField label="Language" value={demographics.motherTongue} />
+            <DetailField label="Tribe" value={demographics.tribeName} />
+            <DetailField label="Sub-tribe" value={demographics.subTribeName} />
+            <DetailField label="Country" value={demographics.country} />
+            <DetailField label="City" value={demographics.city} />
+            <DetailField label="Village" value={demographics.villageName} />
+            <DetailField label="Quarter" value={demographics.quarterName} />
+            <DetailField label="Dialect" value={demographics.dialect} />
+          </div>
+        </div>
+      )}
+
       <div>
         <h2 className="mb-3 text-lg font-bold text-ink">Edit Profile</h2>
         {isEditing ? (
@@ -144,6 +165,22 @@ function StatCard({ label, value }: { label: string; value: number }) {
     <div className="rounded-2xl bg-surface p-5 shadow-sm text-center">
       <div className="text-2xl font-bold text-ink">{value}</div>
       <div className="mt-1 text-xs text-ink-muted">{label}</div>
+    </div>
+  );
+}
+
+const GENDER_LABELS: Record<string, string> = {
+  male: "Male",
+  female: "Female",
+  other: "Other",
+  prefer_not_to_say: "Prefer not to say",
+};
+
+function DetailField({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div>
+      <div className="text-xs font-medium text-ink-muted">{label}</div>
+      <div className="mt-0.5 text-sm font-medium text-ink">{value ?? "—"}</div>
     </div>
   );
 }

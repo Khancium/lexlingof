@@ -31,7 +31,7 @@ type AuthState = {
   // resolves, so RootNavigator swaps away from AuthStack immediately).
   justRegistered: boolean;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName: string) => Promise<void>;
+  register: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   loadUser: () => Promise<void>;
   updateUser: (partial: Partial<AuthUser>) => void;
@@ -70,10 +70,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  register: async (email, password, displayName) => {
+  register: async (email, password) => {
     set({ isLoading: true, error: null });
     try {
-      const { accessToken, refreshToken } = await api.auth.register(email, password, displayName);
+      const { accessToken, refreshToken } = await api.auth.register(email, password);
       await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
       setAccessToken(accessToken);
 
