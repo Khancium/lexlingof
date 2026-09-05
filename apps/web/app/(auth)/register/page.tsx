@@ -43,18 +43,18 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4">
-      <div className="w-full max-w-sm rounded-xl bg-slate-800 p-8 shadow-xl">
-        <h1 className="mb-6 text-2xl font-bold text-white">Create Account</h1>
+    <div className="flex min-h-screen items-center justify-center bg-surface-muted px-4">
+      <div className="w-full max-w-sm rounded-3xl bg-surface p-8 shadow-sm border border-border">
+        <h1 className="mb-6 text-2xl font-bold text-ink">Create Account</h1>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
             <input
               {...register("displayName")}
               placeholder="Display name"
-              className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand"
             />
-            {errors.displayName && <p className="mt-1 text-xs text-red-400">{errors.displayName.message}</p>}
+            {errors.displayName && <p className="mt-1 text-xs text-red-600">{errors.displayName.message}</p>}
           </div>
 
           <div>
@@ -63,9 +63,9 @@ export default function RegisterPage() {
               type="email"
               placeholder="Email"
               autoComplete="email"
-              className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand"
             />
-            {errors.email && <p className="mt-1 text-xs text-red-400">{errors.email.message}</p>}
+            {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
           </div>
 
           <div>
@@ -74,9 +74,9 @@ export default function RegisterPage() {
               type="password"
               placeholder="Password"
               autoComplete="new-password"
-              className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand"
             />
-            {errors.password && <p className="mt-1 text-xs text-red-400">{errors.password.message}</p>}
+            {errors.password && <p className="mt-1 text-xs text-red-600">{errors.password.message}</p>}
           </div>
 
           <div>
@@ -85,25 +85,25 @@ export default function RegisterPage() {
               type="password"
               placeholder="Confirm password"
               autoComplete="new-password"
-              className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand"
             />
-            {errors.confirmPassword && <p className="mt-1 text-xs text-red-400">{errors.confirmPassword.message}</p>}
+            {errors.confirmPassword && <p className="mt-1 text-xs text-red-600">{errors.confirmPassword.message}</p>}
           </div>
 
-          {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+          {serverError && <p className="text-sm text-red-600">{serverError}</p>}
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+            className="w-full rounded-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
           >
             {isSubmitting ? "Creating account..." : "Register"}
           </button>
         </form>
 
-        <p className="mt-6 text-center text-sm text-slate-400">
+        <p className="mt-6 text-center text-sm text-ink-muted">
           Already have an account?{" "}
-          <Link href="/login" className="font-medium text-blue-500 hover:underline">
+          <Link href="/login" className="font-medium text-brand hover:underline">
             Log in
           </Link>
         </p>

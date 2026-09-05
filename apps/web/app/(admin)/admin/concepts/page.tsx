@@ -82,15 +82,15 @@ export default function AdminConceptsPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold text-white">Concepts</h1>
+      <h1 className="text-2xl font-bold text-ink">Concepts</h1>
 
-      <div className="space-y-3 rounded-xl bg-slate-800 p-5">
-        <h2 className="text-lg font-bold text-white">Add New Concept</h2>
+      <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+        <h2 className="text-lg font-bold text-ink">Add New Concept</h2>
         <div className="flex flex-wrap gap-3">
           <select
             value={newCategoryId}
             onChange={(e) => setNewCategoryId(e.target.value)}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-white ring-1 ring-slate-700"
+            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
           >
             <option value="">Select category</option>
             {categories.map((c) => (
@@ -103,18 +103,18 @@ export default function AdminConceptsPage() {
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
             placeholder="Label (English)"
-            className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-white placeholder-slate-500 ring-1 ring-slate-700"
+            className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
           />
           <input
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
             placeholder="Description"
-            className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-white placeholder-slate-500 ring-1 ring-slate-700"
+            className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
           />
           <select
             value={newDifficulty}
             onChange={(e) => setNewDifficulty(Number(e.target.value))}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-white ring-1 ring-slate-700"
+            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
           >
             {[1, 2, 3, 4, 5].map((d) => (
               <option key={d} value={d}>
@@ -125,20 +125,20 @@ export default function AdminConceptsPage() {
           <button
             onClick={handleCreate}
             disabled={isCreating}
-            className="rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+            className="rounded-full bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
           >
             {isCreating ? "Adding..." : "Add"}
           </button>
         </div>
-        {createError ? <p className="text-sm text-red-400">{createError}</p> : null}
+        {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-slate-800">
+        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-700 text-slate-400">
+            <thead className="border-b border-border text-ink-muted">
               <tr>
                 <th className="px-4 py-3">Label</th>
                 <th className="px-4 py-3">Category</th>
@@ -150,19 +150,19 @@ export default function AdminConceptsPage() {
             <tbody>
               {concepts.map((concept) =>
                 editingId === concept.id ? (
-                  <tr key={concept.id} className="border-b border-slate-700/50 bg-slate-900/40">
+                  <tr key={concept.id} className="border-b border-border bg-surface-card">
                     <td className="px-4 py-2">
                       <input
                         value={editLabel}
                         onChange={(e) => setEditLabel(e.target.value)}
-                        className="w-full rounded bg-slate-900 px-2 py-1 text-white ring-1 ring-slate-700"
+                        className="w-full rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       />
                     </td>
                     <td className="px-4 py-2">
                       <select
                         value={editCategoryId}
                         onChange={(e) => setEditCategoryId(e.target.value)}
-                        className="w-full rounded bg-slate-900 px-2 py-1 text-white ring-1 ring-slate-700"
+                        className="w-full rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       >
                         {categories.map((c) => (
                           <option key={c.id} value={c.id}>
@@ -175,14 +175,14 @@ export default function AdminConceptsPage() {
                       <input
                         value={editDescription}
                         onChange={(e) => setEditDescription(e.target.value)}
-                        className="w-full rounded bg-slate-900 px-2 py-1 text-white ring-1 ring-slate-700"
+                        className="w-full rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       />
                     </td>
                     <td className="px-4 py-2">
                       <select
                         value={editDifficulty}
                         onChange={(e) => setEditDifficulty(Number(e.target.value))}
-                        className="rounded bg-slate-900 px-2 py-1 text-white ring-1 ring-slate-700"
+                        className="rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       >
                         {[1, 2, 3, 4, 5].map((d) => (
                           <option key={d} value={d}>
@@ -196,13 +196,13 @@ export default function AdminConceptsPage() {
                         <button
                           onClick={() => saveEdit(concept.id)}
                           disabled={isSaving}
-                          className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500"
+                          className="rounded-full bg-brand px-3 py-1 text-xs font-semibold text-ink-inverted hover:bg-brand-dark"
                         >
                           Save
                         </button>
                         <button
                           onClick={() => setEditingId(null)}
-                          className="rounded bg-slate-700 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-600"
+                          className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
                         >
                           Cancel
                         </button>
@@ -210,13 +210,13 @@ export default function AdminConceptsPage() {
                     </td>
                   </tr>
                 ) : (
-                  <tr key={concept.id} className="border-b border-slate-700/50 last:border-0">
-                    <td className="px-4 py-3 text-white">{concept.labelEnglish}</td>
-                    <td className="px-4 py-3 text-slate-300">{concept.categoryName}</td>
-                    <td className="px-4 py-3 text-slate-400">{concept.description ?? "--"}</td>
-                    <td className="px-4 py-3 text-slate-400">{concept.difficulty}</td>
+                  <tr key={concept.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 text-ink">{concept.labelEnglish}</td>
+                    <td className="px-4 py-3 text-ink-muted">{concept.categoryName}</td>
+                    <td className="px-4 py-3 text-ink-muted">{concept.description ?? "--"}</td>
+                    <td className="px-4 py-3 text-ink-muted">{concept.difficulty}</td>
                     <td className="px-4 py-3">
-                      <button onClick={() => startEdit(concept)} className="text-xs font-semibold text-blue-400 hover:underline">
+                      <button onClick={() => startEdit(concept)} className="text-xs font-semibold text-brand hover:underline">
                         Edit
                       </button>
                     </td>

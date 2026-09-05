@@ -28,7 +28,7 @@ export function Combobox({
         placeholder={placeholder}
         disabled={disabled}
         autoComplete="off"
-        className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+        className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand disabled:opacity-50"
       />
       <datalist id={`${id}-options`}>
         {options.map((option) => (

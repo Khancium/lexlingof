@@ -43,12 +43,12 @@ export default function ReviewPage() {
     return (
       <div className="mx-auto max-w-md space-y-4 py-16 text-center">
         <div className="text-6xl">🏆</div>
-        <h1 className="text-2xl font-bold text-white">Unlock Review Access</h1>
-        <p className="text-slate-400">Review access requires GOLD level (500 verified contributions)</p>
-        <div className="h-2.5 overflow-hidden rounded-full bg-slate-800">
+        <h1 className="text-2xl font-bold text-ink">Unlock Review Access</h1>
+        <p className="text-ink-muted">Review access requires GOLD level (500 verified contributions)</p>
+        <div className="h-2.5 overflow-hidden rounded-full bg-surface-card">
           <div className="h-full bg-yellow-500" style={{ width: `${progressPct}%` }} />
         </div>
-        <p className="text-sm font-semibold text-white">
+        <p className="text-sm font-semibold text-ink">
           {verified} / {threshold}
         </p>
       </div>
@@ -57,7 +57,7 @@ export default function ReviewPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">Review Queue</h1>
+      <h1 className="text-2xl font-bold text-ink">Review Queue</h1>
 
       <div className="flex gap-2">
         {TABS.map((tab) => (
@@ -65,7 +65,7 @@ export default function ReviewPage() {
             key={tab.label}
             onClick={() => setFilter(tab.value)}
             className={`rounded-md px-3 py-1.5 text-sm font-bold transition ${
-              filter === tab.value ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+              filter === tab.value ? "bg-brand text-ink-inverted" : "bg-surface-card text-ink-muted hover:bg-border"
             }`}
           >
             {tab.label}
@@ -74,9 +74,9 @@ export default function ReviewPage() {
       </div>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : items.length === 0 ? (
-        <p className="text-slate-400">No pending reviews. All caught up!</p>
+        <p className="text-ink-muted">No pending reviews. All caught up!</p>
       ) : (
         <div className="space-y-4">
           {items.map((item) => (
@@ -134,15 +134,15 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
   }
 
   return (
-    <div className="space-y-4 rounded-xl bg-slate-800 p-5">
+    <div className="space-y-4 rounded-2xl bg-surface p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
-          <p className="font-semibold text-white">{item.contributor.displayName}</p>
-          <p className="text-xs text-slate-400">
+          <p className="font-semibold text-ink">{item.contributor.displayName}</p>
+          <p className="text-xs text-ink-muted">
             {item.language?.nameEnglish ?? "Unknown language"} · {new Date(item.submittedAt).toLocaleDateString()}
           </p>
         </div>
-        <span className="rounded bg-slate-700 px-2 py-1 text-xs font-bold text-white">{item.moduleType}</span>
+        <span className="rounded-full bg-surface-card px-2 py-1 text-xs font-bold text-ink">{item.moduleType}</span>
       </div>
 
       {item.detail.imageUrl ? (
@@ -152,43 +152,43 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
 
       {item.moduleType === "WORD" ? (
         <div>
-          <p className="text-xl font-bold text-white">{item.detail.nativeWord}</p>
-          {item.detail.romanization ? <p className="text-sm text-slate-400">Romanization: {item.detail.romanization}</p> : null}
-          {item.detail.ipa ? <p className="text-sm text-slate-400">IPA: {item.detail.ipa}</p> : null}
+          <p className="text-xl font-bold text-ink">{item.detail.nativeWord}</p>
+          {item.detail.romanization ? <p className="text-sm text-ink-muted">Romanization: {item.detail.romanization}</p> : null}
+          {item.detail.ipa ? <p className="text-sm text-ink-muted">IPA: {item.detail.ipa}</p> : null}
         </div>
       ) : null}
 
       {item.moduleType === "TRANSLATION" ? (
         <div>
-          <p className="text-sm text-slate-400">{item.detail.englishText}</p>
-          <p className="mt-1 text-lg font-bold text-white">{item.detail.nativeText}</p>
+          <p className="text-sm text-ink-muted">{item.detail.englishText}</p>
+          <p className="mt-1 text-lg font-bold text-ink">{item.detail.nativeText}</p>
         </div>
       ) : null}
 
       {item.moduleType === "SCENE" ? (
         <div>
-          <p className="text-lg font-bold text-white">{item.detail.title}</p>
-          <p className="text-sm capitalize text-slate-400">Difficulty: {item.detail.difficulty}</p>
+          <p className="text-lg font-bold text-ink">{item.detail.title}</p>
+          <p className="text-sm capitalize text-ink-muted">Difficulty: {item.detail.difficulty}</p>
         </div>
       ) : null}
 
       {item.moduleType === "TRANSCRIPTION" ? (
         <div>
-          <p className="text-lg font-bold text-white">{item.detail.title}</p>
-          <p className="text-sm capitalize text-slate-400">Type: {item.detail.recordingType}</p>
-          {item.detail.nativeText ? <p className="mt-1 text-sm text-slate-300">{item.detail.nativeText}</p> : null}
+          <p className="text-lg font-bold text-ink">{item.detail.title}</p>
+          <p className="text-sm capitalize text-ink-muted">Type: {item.detail.recordingType}</p>
+          {item.detail.nativeText ? <p className="mt-1 text-sm text-ink-muted">{item.detail.nativeText}</p> : null}
         </div>
       ) : null}
 
-      <div className="flex items-center gap-3 rounded-lg bg-slate-900 p-3">
+      <div className="flex items-center gap-3 rounded-xl bg-surface-card p-3">
         <button
           onClick={togglePlay}
           disabled={!item.detail.audioFileId || isLoadingAudio}
-          className="rounded-full bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
         >
           {isLoadingAudio ? "Loading..." : isPlaying ? "Pause" : "Play"}
         </button>
-        {!item.detail.audioFileId ? <span className="text-xs text-slate-500">No audio for this submission</span> : null}
+        {!item.detail.audioFileId ? <span className="text-xs text-ink-muted">No audio for this submission</span> : null}
         {audioUrl ? (
           <audio
             ref={audioRef}
@@ -206,30 +206,30 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
         onChange={(e) => setNotes(e.target.value)}
         placeholder="Optional reason / notes"
         rows={2}
-        className="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 ring-1 ring-slate-700"
+        className="w-full rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border"
       />
 
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       <div className="flex gap-3">
         <button
           onClick={() => submitDecision("valid")}
           disabled={pendingDecision !== null}
-          className="flex-1 rounded-lg bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="flex-1 rounded-full bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
         >
           ✓ Valid
         </button>
         <button
           onClick={() => submitDecision("needs_correction")}
           disabled={pendingDecision !== null}
-          className="flex-1 rounded-lg bg-yellow-500 py-2.5 font-semibold text-slate-900 hover:bg-yellow-400 disabled:opacity-50"
+          className="flex-1 rounded-full bg-yellow-500 py-2.5 font-semibold text-ink hover:bg-yellow-400 disabled:opacity-50"
         >
           ⚠ Needs Correction
         </button>
         <button
           onClick={() => submitDecision("invalid")}
           disabled={pendingDecision !== null}
-          className="flex-1 rounded-lg bg-red-600 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+          className="flex-1 rounded-full bg-red-600 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
         >
           ✕ Invalid
         </button>

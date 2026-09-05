@@ -25,8 +25,8 @@ export default function AdminNav() {
   const links = isSuperAdmin ? [...LINKS, ...SUPER_ADMIN_LINKS] : LINKS;
 
   return (
-    <aside className="w-56 shrink-0 border-r border-slate-800 bg-slate-900 p-4">
-      <Link href="/admin/dashboard" className="mb-6 block text-lg font-bold text-blue-500">
+    <aside className="w-56 shrink-0 border-r border-border bg-surface p-4">
+      <Link href="/admin/dashboard" className="mb-6 block text-lg font-bold text-brand">
         Lexlingo Admin
       </Link>
       <nav className="space-y-1">
@@ -36,8 +36,8 @@ export default function AdminNav() {
             <Link
               key={link.href}
               href={link.href}
-              className={`block rounded-md px-3 py-2 text-sm font-medium transition ${
-                active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+              className={`block rounded-full px-3 py-2 text-sm font-medium transition ${
+                active ? "bg-brand text-ink-inverted" : "text-ink-muted hover:bg-surface-card hover:text-ink"
               }`}
             >
               {link.label}
@@ -45,7 +45,7 @@ export default function AdminNav() {
           );
         })}
       </nav>
-      <Link href="/dashboard" className="mt-6 block text-xs text-slate-500 hover:text-slate-300">
+      <Link href="/dashboard" className="mt-6 block text-xs text-ink-muted hover:text-ink">
         ← Back to app
       </Link>
     </aside>

@@ -97,11 +97,11 @@ export default function ConceptPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Record a Word</h1>
+        <h1 className="text-2xl font-bold text-ink">Record a Word</h1>
         <select
           value={categoryId}
           onChange={(e) => setCategoryId(e.target.value)}
-          className="rounded-lg bg-slate-800 px-3 py-2 text-sm text-white ring-1 ring-slate-700"
+          className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
         >
           <option value="">All categories</option>
           {categories.map((c) => (
@@ -113,24 +113,24 @@ export default function ConceptPage() {
       </div>
 
       {loadingConcept ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : conceptError || !data ? (
-        <p className="text-red-400">{conceptError ?? "No concepts available"}</p>
+        <p className="text-red-600">{conceptError ?? "No concepts available"}</p>
       ) : (
         <>
-          <div className="rounded-xl bg-slate-800 p-8 text-center">
+          <div className="rounded-2xl bg-surface p-8 text-center shadow-sm">
             {data.publicUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={data.publicUrl} alt={data.concept.labelEnglish} className="mx-auto mb-4 h-40 w-40 rounded-lg object-cover" />
             ) : (
-              <div className="mx-auto mb-4 flex h-40 w-40 items-center justify-center rounded-lg bg-slate-900 text-4xl">🖼️</div>
+              <div className="mx-auto mb-4 flex h-40 w-40 items-center justify-center rounded-lg bg-surface-card text-4xl">🖼️</div>
             )}
-            <div className="text-3xl font-bold text-white">{data.concept.labelEnglish}</div>
-            <div className="mt-1 text-sm text-slate-400">{data.category.name}</div>
+            <div className="text-3xl font-bold text-ink">{data.concept.labelEnglish}</div>
+            <div className="mt-1 text-sm text-ink-muted">{data.category.name}</div>
           </div>
 
           <div className="flex items-center justify-center gap-3">
-            <span className="text-sm font-medium text-slate-300">Synonym:</span>
+            <span className="text-sm font-medium text-ink-muted">Synonym:</span>
             {([1, 2, 3] as const).map((idx) => {
               const takes = data.limits.takesPerSynonym[String(idx) as "1" | "2" | "3"] ?? 0;
               return (
@@ -139,21 +139,21 @@ export default function ConceptPage() {
                   onClick={() => setSynonymIndex(idx)}
                   className={`h-9 w-9 rounded-full text-sm font-bold transition ${
                     synonymIndex === idx
-                      ? "bg-blue-600 text-white"
+                      ? "bg-brand text-ink-inverted"
                       : takes >= 3
-                        ? "bg-slate-700 text-slate-500"
-                        : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+                        ? "bg-surface-card text-ink-muted/50"
+                        : "bg-surface-card text-ink-muted hover:bg-border"
                   }`}
                 >
                   {idx}
                 </button>
               );
             })}
-            <span className="text-xs text-slate-500">Take {takeIndex} of 3</span>
+            <span className="text-xs text-ink-muted">Take {takeIndex} of 3</span>
           </div>
 
           {synonymFull ? (
-            <p className="text-center text-emerald-400">This synonym slot is complete. Pick another synonym.</p>
+            <p className="text-center text-emerald-600">This synonym slot is complete. Pick another synonym.</p>
           ) : (
             <>
               <div className="space-y-3">
@@ -161,23 +161,23 @@ export default function ConceptPage() {
                   value={nativeWord}
                   onChange={(e) => setNativeWord(e.target.value)}
                   placeholder="Your word *"
-                  className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                 />
                 <input
                   value={romanization}
                   onChange={(e) => setRomanization(e.target.value)}
                   placeholder="Romanization"
-                  className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                 />
                 <input
                   value={ipa}
                   onChange={(e) => setIpa(e.target.value)}
                   placeholder="IPA"
-                  className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+                  className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                 />
               </div>
 
-              <div className="flex justify-center rounded-xl bg-slate-800 py-8">
+              <div className="flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
                 <AudioRecorder
                   maxDurationMs={3000}
                   onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
@@ -185,18 +185,18 @@ export default function ConceptPage() {
                 />
               </div>
 
-              <p className="text-center text-sm text-slate-400">Base points awarded now, plus a bonus once verified.</p>
+              <p className="text-center text-sm text-ink-muted">Base points awarded now, plus a bonus once verified.</p>
 
               {!languageId && !languageLoading ? (
-                <p className="text-center text-red-400">Set your language in your profile before contributing.</p>
+                <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
               ) : null}
-              {submitError ? <p className="text-center text-red-400">{submitError}</p> : null}
-              {successMessage ? <p className="text-center text-emerald-400">{successMessage}</p> : null}
+              {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+              {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit}
-                className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+                className="w-full rounded-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
               >
                 {isSubmitting ? "Submitting..." : "Submit"}
               </button>

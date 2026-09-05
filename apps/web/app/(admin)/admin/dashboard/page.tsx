@@ -33,10 +33,10 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
+      <h1 className="text-2xl font-bold text-ink">Admin Dashboard</h1>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -47,13 +47,13 @@ export default function AdminDashboardPage() {
           </div>
 
           <div>
-            <h2 className="mb-3 text-lg font-bold text-white">Quick Links</h2>
+            <h2 className="mb-3 text-lg font-bold text-ink">Quick Links</h2>
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {QUICK_LINKS.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="rounded-lg bg-slate-800 p-4 text-center text-sm font-semibold text-white hover:bg-slate-700"
+                  className="rounded-2xl bg-surface-card p-4 text-center text-sm font-semibold text-ink hover:bg-border shadow-sm"
                 >
                   {link.label}
                 </Link>
@@ -62,10 +62,10 @@ export default function AdminDashboardPage() {
           </div>
 
           <div>
-            <h2 className="mb-3 text-lg font-bold text-white">Recent Contributions</h2>
-            <div className="overflow-x-auto rounded-xl bg-slate-800">
+            <h2 className="mb-3 text-lg font-bold text-ink">Recent Contributions</h2>
+            <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
               <table className="w-full text-left text-sm">
-                <thead className="border-b border-slate-700 text-slate-400">
+                <thead className="border-b border-border text-ink-muted">
                   <tr>
                     <th className="px-4 py-3">Contributor</th>
                     <th className="px-4 py-3">Module</th>
@@ -75,11 +75,11 @@ export default function AdminDashboardPage() {
                 </thead>
                 <tbody>
                   {recent.map((item) => (
-                    <tr key={item.contributionId} className="border-b border-slate-700/50 last:border-0">
-                      <td className="px-4 py-3 text-white">{item.contributor.displayName}</td>
-                      <td className="px-4 py-3 text-slate-300">{MODULE_LABEL[item.moduleType]}</td>
-                      <td className="px-4 py-3 capitalize text-slate-300">{item.status.replace("_", " ")}</td>
-                      <td className="px-4 py-3 text-slate-400">{new Date(item.submittedAt).toLocaleString()}</td>
+                    <tr key={item.contributionId} className="border-b border-border last:border-0">
+                      <td className="px-4 py-3 text-ink">{item.contributor.displayName}</td>
+                      <td className="px-4 py-3 text-ink-muted">{MODULE_LABEL[item.moduleType]}</td>
+                      <td className="px-4 py-3 capitalize text-ink-muted">{item.status.replace("_", " ")}</td>
+                      <td className="px-4 py-3 text-ink-muted">{new Date(item.submittedAt).toLocaleString()}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -94,9 +94,9 @@ export default function AdminDashboardPage() {
 
 function Card({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl bg-slate-800 p-5 text-center">
-      <div className="text-3xl font-bold text-white">{value}</div>
-      <div className="mt-1 text-xs text-slate-400">{label}</div>
+    <div className="rounded-2xl bg-surface p-5 shadow-sm text-center">
+      <div className="text-3xl font-bold text-ink">{value}</div>
+      <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>
   );
 }

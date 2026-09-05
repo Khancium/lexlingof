@@ -176,8 +176,8 @@ export default function AudioUploadPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Upload Audio</h1>
-        <p className="text-sm text-slate-400">Step {step} of 2</p>
+        <h1 className="text-2xl font-bold text-ink">Upload Audio</h1>
+        <p className="text-sm text-ink-muted">Step {step} of 2</p>
       </div>
 
       {step === 1 ? (
@@ -194,8 +194,8 @@ export default function AudioUploadPage() {
               handleFileSelected(e.dataTransfer.files[0]);
             }}
             onClick={() => fileInputRef.current?.click()}
-            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed py-12 text-center transition ${
-              isDragging ? "border-blue-500 bg-slate-800" : "border-slate-700"
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed py-12 text-center transition ${
+              isDragging ? "border-brand bg-brand-light" : "border-border"
             }`}
           >
             <input
@@ -205,22 +205,22 @@ export default function AudioUploadPage() {
               className="hidden"
               onChange={(e) => handleFileSelected(e.target.files?.[0])}
             />
-            <p className="text-white">{file ? file.name : "Drag and drop an audio file, or click to select"}</p>
-            {file ? <p className="mt-1 text-sm text-slate-400">{(file.size / (1024 * 1024)).toFixed(2)} MB</p> : null}
+            <p className="text-ink">{file ? file.name : "Drag and drop an audio file, or click to select"}</p>
+            {file ? <p className="mt-1 text-sm text-ink-muted">{(file.size / (1024 * 1024)).toFixed(2)} MB</p> : null}
           </div>
-          <p className="text-center text-xs text-slate-500">Maximum file size: 100MB</p>
+          <p className="text-center text-xs text-ink-muted">Maximum file size: 100MB</p>
 
           <input
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Title *"
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
 
           <select
             value={recordingType}
             onChange={(e) => setRecordingType(e.target.value as (typeof RECORDING_TYPES)[number])}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white ring-1 ring-slate-700"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
           >
             {RECORDING_TYPES.map((t) => (
               <option key={t} value={t} className="capitalize">
@@ -232,7 +232,7 @@ export default function AudioUploadPage() {
           <select
             value={languageId ?? ""}
             onChange={(e) => setLanguageId(e.target.value)}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white ring-1 ring-slate-700"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
           >
             <option value="" disabled>
               Select a language
@@ -249,68 +249,68 @@ export default function AudioUploadPage() {
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description"
             rows={3}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <input
             value={location}
             onChange={(e) => setLocation(e.target.value)}
             placeholder="Location"
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <input
             type="date"
             value={recordedAt}
             onChange={(e) => setRecordedAt(e.target.value)}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white ring-1 ring-slate-700"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
           />
 
           {!defaultLanguageId && !languageLoading && !languageId ? (
-            <p className="text-center text-red-400">Set your language in your profile before contributing.</p>
+            <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
           ) : null}
-          {step1Error ? <p className="text-center text-red-400">{step1Error}</p> : null}
+          {step1Error ? <p className="text-center text-red-600">{step1Error}</p> : null}
 
           <button
             onClick={handleUploadAndContinue}
             disabled={!canUpload}
-            className="w-full rounded-lg bg-purple-600 py-3 font-semibold text-white transition hover:bg-purple-500 disabled:opacity-50"
+            className="w-full rounded-full bg-accent py-3 font-semibold text-ink-inverted transition hover:opacity-90 disabled:opacity-50"
           >
             {isUploading ? "Uploading..." : "Upload & Continue"}
           </button>
         </>
       ) : (
         <>
-          <h2 className="text-lg font-bold text-white">Transcription</h2>
+          <h2 className="text-lg font-bold text-ink">Transcription</h2>
           <textarea
             value={nativeText}
             onChange={(e) => setNativeText(e.target.value)}
             placeholder="Native text"
             rows={4}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <textarea
             value={romanization}
             onChange={(e) => setRomanization(e.target.value)}
             placeholder="Romanization"
             rows={2}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <textarea
             value={ipa}
             onChange={(e) => setIpa(e.target.value)}
             placeholder="IPA"
             rows={2}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
 
-          <button onClick={addSegment} className="text-sm font-semibold text-blue-500 hover:underline">
+          <button onClick={addSegment} className="text-sm font-semibold text-brand hover:underline">
             + Add Time Segment
           </button>
 
           {segments.map((segment, index) => (
-            <div key={index} className="space-y-2 rounded-lg bg-slate-800 p-4">
+            <div key={index} className="space-y-2 rounded-xl bg-surface-card p-4">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-semibold text-white">Segment {index + 1}</span>
-                <button onClick={() => removeSegment(index)} className="text-xs text-red-400 hover:underline">
+                <span className="text-sm font-semibold text-ink">Segment {index + 1}</span>
+                <button onClick={() => removeSegment(index)} className="text-xs text-red-600 hover:underline">
                   Remove
                 </button>
               </div>
@@ -319,31 +319,31 @@ export default function AudioUploadPage() {
                   value={segment.startMs}
                   onChange={(e) => updateSegment(index, { startMs: e.target.value })}
                   placeholder="Start (ms)"
-                  className="w-1/2 rounded-lg bg-slate-900 px-3 py-2 text-white placeholder-slate-500 ring-1 ring-slate-700"
+                  className="w-1/2 rounded-lg bg-surface px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
                 />
                 <input
                   value={segment.endMs}
                   onChange={(e) => updateSegment(index, { endMs: e.target.value })}
                   placeholder="End (ms)"
-                  className="w-1/2 rounded-lg bg-slate-900 px-3 py-2 text-white placeholder-slate-500 ring-1 ring-slate-700"
+                  className="w-1/2 rounded-lg bg-surface px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
                 />
               </div>
               <input
                 value={segment.nativeText}
                 onChange={(e) => updateSegment(index, { nativeText: e.target.value })}
                 placeholder="Native text"
-                className="w-full rounded-lg bg-slate-900 px-3 py-2 text-white placeholder-slate-500 ring-1 ring-slate-700"
+                className="w-full rounded-lg bg-surface px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
               />
             </div>
           ))}
 
-          {step2Error ? <p className="text-center text-red-400">{step2Error}</p> : null}
-          {doneMessage ? <p className="text-center text-emerald-400">{doneMessage}</p> : null}
+          {step2Error ? <p className="text-center text-red-600">{step2Error}</p> : null}
+          {doneMessage ? <p className="text-center text-emerald-600">{doneMessage}</p> : null}
 
           <button
             onClick={handleSubmitStep2}
             disabled={isSubmittingStep2}
-            className="w-full rounded-lg bg-purple-600 py-3 font-semibold text-white transition hover:bg-purple-500 disabled:opacity-50"
+            className="w-full rounded-full bg-accent py-3 font-semibold text-ink-inverted transition hover:opacity-90 disabled:opacity-50"
           >
             {isSubmittingStep2 ? "Submitting..." : "Submit"}
           </button>

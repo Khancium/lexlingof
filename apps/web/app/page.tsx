@@ -6,12 +6,12 @@ export const dynamic = "force-dynamic";
 const MODULES = [
   {
     title: "Record Words",
-    color: "border-blue-500",
+    color: "border-brand",
     description: "Record individual words in your language, 3 seconds at a time.",
   },
   {
     title: "Upload Audio",
-    color: "border-purple-500",
+    color: "border-accent",
     description: "Share existing recordings of conversations and stories.",
   },
   {
@@ -38,30 +38,30 @@ export default async function LandingPage() {
   const stats = await getStats();
 
   return (
-    <div className="min-h-screen bg-slate-900 text-white">
-      <header className="border-b border-slate-800 px-6 py-4">
+    <div className="min-h-screen bg-surface-muted text-ink">
+      <header className="border-b border-border bg-surface px-6 py-4">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
-          <span className="text-xl font-bold text-blue-500">Lexlingo</span>
+          <span className="text-xl font-bold text-brand">Lexlingo</span>
           <div className="flex gap-3">
-            <Link href="/login" className="rounded-md px-4 py-2 text-sm font-medium text-slate-300 hover:text-white">
+            <Link href="/login" className="rounded-full px-4 py-2 text-sm font-medium text-ink-muted hover:text-ink">
               Log In
             </Link>
-            <Link href="/register" className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-500">
+            <Link href="/register" className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark">
               Register
             </Link>
           </div>
         </div>
       </header>
 
-      <section className="mx-auto max-w-4xl px-6 py-24 text-center">
-        <h1 className="text-4xl font-extrabold tracking-tight sm:text-6xl">Document Languages Together</h1>
-        <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-400">
+      <section className="mx-auto max-w-4xl px-6 py-24 text-center bg-gradient-to-b from-accent-light to-surface-muted">
+        <h1 className="text-4xl font-extrabold tracking-tight text-ink sm:text-6xl">Document Languages Together</h1>
+        <p className="mx-auto mt-6 max-w-2xl text-lg text-ink-muted">
           Lexlingo is a community platform for recording, translating, and preserving under-documented languages --
           one word, sentence, and story at a time.
         </p>
         <Link
           href="/register"
-          className="mt-10 inline-block rounded-lg bg-blue-600 px-8 py-4 text-lg font-semibold text-white shadow-lg transition hover:bg-blue-500"
+          className="mt-10 inline-block rounded-full bg-brand px-8 py-4 text-lg font-semibold text-ink-inverted shadow-sm transition hover:bg-brand-dark"
         >
           Start Contributing
         </Link>
@@ -69,15 +69,15 @@ export default async function LandingPage() {
 
       <section className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-6 pb-24 sm:grid-cols-2 lg:grid-cols-4">
         {MODULES.map((m) => (
-          <div key={m.title} className={`rounded-xl border-l-4 bg-slate-800 p-6 ${m.color}`}>
-            <h3 className="text-lg font-bold">{m.title}</h3>
-            <p className="mt-2 text-sm text-slate-400">{m.description}</p>
+          <div key={m.title} className={`rounded-2xl border-l-4 bg-surface p-6 shadow-sm ${m.color}`}>
+            <h3 className="text-lg font-bold text-ink">{m.title}</h3>
+            <p className="mt-2 text-sm text-ink-muted">{m.description}</p>
           </div>
         ))}
       </section>
 
       {stats ? (
-        <section className="border-t border-slate-800 bg-slate-950 px-6 py-16">
+        <section className="border-t border-border bg-surface-card px-6 py-16">
           <div className="mx-auto grid max-w-6xl grid-cols-2 gap-8 text-center sm:grid-cols-4">
             <Stat value={stats.totalActiveContributors} label="Active Contributors" />
             <Stat value={stats.totalContributions} label="Contributions" />
@@ -93,8 +93,8 @@ export default async function LandingPage() {
 function Stat({ value, label }: { value: number; label: string }) {
   return (
     <div>
-      <div className="text-4xl font-extrabold text-blue-500">{value.toLocaleString()}</div>
-      <div className="mt-1 text-sm text-slate-400">{label}</div>
+      <div className="text-4xl font-extrabold text-brand">{value.toLocaleString()}</div>
+      <div className="mt-1 text-sm text-ink-muted">{label}</div>
     </div>
   );
 }

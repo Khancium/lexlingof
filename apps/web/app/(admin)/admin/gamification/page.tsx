@@ -22,7 +22,7 @@ export default function GamificationConfigPage() {
   }, [user]);
 
   if (user?.role !== "super_admin") {
-    return <p className="text-red-400">Super-admin access required.</p>;
+    return <p className="text-red-600">Super-admin access required.</p>;
   }
 
   function numericValue(row: GamificationConfigRow): number | null {
@@ -57,18 +57,18 @@ export default function GamificationConfigPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">Gamification Config</h1>
+      <h1 className="text-2xl font-bold text-ink">Gamification Config</h1>
 
-      <div className="rounded-lg border border-yellow-700 bg-yellow-950 p-4 text-sm text-yellow-300">
+      <div className="rounded-xl border border-yellow-300 bg-yellow-50 p-4 text-sm text-yellow-800">
         ⚠ Changing these values affects all future point awards.
       </div>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-slate-800">
+        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-700 text-slate-400">
+            <thead className="border-b border-border text-ink-muted">
               <tr>
                 <th className="px-4 py-3">Key</th>
                 <th className="px-4 py-3">Description</th>
@@ -78,18 +78,18 @@ export default function GamificationConfigPage() {
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.configKey} className="border-b border-slate-700/50 last:border-0">
-                  <td className="px-4 py-3 font-mono text-xs text-white">{row.configKey}</td>
-                  <td className="px-4 py-3 text-slate-400">{row.description}</td>
+                <tr key={row.configKey} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 font-mono text-xs text-ink">{row.configKey}</td>
+                  <td className="px-4 py-3 text-ink-muted">{row.description}</td>
                   <td className="px-4 py-3">
                     {editingKey === row.configKey ? (
                       <input
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        className="w-24 rounded bg-slate-900 px-2 py-1 text-white ring-1 ring-slate-700"
+                        className="w-24 rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       />
                     ) : (
-                      <span className="text-white">{numericValue(row) ?? JSON.stringify(row.configValue)}</span>
+                      <span className="text-ink">{numericValue(row) ?? JSON.stringify(row.configValue)}</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -98,19 +98,19 @@ export default function GamificationConfigPage() {
                         <button
                           onClick={() => saveEdit(row.configKey)}
                           disabled={isSaving}
-                          className="rounded bg-blue-600 px-3 py-1 text-xs font-semibold text-white hover:bg-blue-500"
+                          className="rounded-full bg-brand px-3 py-1 text-xs font-semibold text-ink-inverted hover:bg-brand-dark"
                         >
                           Save
                         </button>
                         <button
                           onClick={() => setEditingKey(null)}
-                          className="rounded bg-slate-700 px-3 py-1 text-xs font-semibold text-white hover:bg-slate-600"
+                          className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
                         >
                           Cancel
                         </button>
                       </div>
                     ) : (
-                      <button onClick={() => startEdit(row)} className="text-xs font-semibold text-blue-400 hover:underline">
+                      <button onClick={() => startEdit(row)} className="text-xs font-semibold text-brand hover:underline">
                         Edit
                       </button>
                     )}
@@ -121,7 +121,7 @@ export default function GamificationConfigPage() {
           </table>
         </div>
       )}
-      {error ? <p className="text-sm text-red-400">{error}</p> : null}
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
     </div>
   );
 }

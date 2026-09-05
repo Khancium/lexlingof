@@ -191,7 +191,7 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   }
 
   const micMeter = (
-    <div className="h-2 w-56 overflow-hidden rounded-full bg-slate-700">
+    <div className="h-2 w-56 overflow-hidden rounded-full bg-surface-card">
       <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${Math.round(micLevel * 100)}%` }} />
     </div>
   );
@@ -199,8 +199,8 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   if (status === "requesting") {
     return (
       <div className="flex flex-col items-center gap-3">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-600 border-t-blue-500" />
-        <p className="text-sm text-slate-400">Requesting microphone access...</p>
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-brand" />
+        <p className="text-sm text-ink-muted">Requesting microphone access...</p>
       </div>
     );
   }
@@ -208,8 +208,8 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   if (status === "error") {
     return (
       <div className="flex flex-col items-center gap-3">
-        <p className="text-sm text-red-400">{errorMessage}</p>
-        <button onClick={requestMic} className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500">
+        <p className="text-sm text-red-600">{errorMessage}</p>
+        <button onClick={requestMic} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
           Try Again
         </button>
       </div>
@@ -221,12 +221,12 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
       <div className="flex flex-col items-center gap-3">
         <button
           onClick={startRecording}
-          className="flex h-20 w-20 items-center justify-center rounded-full bg-red-600 text-white shadow-lg transition hover:bg-red-500"
+          className="flex h-20 w-20 items-center justify-center rounded-full bg-brand text-ink-inverted shadow-sm transition hover:bg-brand-dark"
           aria-label="Start recording"
         >
           <MicIcon />
         </button>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-ink-muted">
           {maxDurationMs ? `Tap to record (max ${(maxDurationMs / 1000).toFixed(0)} seconds)` : "Tap to start recording"}
         </p>
         {micMeter}
@@ -239,12 +239,12 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     const progressPct = Math.min(100, (durationMs / maxDurationMs) * 100);
     return (
       <div className="flex flex-col items-center gap-4">
-        <div className="text-5xl font-bold tabular-nums text-white">{formatRemaining(remainingMs)}</div>
-        <div className="h-3 w-64 overflow-hidden rounded-full bg-slate-700">
-          <div className="h-full bg-red-500 transition-[width]" style={{ width: `${progressPct}%` }} />
+        <div className="text-5xl font-bold tabular-nums text-ink">{formatRemaining(remainingMs)}</div>
+        <div className="h-3 w-64 overflow-hidden rounded-full bg-surface-card">
+          <div className="h-full bg-brand transition-[width]" style={{ width: `${progressPct}%` }} />
         </div>
         {micMeter}
-        <p className="text-sm font-semibold text-red-400">Recording... auto-stops at {(maxDurationMs / 1000).toFixed(0)} seconds</p>
+        <p className="text-sm font-semibold text-brand">Recording... auto-stops at {(maxDurationMs / 1000).toFixed(0)} seconds</p>
       </div>
     );
   }
@@ -252,13 +252,13 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   if (status === "recording" && !maxDurationMs) {
     return (
       <div className="flex flex-col items-center gap-4">
-        <div className="text-4xl font-bold tabular-nums text-white">{formatElapsed(durationMs)}</div>
+        <div className="text-4xl font-bold tabular-nums text-ink">{formatElapsed(durationMs)}</div>
         {micMeter}
         <div className="flex gap-3">
-          <button onClick={pauseRecording} className="rounded-lg bg-slate-700 px-5 py-3 font-semibold text-white hover:bg-slate-600">
+          <button onClick={pauseRecording} className="rounded-full bg-surface-card px-5 py-3 font-semibold text-ink hover:bg-border">
             Pause
           </button>
-          <button onClick={stopRecording} className="rounded-lg bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-500">
+          <button onClick={stopRecording} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
             Stop
           </button>
         </div>
@@ -269,13 +269,13 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   if (status === "paused") {
     return (
       <div className="flex flex-col items-center gap-4">
-        <div className="text-4xl font-bold tabular-nums text-white">{formatElapsed(durationMs)}</div>
+        <div className="text-4xl font-bold tabular-nums text-ink">{formatElapsed(durationMs)}</div>
         {micMeter}
         <div className="flex gap-3">
-          <button onClick={resumeRecording} className="rounded-lg bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-500">
+          <button onClick={resumeRecording} className="rounded-full bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-500">
             Resume
           </button>
-          <button onClick={stopRecording} className="rounded-lg bg-red-600 px-5 py-3 font-semibold text-white hover:bg-red-500">
+          <button onClick={stopRecording} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
             Stop
           </button>
         </div>
@@ -294,14 +294,14 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         onEnded={() => setIsPlaying(false)}
         className="hidden"
       />
-      <p className="text-lg font-semibold text-emerald-400">
+      <p className="text-lg font-semibold text-emerald-600">
         Recording ready -- {(durationMs / 1000).toFixed(1)}s
       </p>
       <div className="flex gap-3">
-        <button onClick={togglePlayback} className="rounded-lg bg-blue-600 px-5 py-3 font-semibold text-white hover:bg-blue-500">
+        <button onClick={togglePlayback} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
           {isPlaying ? "Pause" : "Play"}
         </button>
-        <button onClick={retake} className="rounded-lg bg-slate-700 px-5 py-3 font-semibold text-white hover:bg-slate-600">
+        <button onClick={retake} className="rounded-full bg-surface-card px-5 py-3 font-semibold text-ink hover:bg-border">
           Retake
         </button>
       </div>

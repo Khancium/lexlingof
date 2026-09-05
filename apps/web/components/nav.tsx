@@ -32,9 +32,9 @@ export default function Nav() {
   const links = canReview(user?.level) ? [...LINKS, { href: "/review", label: "Review" }] : LINKS;
 
   return (
-    <nav className="border-b border-slate-800 bg-slate-900">
+    <nav className="border-b border-border bg-surface">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-        <Link href="/dashboard" className="text-lg font-bold text-blue-500">
+        <Link href="/dashboard" className="text-lg font-bold text-brand">
           Lexlingo
         </Link>
 
@@ -45,8 +45,8 @@ export default function Nav() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`rounded-md px-3 py-2 text-sm font-medium transition ${
-                  active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                className={`rounded-full px-3 py-2 text-sm font-medium transition ${
+                  active ? "bg-brand text-ink-inverted" : "text-ink-muted hover:bg-surface-card hover:text-ink"
                 }`}
               >
                 {link.label}
@@ -56,10 +56,10 @@ export default function Nav() {
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="hidden text-sm text-slate-400 sm:inline">{user?.displayName}</span>
+          <span className="hidden text-sm text-ink-muted sm:inline">{user?.displayName}</span>
           <button
             onClick={handleLogout}
-            className="rounded-md bg-slate-800 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700"
+            className="rounded-full bg-surface-card px-3 py-2 text-sm font-medium text-ink hover:bg-border"
           >
             Sign Out
           </button>

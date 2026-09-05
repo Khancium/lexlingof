@@ -1,1 +1,29 @@
 @import "tailwindcss";
+
+/*
+ * Lexlingo light theme -- crimson-red primary + light-violet accent on a
+ * white/near-white surface, replacing the earlier dark slate/blue theme.
+ * Semantic tokens so components can reference `bg-brand`, `text-ink`, etc.
+ * instead of raw Tailwind color/shade pairs.
+ */
+@theme {
+  --color-brand: #ef1e4b;
+  --color-brand-dark: #c8123a;
+  --color-brand-light: #fde2e8;
+  --color-accent: #a78bfa;
+  --color-accent-light: #ede9fe;
+
+  --color-surface: #ffffff;
+  --color-surface-muted: #f7f7f8;
+  --color-surface-card: #f3f4f6;
+  --color-border: #e5e7eb;
+
+  --color-ink: #111827;
+  --color-ink-muted: #6b7280;
+  --color-ink-inverted: #ffffff;
+}
+
+body {
+  background-color: var(--color-surface-muted);
+  color: var(--color-ink);
+}

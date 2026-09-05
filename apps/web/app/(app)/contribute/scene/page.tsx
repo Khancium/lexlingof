@@ -76,15 +76,15 @@ export default function ScenePage() {
   const canSubmit = !!recording && !!languageId && !isSubmitting;
 
   if (loadingScene) {
-    return <p className="text-slate-400">Loading...</p>;
+    return <p className="text-ink-muted">Loading...</p>;
   }
   if (sceneError || !scene) {
-    return <p className="text-red-400">{sceneError ?? "No scenes available"}</p>;
+    return <p className="text-red-600">{sceneError ?? "No scenes available"}</p>;
   }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="relative overflow-hidden rounded-xl bg-slate-800">
+      <div className="relative overflow-hidden rounded-2xl bg-surface shadow-sm">
         {scene.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={scene.imageUrl} alt={scene.title} className="h-80 w-full object-cover" />
@@ -101,37 +101,37 @@ export default function ScenePage() {
         </span>
       </div>
 
-      <p className="text-center text-slate-300">
+      <p className="text-center text-ink-muted">
         Describe what you see in this image in your own language. Tell us what is happening. Take as much time as you
         need.
       </p>
 
-      <div className="flex justify-center rounded-xl bg-slate-800 py-8">
+      <div className="flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
         <AudioRecorder
           onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
           onError={(message) => setSubmitError(message)}
         />
       </div>
 
-      <p className="text-center text-sm text-slate-400">
+      <p className="text-center text-sm text-ink-muted">
         Base: 20 pts. Bonuses: longer description (60s+), today&apos;s daily scene, expert difficulty.
       </p>
 
       {!languageId && !languageLoading ? (
-        <p className="text-center text-red-400">Set your language in your profile before contributing.</p>
+        <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
       ) : null}
-      {submitError ? <p className="text-center text-red-400">{submitError}</p> : null}
-      {successMessage ? <p className="text-center text-emerald-400">{successMessage}</p> : null}
+      {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+      {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
       <button
         onClick={handleSubmit}
         disabled={!canSubmit}
-        className="w-full rounded-lg bg-amber-600 py-3 font-semibold text-white transition hover:bg-amber-500 disabled:opacity-50"
+        className="w-full rounded-full bg-amber-600 py-3 font-semibold text-white transition hover:bg-amber-500 disabled:opacity-50"
       >
         {isSubmitting ? "Submitting..." : "Submit"}
       </button>
 
-      <button onClick={() => loadScene(scene.id)} className="w-full text-center text-sm text-slate-400 hover:text-white">
+      <button onClick={() => loadScene(scene.id)} className="w-full text-center text-sm text-ink-muted hover:text-ink">
         Different scene
       </button>
     </div>

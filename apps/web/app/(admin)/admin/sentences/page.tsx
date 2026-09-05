@@ -53,21 +53,21 @@ export default function AdminSentencesPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-2xl font-bold text-white">Sentences</h1>
+      <h1 className="text-2xl font-bold text-ink">Sentences</h1>
 
-      <div className="space-y-3 rounded-xl bg-slate-800 p-5">
-        <h2 className="text-lg font-bold text-white">Add New Sentence</h2>
+      <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+        <h2 className="text-lg font-bold text-ink">Add New Sentence</h2>
         <div className="flex flex-wrap gap-3">
           <input
             value={englishText}
             onChange={(e) => setEnglishText(e.target.value)}
             placeholder="English sentence"
-            className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-white placeholder-slate-500 ring-1 ring-slate-700"
+            className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
           />
           <select
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-white ring-1 ring-slate-700"
+            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
           >
             <option value="">No category</option>
             {categories.map((c) => (
@@ -79,7 +79,7 @@ export default function AdminSentencesPage() {
           <select
             value={difficulty}
             onChange={(e) => setDifficulty(Number(e.target.value))}
-            className="rounded-lg bg-slate-900 px-3 py-2 text-white ring-1 ring-slate-700"
+            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
           >
             {[1, 2, 3, 4, 5].map((d) => (
               <option key={d} value={d}>
@@ -90,20 +90,20 @@ export default function AdminSentencesPage() {
           <button
             onClick={handleCreate}
             disabled={isCreating}
-            className="rounded-lg bg-blue-600 px-5 py-2 font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+            className="rounded-full bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
           >
             {isCreating ? "Adding..." : "Add"}
           </button>
         </div>
-        {createError ? <p className="text-sm text-red-400">{createError}</p> : null}
+        {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-slate-800">
+        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-700 text-slate-400">
+            <thead className="border-b border-border text-ink-muted">
               <tr>
                 <th className="px-4 py-3">English Text</th>
                 <th className="px-4 py-3">Category</th>
@@ -113,11 +113,11 @@ export default function AdminSentencesPage() {
             </thead>
             <tbody>
               {sentences.map((sentence) => (
-                <tr key={sentence.id} className="border-b border-slate-700/50 last:border-0">
-                  <td className="px-4 py-3 text-white">{sentence.englishText}</td>
-                  <td className="px-4 py-3 text-slate-300">{categoryName(sentence.categoryId)}</td>
-                  <td className="px-4 py-3 text-slate-400">{sentence.difficulty}</td>
-                  <td className="px-4 py-3 text-slate-400">{sentence.usageCount}</td>
+                <tr key={sentence.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 text-ink">{sentence.englishText}</td>
+                  <td className="px-4 py-3 text-ink-muted">{categoryName(sentence.categoryId)}</td>
+                  <td className="px-4 py-3 text-ink-muted">{sentence.difficulty}</td>
+                  <td className="px-4 py-3 text-ink-muted">{sentence.usageCount}</td>
                 </tr>
               ))}
             </tbody>

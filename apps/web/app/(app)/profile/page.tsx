@@ -59,16 +59,16 @@ export default function ProfilePage() {
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">{user.displayName}</h1>
+        <h1 className="text-2xl font-bold text-ink">{user.displayName}</h1>
         <span className={`mt-2 inline-block rounded-full px-4 py-1 text-sm font-extrabold text-white ${LEVEL_COLOR[level]}`}>
           {level}
         </span>
         {nextThreshold ? (
-          <p className="mt-2 text-sm text-slate-400">
+          <p className="mt-2 text-sm text-ink-muted">
             {verified} / {nextThreshold} verified contributions to reach {nextLevel}
           </p>
         ) : (
-          <p className="mt-2 text-sm text-slate-400">Highest level reached</p>
+          <p className="mt-2 text-sm text-ink-muted">Highest level reached</p>
         )}
       </div>
 
@@ -80,15 +80,15 @@ export default function ProfilePage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-lg font-bold text-white">My Badges</h2>
+        <h2 className="mb-3 text-lg font-bold text-ink">My Badges</h2>
         {badges.length === 0 ? (
-          <p className="text-sm text-slate-400">No badges earned yet.</p>
+          <p className="text-sm text-ink-muted">No badges earned yet.</p>
         ) : (
           <div className="grid grid-cols-3 gap-4 sm:grid-cols-5">
             {badges.map((badge) => (
-              <div key={badge.id} className="flex flex-col items-center gap-2 rounded-xl bg-slate-800 p-4 text-center">
+              <div key={badge.id} className="flex flex-col items-center gap-2 rounded-2xl bg-surface p-4 shadow-sm text-center">
                 <span className="text-3xl">{badge.icon}</span>
-                <span className="text-xs font-medium text-white">{badge.name}</span>
+                <span className="text-xs font-medium text-ink">{badge.name}</span>
               </div>
             ))}
           </div>
@@ -96,41 +96,41 @@ export default function ProfilePage() {
       </div>
 
       <div>
-        <h2 className="mb-3 text-lg font-bold text-white">Edit Profile</h2>
+        <h2 className="mb-3 text-lg font-bold text-ink">Edit Profile</h2>
         {isEditing ? (
-          <div className="space-y-3 rounded-xl bg-slate-800 p-5">
+          <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
             <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="Display name"
-              className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
             />
             <textarea
               value={biography}
               onChange={(e) => setBiography(e.target.value)}
               placeholder="Biography"
               rows={4}
-              className="w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+              className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
             />
-            {saveError ? <p className="text-sm text-red-400">{saveError}</p> : null}
+            {saveError ? <p className="text-sm text-red-600">{saveError}</p> : null}
             <div className="flex gap-3">
               <button
                 onClick={() => setIsEditing(false)}
-                className="flex-1 rounded-lg bg-slate-700 py-2.5 font-semibold text-white hover:bg-slate-600"
+                className="flex-1 rounded-full bg-surface-card py-2.5 font-semibold text-ink hover:bg-border"
               >
                 Cancel
               </button>
               <button
                 onClick={saveProfile}
                 disabled={isSaving}
-                className="flex-1 rounded-lg bg-blue-600 py-2.5 font-semibold text-white hover:bg-blue-500 disabled:opacity-50"
+                className="flex-1 rounded-full bg-brand py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
               >
                 {isSaving ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
         ) : (
-          <button onClick={startEditing} className="rounded-lg bg-slate-800 px-5 py-2.5 font-semibold text-white hover:bg-slate-700">
+          <button onClick={startEditing} className="rounded-full bg-surface-card px-5 py-2.5 font-semibold text-ink hover:bg-border">
             Edit Profile
           </button>
         )}
@@ -141,9 +141,9 @@ export default function ProfilePage() {
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl bg-slate-800 p-5 text-center">
-      <div className="text-2xl font-bold text-white">{value}</div>
-      <div className="mt-1 text-xs text-slate-400">{label}</div>
+    <div className="rounded-2xl bg-surface p-5 shadow-sm text-center">
+      <div className="text-2xl font-bold text-ink">{value}</div>
+      <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>
   );
 }

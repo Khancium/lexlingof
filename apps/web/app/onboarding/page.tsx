@@ -26,8 +26,8 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>;
 
 const inputClass =
-  "w-full rounded-lg bg-slate-900 px-4 py-3 text-white placeholder-slate-500 outline-none ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500";
-const labelClass = "mb-1 block text-sm font-medium text-slate-300";
+  "w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 outline-none ring-1 ring-border focus:ring-2 focus:ring-brand";
+const labelClass = "mb-1 block text-sm font-medium text-ink";
 
 export default function OnboardingPage() {
   const user = useAuthStore((state) => state.user);
@@ -126,10 +126,10 @@ export default function OnboardingPage() {
   if (!user) return null;
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-900 px-4 py-12">
-      <div className="w-full max-w-lg rounded-xl bg-slate-800 p-8 shadow-xl">
-        <h1 className="mb-1 text-2xl font-bold text-white">Tell us about yourself</h1>
-        <p className="mb-6 text-sm text-slate-400">
+    <div className="flex min-h-screen items-center justify-center bg-surface-muted px-4 py-12">
+      <div className="w-full max-w-lg rounded-3xl bg-surface p-8 shadow-sm border border-border">
+        <h1 className="mb-1 text-2xl font-bold text-ink">Tell us about yourself</h1>
+        <p className="mb-6 text-sm text-ink-muted">
           This helps us understand who&apos;s contributing to the corpus.
         </p>
 
@@ -137,7 +137,7 @@ export default function OnboardingPage() {
           <div>
             <label className={labelClass}>Full Name</label>
             <input {...register("fullName")} className={inputClass} placeholder="Full name" />
-            {errors.fullName && <p className="mt-1 text-xs text-red-400">{errors.fullName.message}</p>}
+            {errors.fullName && <p className="mt-1 text-xs text-red-600">{errors.fullName.message}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -151,7 +151,7 @@ export default function OnboardingPage() {
                 className={inputClass}
                 placeholder="Age"
               />
-              {errors.age && <p className="mt-1 text-xs text-red-400">{errors.age.message}</p>}
+              {errors.age && <p className="mt-1 text-xs text-red-600">{errors.age.message}</p>}
             </div>
             <div>
               <label className={labelClass}>Gender</label>
@@ -165,7 +165,7 @@ export default function OnboardingPage() {
                   </option>
                 ))}
               </select>
-              {errors.gender && <p className="mt-1 text-xs text-red-400">{errors.gender.message}</p>}
+              {errors.gender && <p className="mt-1 text-xs text-red-600">{errors.gender.message}</p>}
             </div>
           </div>
 
@@ -181,7 +181,7 @@ export default function OnboardingPage() {
                 </option>
               ))}
             </select>
-            {errors.motherTongue && <p className="mt-1 text-xs text-red-400">{errors.motherTongue.message}</p>}
+            {errors.motherTongue && <p className="mt-1 text-xs text-red-600">{errors.motherTongue.message}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -194,7 +194,7 @@ export default function OnboardingPage() {
                   <Combobox id="tribe" value={field.value ?? ""} onChange={field.onChange} options={tribes} placeholder="Tribe" />
                 )}
               />
-              {errors.tribe && <p className="mt-1 text-xs text-red-400">{errors.tribe.message}</p>}
+              {errors.tribe && <p className="mt-1 text-xs text-red-600">{errors.tribe.message}</p>}
             </div>
             <div>
               <label className={labelClass}>Sub-tribe (optional)</label>
@@ -228,7 +228,7 @@ export default function OnboardingPage() {
                   </option>
                 ))}
               </select>
-              {errors.countryCode && <p className="mt-1 text-xs text-red-400">{errors.countryCode.message}</p>}
+              {errors.countryCode && <p className="mt-1 text-xs text-red-600">{errors.countryCode.message}</p>}
             </div>
             <div>
               <label className={labelClass}>City</label>
@@ -242,7 +242,7 @@ export default function OnboardingPage() {
                   </option>
                 ))}
               </select>
-              {errors.city && <p className="mt-1 text-xs text-red-400">{errors.city.message}</p>}
+              {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
             </div>
           </div>
 
@@ -262,7 +262,7 @@ export default function OnboardingPage() {
                   />
                 )}
               />
-              {errors.village && <p className="mt-1 text-xs text-red-400">{errors.village.message}</p>}
+              {errors.village && <p className="mt-1 text-xs text-red-600">{errors.village.message}</p>}
             </div>
             <div>
               <label className={labelClass}>Quarter (optional)</label>
@@ -288,12 +288,12 @@ export default function OnboardingPage() {
             <input {...register("dialect")} className={inputClass} placeholder="Dialect" />
           </div>
 
-          {serverError && <p className="text-sm text-red-400">{serverError}</p>}
+          {serverError && <p className="text-sm text-red-600">{serverError}</p>}
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-lg bg-blue-600 py-3 font-semibold text-white transition hover:bg-blue-500 disabled:opacity-50"
+            className="w-full rounded-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
           >
             {isSubmitting ? "Saving..." : "Continue"}
           </button>

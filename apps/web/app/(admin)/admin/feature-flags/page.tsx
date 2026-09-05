@@ -19,7 +19,7 @@ export default function FeatureFlagsPage() {
   }, [user]);
 
   if (user?.role !== "super_admin") {
-    return <p className="text-red-400">Super-admin access required.</p>;
+    return <p className="text-red-600">Super-admin access required.</p>;
   }
 
   async function toggle(flag: FeatureFlag) {
@@ -34,24 +34,24 @@ export default function FeatureFlagsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">Feature Flags</h1>
+      <h1 className="text-2xl font-bold text-ink">Feature Flags</h1>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : flags.length === 0 ? (
-        <p className="text-slate-400">No feature flags configured.</p>
+        <p className="text-ink-muted">No feature flags configured.</p>
       ) : (
         <div className="space-y-3">
           {flags.map((flag) => (
-            <div key={flag.flagKey} className="flex items-center justify-between rounded-xl bg-slate-800 p-4">
+            <div key={flag.flagKey} className="flex items-center justify-between rounded-2xl bg-surface p-4 shadow-sm">
               <div>
-                <p className="font-mono text-sm text-white">{flag.flagKey}</p>
-                <p className="text-xs text-slate-400">{flag.description}</p>
+                <p className="font-mono text-sm text-ink">{flag.flagKey}</p>
+                <p className="text-xs text-ink-muted">{flag.description}</p>
               </div>
               <button
                 onClick={() => toggle(flag)}
                 disabled={togglingKey === flag.flagKey}
-                className={`relative h-7 w-12 rounded-full transition ${flag.isEnabled ? "bg-emerald-600" : "bg-slate-600"}`}
+                className={`relative h-7 w-12 rounded-full transition ${flag.isEnabled ? "bg-emerald-600" : "bg-gray-300"}`}
                 aria-label={`Toggle ${flag.flagKey}`}
               >
                 <span

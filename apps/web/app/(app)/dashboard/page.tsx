@@ -23,8 +23,8 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 const QUICK_ACTIONS = [
-  { href: "/contribute/concept", title: "Record a Word", color: "border-blue-500" },
-  { href: "/contribute/audio", title: "Upload Audio", color: "border-purple-500" },
+  { href: "/contribute/concept", title: "Record a Word", color: "border-brand" },
+  { href: "/contribute/audio", title: "Upload Audio", color: "border-accent" },
   { href: "/contribute/translate", title: "Translate", color: "border-emerald-500" },
   { href: "/contribute/scene", title: "Describe a Scene", color: "border-amber-500" },
 ];
@@ -51,9 +51,9 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-3xl font-bold text-white">Welcome back, {user?.displayName}</h1>
+      <h1 className="text-3xl font-bold text-ink">Welcome back, {user?.displayName}</h1>
 
-      <div className={`rounded-xl p-6 text-white ${LEVEL_COLOR[level]}`}>
+      <div className={`rounded-2xl p-6 text-white shadow-sm ${LEVEL_COLOR[level]}`}>
         <div className="flex items-center justify-between">
           <div>
             <div className="text-2xl font-extrabold">{level}</div>
@@ -82,13 +82,13 @@ export default function DashboardPage() {
       </div>
 
       <div>
-        <h2 className="mb-4 text-xl font-bold text-white">Contribute</h2>
+        <h2 className="mb-4 text-xl font-bold text-ink">Contribute</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {QUICK_ACTIONS.map((action) => (
             <Link
               key={action.href}
               href={action.href}
-              className={`rounded-xl border-l-4 bg-slate-800 p-6 font-semibold text-white transition hover:bg-slate-700 ${action.color}`}
+              className={`rounded-2xl border-l-4 bg-surface p-6 font-semibold text-ink shadow-sm transition hover:bg-surface-card ${action.color}`}
             >
               {action.title}
             </Link>
@@ -97,23 +97,23 @@ export default function DashboardPage() {
       </div>
 
       <div>
-        <h2 className="mb-4 text-xl font-bold text-white">Recent Contributions</h2>
+        <h2 className="mb-4 text-xl font-bold text-ink">Recent Contributions</h2>
         {recent.length === 0 ? (
-          <p className="text-sm text-slate-400">No contributions yet -- get started above.</p>
+          <p className="text-sm text-ink-muted">No contributions yet -- get started above.</p>
         ) : (
           <div className="space-y-2">
             {recent.map((item) => (
-              <div key={item.id} className="flex items-center justify-between rounded-lg bg-slate-800 px-4 py-3">
+              <div key={item.id} className="flex items-center justify-between rounded-xl bg-surface p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <span>{MODULE_ICON[item.moduleType]}</span>
                   <span
-                    className={`rounded px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-600"}`}
+                    className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-600"}`}
                   >
                     {item.status.replace("_", " ")}
                   </span>
-                  <span className="text-sm text-slate-400">{new Date(item.submittedAt).toLocaleDateString()}</span>
+                  <span className="text-sm text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</span>
                 </div>
-                <span className="font-semibold text-emerald-400">+{item.totalPoints ?? 0}</span>
+                <span className="font-semibold text-emerald-600">+{item.totalPoints ?? 0}</span>
               </div>
             ))}
           </div>
@@ -125,9 +125,9 @@ export default function DashboardPage() {
 
 function StatCard({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl bg-slate-800 p-5 text-center">
-      <div className="text-2xl font-bold text-white">{value}</div>
-      <div className="mt-1 text-xs text-slate-400">{label}</div>
+    <div className="rounded-2xl bg-surface-card p-5 text-center shadow-sm">
+      <div className="text-2xl font-bold text-ink">{value}</div>
+      <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>
   );
 }

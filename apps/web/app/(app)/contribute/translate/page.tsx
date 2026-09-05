@@ -97,13 +97,13 @@ export default function TranslatePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-white">Translate a Sentence</h1>
+      <h1 className="text-2xl font-bold text-ink">Translate a Sentence</h1>
 
       {languages.length > 1 ? (
         <select
           value={languageId ?? ""}
           onChange={(e) => setLanguageId(e.target.value)}
-          className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white ring-1 ring-slate-700"
+          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
         >
           {languages.map((l) => (
             <option key={l.id} value={l.id}>
@@ -114,18 +114,18 @@ export default function TranslatePage() {
       ) : null}
 
       {loadingSentence ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : sentenceError || !sentence ? (
-        <p className="text-red-400">{sentenceError ?? "No sentences available"}</p>
+        <p className="text-red-600">{sentenceError ?? "No sentences available"}</p>
       ) : (
         <>
-          <div className="rounded-xl bg-slate-800 p-8">
+          <div className="rounded-2xl bg-surface p-8 shadow-sm">
             {sentence.category ? (
-              <span className="mb-3 inline-block rounded bg-slate-700 px-2 py-1 text-xs font-semibold text-white">
+              <span className="mb-3 inline-block rounded-full bg-surface-card px-2 py-1 text-xs font-semibold text-ink">
                 {sentence.category.name}
               </span>
             ) : null}
-            <p className="text-2xl font-bold text-white">{sentence.englishText}</p>
+            <p className="text-2xl font-bold text-ink">{sentence.englishText}</p>
           </div>
 
           <textarea
@@ -133,51 +133,51 @@ export default function TranslatePage() {
             onChange={(e) => setTranslation(e.target.value)}
             placeholder="Translation *"
             rows={3}
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <input
             value={romanization}
             onChange={(e) => setRomanization(e.target.value)}
             placeholder="Romanization"
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <input
             value={ipa}
             onChange={(e) => setIpa(e.target.value)}
             placeholder="IPA"
-            className="w-full rounded-lg bg-slate-800 px-4 py-3 text-white placeholder-slate-500 ring-1 ring-slate-700 focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
 
-          <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-800 py-8">
+          <div className="flex flex-col items-center gap-2 rounded-2xl bg-surface py-8 shadow-sm">
             <AudioRecorder
               maxDurationMs={MAX_DURATION_MS}
               onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
               onError={(message) => setSubmitError(message)}
             />
-            <p className="text-xs text-slate-500">Optional -- record yourself reading your translation (up to 60s)</p>
+            <p className="text-xs text-ink-muted">Optional -- record yourself reading your translation (up to 60s)</p>
           </div>
 
-          <p className="text-center text-sm text-slate-400">
+          <p className="text-center text-sm text-ink-muted">
             Base points, plus bonuses for romanization, IPA, and an audio recording.
           </p>
 
           {!defaultLanguageId && !languageLoading ? (
-            <p className="text-center text-red-400">Set your language in your profile before contributing.</p>
+            <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
           ) : null}
-          {submitError ? <p className="text-center text-red-400">{submitError}</p> : null}
-          {successMessage ? <p className="text-center text-emerald-400">{successMessage}</p> : null}
+          {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+          {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
           <div className="flex gap-3">
             <button
               onClick={() => languageId && loadSentence(languageId)}
-              className="flex-1 rounded-lg bg-slate-700 py-3 font-semibold text-white transition hover:bg-slate-600"
+              className="flex-1 rounded-full bg-surface-card py-3 font-semibold text-ink transition hover:bg-border"
             >
               Skip
             </button>
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className="flex-[2] rounded-lg bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              className="flex-[2] rounded-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
             >
               {isSubmitting ? "Submitting..." : "Submit"}
             </button>

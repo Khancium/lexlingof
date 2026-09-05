@@ -42,7 +42,7 @@ export default function ContributionsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-white">My Contributions</h1>
+      <h1 className="text-2xl font-bold text-ink">My Contributions</h1>
 
       <div className="flex gap-2">
         {FILTERS.map((f) => (
@@ -50,7 +50,7 @@ export default function ContributionsPage() {
             key={f.label}
             onClick={() => setFilter(f.value)}
             className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
-              filter === f.value ? "bg-blue-600 text-white" : "bg-slate-800 text-slate-300 hover:bg-slate-700"
+              filter === f.value ? "bg-brand text-ink-inverted" : "bg-surface-card text-ink-muted hover:bg-border"
             }`}
           >
             {f.label}
@@ -59,13 +59,13 @@ export default function ContributionsPage() {
       </div>
 
       {loading ? (
-        <p className="text-slate-400">Loading...</p>
+        <p className="text-ink-muted">Loading...</p>
       ) : items.length === 0 ? (
-        <p className="text-slate-400">No contributions yet.</p>
+        <p className="text-ink-muted">No contributions yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-xl bg-slate-800">
+        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-700 text-slate-400">
+            <thead className="border-b border-border text-ink-muted">
               <tr>
                 <th className="px-4 py-3">Module</th>
                 <th className="px-4 py-3">Status</th>
@@ -75,17 +75,17 @@ export default function ContributionsPage() {
             </thead>
             <tbody>
               {items.map((item) => (
-                <tr key={item.id} className="border-b border-slate-700/50 last:border-0">
-                  <td className="px-4 py-3 text-white">{MODULE_LABEL[item.moduleType]}</td>
+                <tr key={item.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3 text-ink">{MODULE_LABEL[item.moduleType]}</td>
                   <td className="px-4 py-3">
                     <span
-                      className={`rounded px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-600"}`}
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-500"}`}
                     >
                       {item.status.replace("_", " ")}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-400">{new Date(item.submittedAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-3 font-semibold text-emerald-400">
+                  <td className="px-4 py-3 text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</td>
+                  <td className="px-4 py-3 font-semibold text-emerald-600">
                     {item.totalPoints != null ? `+${item.totalPoints}` : "--"}
                   </td>
                 </tr>
