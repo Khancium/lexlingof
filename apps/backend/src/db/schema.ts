@@ -474,7 +474,7 @@ export const wordRecordings = pgTable(
     audioFileId: uuid("audio_file_id")
       .notNull()
       .references(() => audioFiles.id),
-    nativeWord: text("native_word").notNull(),
+    nativeWord: text("native_word"),
     romanization: text("romanization"),
     ipa: text("ipa"),
     synonymIndex: smallint("synonym_index").default(1).notNull(),

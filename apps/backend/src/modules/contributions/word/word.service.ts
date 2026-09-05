@@ -21,7 +21,7 @@ export type SubmitWordRecordingInput = {
   conceptId: string;
   languageId: string;
   dialectId?: string | null;
-  nativeWord: string;
+  nativeWord?: string | null;
   romanization?: string | null;
   ipa?: string | null;
   synonymIndex: number;
@@ -136,7 +136,7 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       .values({
         conceptId: data.conceptId,
         audioFileId: data.audioFileId,
-        nativeWord: data.nativeWord,
+        nativeWord: data.nativeWord ?? null,
         romanization: data.romanization ?? null,
         ipa: data.ipa ?? null,
         synonymIndex,

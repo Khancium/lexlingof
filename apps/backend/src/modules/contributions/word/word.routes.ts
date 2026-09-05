@@ -18,7 +18,7 @@ const submitSchema = z.object({
   conceptId: z.string().uuid(),
   languageId: z.string().uuid(),
   dialectId: z.string().uuid().optional(),
-  nativeWord: z.string().min(1).max(200),
+  nativeWord: z.string().max(200).optional(),
   romanization: z.string().optional(),
   ipa: z.string().optional(),
   synonymIndex: z.number().int().min(1).max(3),

@@ -14,12 +14,18 @@ import { colors } from '../../theme/colors';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module1Screen'>;
 
-type Concept = {
+type Category = { id: string; nameEnglish: string; icon: string | null; conceptCount?: number };
+
+type ConceptListItem = {
   id: string;
-  slug: string;
   labelEnglish: string;
-  description: string | null;
-  difficulty: string;
+};
+
+type ConceptDetail = {
+  id: string;
+  labelEnglish: string;
+  category: { id: string; name: string };
+  media: { publicUrl: string }[];
 };
 
 type WordLimits = {
@@ -31,25 +37,26 @@ type WordLimits = {
   nextTakeIndex: 1 | 2 | 3 | null;
 };
 
-type NextConceptResponse = {
-  concept: Concept;
-  category: { id: string; name: string; slug: string };
-  publicUrl: string | null;
-  limits: WordLimits;
-};
-
 type RecordingState = { path: string; durationMs: number; checksum: string };
+type Step = 'categories' | 'concepts' | 'record';
 
 export default function Module1Screen({ navigation }: Props) {
-  const categories = useAppStore((state) => state.categories);
+  const categories = useAppStore((state) => state.categories) as Category[];
   const loadCategories = useAppStore((state) => state.loadCategories);
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
 
-  const [categoryId, setCategoryId] = useState<string | undefined>(undefined);
-  const [data, setData] = useState<NextConceptResponse | null>(null);
-  const [loadingConcept, setLoadingConcept] = useState(true);
+  const [step, setStep] = useState<Step>('categories');
+
+  const [category, setCategory] = useState<Category | null>(null);
+  const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
+  const [loadingConcepts, setLoadingConcepts] = useState(false);
+
+  const [concept, setConcept] = useState<ConceptDetail | null>(null);
+  const [limits, setLimits] = useState<WordLimits | null>(null);
+  const [loadingConcept, setLoadingConcept] = useState(false);
   const [conceptError, setConceptError] = useState<string | null>(null);
 
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [nativeWord, setNativeWord] = useState('');
   const [romanization, setRomanization] = useState('');
   const [ipa, setIpa] = useState('');
@@ -61,30 +68,43 @@ export default function Module1Screen({ navigation }: Props) {
     loadCategories();
   }, [loadCategories]);
 
-  const loadNextConcept = useCallback(async (forCategoryId?: string) => {
+  function openCategory(c: Category) {
+    setCategory(c);
+    setStep('concepts');
+    setLoadingConcepts(true);
+    api.concepts
+      .getAll({ categoryId: c.id, limit: 100 })
+      .then((res) => setConcepts(res.items ?? []))
+      .finally(() => setLoadingConcepts(false));
+  }
+
+  const openConcept = useCallback(async (item: ConceptListItem) => {
+    setStep('record');
     setLoadingConcept(true);
     setConceptError(null);
+    setDetailsOpen(false);
     setNativeWord('');
     setRomanization('');
     setIpa('');
     setRecording(null);
+    setSubmitError(null);
     try {
-      const next = await api.concepts.getNext(forCategoryId);
-      setData(next);
+      const [detail, wordLimits] = await Promise.all([
+        api.concepts.getById(item.id),
+        api.concepts.getLimits(item.id),
+      ]);
+      setConcept(detail);
+      setLimits(wordLimits);
     } catch (err) {
-      setData(null);
-      setConceptError(err instanceof Error ? err.message : 'No concepts available');
+      setConcept(null);
+      setConceptError(err instanceof Error ? err.message : 'Failed to load object');
     } finally {
       setLoadingConcept(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadNextConcept(categoryId);
-  }, [categoryId, loadNextConcept]);
-
   async function handleSubmit() {
-    if (!data || !languageId || !recording || !data.limits.nextSynonymIndex || !data.limits.nextTakeIndex) {
+    if (!concept || !languageId || !recording || !limits?.nextSynonymIndex || !limits?.nextTakeIndex) {
       return;
     }
     setIsSubmitting(true);
@@ -99,20 +119,20 @@ export default function Module1Screen({ navigation }: Props) {
 
       const result = await api.contributions.submitWord({
         audioFileId,
-        conceptId: data.concept.id,
+        conceptId: concept.id,
         languageId,
         dialectId: dialectId ?? undefined,
-        nativeWord: nativeWord.trim(),
+        nativeWord: nativeWord.trim() || undefined,
         romanization: romanization.trim() || undefined,
         ipa: ipa.trim() || undefined,
-        synonymIndex: data.limits.nextSynonymIndex,
-        takeIndex: data.limits.nextTakeIndex,
+        synonymIndex: limits.nextSynonymIndex,
+        takeIndex: limits.nextTakeIndex,
         durationMs: recording.durationMs,
       });
 
       navigation.replace('RecordingResultScreen', {
         moduleType: 'WORD',
-        pointsAwarded: result.pointsAwarded,
+        pointsAwarded: (result as { pointsAwarded: number }).pointsAwarded,
       });
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to submit recording');
@@ -121,143 +141,173 @@ export default function Module1Screen({ navigation }: Props) {
     }
   }
 
-  const canSubmit =
-    !!recording && nativeWord.trim().length > 0 && !!languageId && !!data?.limits.canAddTake && !isSubmitting;
+  const canSubmit = !!recording && !!languageId && !!limits?.canAddTake && !isSubmitting;
+
+  function goBack() {
+    if (step === 'record') setStep('concepts');
+    else if (step === 'concepts') setStep('categories');
+  }
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.headerRow}>
-        <Text style={styles.heading}>Record a Word</Text>
-        <TouchableOpacity onPress={() => loadNextConcept(categoryId)}>
-          <Text style={styles.skipText}>Skip</Text>
-        </TouchableOpacity>
+        <View style={styles.headerLeft}>
+          {step !== 'categories' && (
+            <TouchableOpacity onPress={goBack} style={styles.backButton}>
+              <Ionicons name="chevron-back" size={22} color={colors.ink} />
+            </TouchableOpacity>
+          )}
+          <Text style={styles.heading}>Record a Word</Text>
+        </View>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.chipRow}
-        contentContainerStyle={styles.chipRowContent}
-      >
-        <TouchableOpacity
-          style={[styles.chip, categoryId === undefined && styles.chipSelected]}
-          onPress={() => setCategoryId(undefined)}
-        >
-          <Text style={[styles.chipText, categoryId === undefined && styles.chipTextSelected]}>All</Text>
-        </TouchableOpacity>
-        {categories.map((category) => (
-          <TouchableOpacity
-            key={category.id}
-            style={[styles.chip, categoryId === category.id && styles.chipSelected]}
-            onPress={() => setCategoryId(category.id)}
-          >
-            <Ionicons
-              name={category.icon ?? 'pricetag-outline'}
-              size={14}
-              color={categoryId === category.id ? colors.inkInverted : colors.ink}
-            />
-            <Text style={[styles.chipText, categoryId === category.id && styles.chipTextSelected]}>
-              {category.nameEnglish}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {step === 'categories' && (
+        <ScrollView contentContainerStyle={styles.gridContent}>
+          <View style={styles.grid}>
+            {categories.map((c) => (
+              <TouchableOpacity key={c.id} style={styles.gridCard} onPress={() => openCategory(c)}>
+                <Ionicons name={c.icon ?? 'pricetag-outline'} size={32} color={colors.brand} />
+                <Text style={styles.gridCardLabel}>{c.nameEnglish}</Text>
+                {typeof c.conceptCount === 'number' && (
+                  <Text style={styles.gridCardMeta}>{c.conceptCount} objects</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </ScrollView>
+      )}
 
-      <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-        {loadingConcept ? (
-          <ActivityIndicator color={colors.brand} style={styles.loader} />
-        ) : conceptError || !data ? (
-          <Text style={styles.errorText}>{conceptError ?? 'No concepts available'}</Text>
-        ) : (
-          <>
-            <View style={styles.conceptCard}>
-              {data.publicUrl ? (
-                <Image source={{ uri: data.publicUrl }} style={styles.conceptImage} contentFit="cover" />
-              ) : (
-                <View style={[styles.conceptImage, styles.conceptImagePlaceholder]}>
-                  <Ionicons name="image-outline" size={48} color={colors.inkMuted} />
-                </View>
-              )}
-              <Text style={styles.conceptLabel}>{data.concept.labelEnglish}</Text>
-              <Text style={styles.conceptCategory}>{data.category.name}</Text>
-            </View>
-
-            <View style={styles.indicatorRow}>
-              <View>
-                <Text style={styles.indicatorLabel}>
-                  Synonym {data.limits.nextSynonymIndex ?? 3} of 3
-                </Text>
-                <View style={styles.dotsRow}>
-                  {[1, 2, 3].map((idx) => (
-                    <View
-                      key={idx}
-                      style={[
-                        styles.dot,
-                        (data.limits.takesPerSynonym[String(idx) as '1' | '2' | '3'] ?? 0) > 0 && styles.dotFilled,
-                      ]}
-                    />
-                  ))}
-                </View>
-              </View>
-              <Text style={styles.indicatorLabel}>Take {data.limits.nextTakeIndex ?? 3} of 3</Text>
-            </View>
-
-            {!data.limits.canAddTake ? (
-              <Text style={styles.completeText}>You've completed every recording for this concept.</Text>
-            ) : (
-              <>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Your word *"
-                  placeholderTextColor={colors.placeholder}
-                  value={nativeWord}
-                  onChangeText={setNativeWord}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="Romanization"
-                  placeholderTextColor={colors.placeholder}
-                  value={romanization}
-                  onChangeText={setRomanization}
-                />
-                <TextInput
-                  style={styles.input}
-                  placeholder="IPA"
-                  placeholderTextColor={colors.placeholder}
-                  value={ipa}
-                  onChangeText={setIpa}
-                />
-
-                <Text style={styles.recorderLabel}>Record your pronunciation (max 3 seconds)</Text>
-                <AudioRecorder
-                  maxDurationMs={3000}
-                  onRecordingComplete={(path, durationMs, checksum) => setRecording({ path, durationMs, checksum })}
-                  onError={(message) => setSubmitError(message)}
-                />
-
-                <Text style={styles.pointsPreview}>+10 base, +10 if verified = up to +20 pts</Text>
-
-                {!languageId && !languageLoading ? (
-                  <Text style={styles.errorText}>Set your language in Profile settings before contributing.</Text>
-                ) : null}
-                {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
-
-                <TouchableOpacity
-                  style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
-                  onPress={handleSubmit}
-                  disabled={!canSubmit}
-                >
-                  {isSubmitting ? (
-                    <ActivityIndicator color={colors.inkInverted} />
-                  ) : (
-                    <Text style={styles.submitButtonText}>Submit</Text>
-                  )}
+      {step === 'concepts' && (
+        <ScrollView contentContainerStyle={styles.gridContent}>
+          <Text style={styles.subheading}>{category?.nameEnglish}</Text>
+          {loadingConcepts ? (
+            <ActivityIndicator color={colors.brand} style={styles.loader} />
+          ) : concepts.length === 0 ? (
+            <Text style={styles.errorText}>No objects in this category yet.</Text>
+          ) : (
+            <View style={styles.grid}>
+              {concepts.map((item) => (
+                <TouchableOpacity key={item.id} style={styles.gridCard} onPress={() => openConcept(item)}>
+                  <Ionicons name="image-outline" size={32} color={colors.inkMuted} />
+                  <Text style={styles.gridCardLabel}>{item.labelEnglish}</Text>
                 </TouchableOpacity>
-              </>
-            )}
-          </>
-        )}
-      </ScrollView>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      )}
+
+      {step === 'record' && (
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          {loadingConcept ? (
+            <ActivityIndicator color={colors.brand} style={styles.loader} />
+          ) : conceptError || !concept ? (
+            <Text style={styles.errorText}>{conceptError ?? 'Failed to load object'}</Text>
+          ) : (
+            <>
+              <View style={styles.conceptCard}>
+                {concept.media[0]?.publicUrl ? (
+                  <Image source={{ uri: concept.media[0].publicUrl }} style={styles.conceptImage} contentFit="cover" />
+                ) : (
+                  <View style={[styles.conceptImage, styles.conceptImagePlaceholder]}>
+                    <Ionicons name="image-outline" size={48} color={colors.inkMuted} />
+                  </View>
+                )}
+                <Text style={styles.conceptLabel}>{concept.labelEnglish}</Text>
+                <Text style={styles.conceptCategory}>{concept.category.name}</Text>
+              </View>
+
+              <View style={styles.indicatorRow}>
+                <View>
+                  <Text style={styles.indicatorLabel}>Synonym {limits?.nextSynonymIndex ?? 3} of 3</Text>
+                  <View style={styles.dotsRow}>
+                    {[1, 2, 3].map((idx) => (
+                      <View
+                        key={idx}
+                        style={[
+                          styles.dot,
+                          (limits?.takesPerSynonym[String(idx) as '1' | '2' | '3'] ?? 0) > 0 && styles.dotFilled,
+                        ]}
+                      />
+                    ))}
+                  </View>
+                </View>
+                <Text style={styles.indicatorLabel}>Take {limits?.nextTakeIndex ?? 3} of 3</Text>
+              </View>
+
+              {!limits?.canAddTake ? (
+                <Text style={styles.completeText}>You've completed every recording for this concept.</Text>
+              ) : (
+                <>
+                  <View style={styles.recorderCard}>
+                    <AudioRecorder
+                      maxDurationMs={3000}
+                      onRecordingComplete={(path, durationMs, checksum) => setRecording({ path, durationMs, checksum })}
+                      onError={(message) => setSubmitError(message)}
+                    />
+                    <Text style={styles.recorderLabel}>Tap to record</Text>
+                  </View>
+
+                  <View style={styles.detailsCard}>
+                    <TouchableOpacity style={styles.detailsToggle} onPress={() => setDetailsOpen((v) => !v)}>
+                      <Text style={styles.detailsToggleLabel}>Add word details (optional)</Text>
+                      <Ionicons
+                        name={detailsOpen ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color={colors.inkMuted}
+                      />
+                    </TouchableOpacity>
+                    {detailsOpen && (
+                      <View style={styles.detailsBody}>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Your word"
+                          placeholderTextColor={colors.placeholder}
+                          value={nativeWord}
+                          onChangeText={setNativeWord}
+                        />
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Romanization"
+                          placeholderTextColor={colors.placeholder}
+                          value={romanization}
+                          onChangeText={setRomanization}
+                        />
+                        <TextInput
+                          style={[styles.input, styles.inputLast]}
+                          placeholder="IPA"
+                          placeholderTextColor={colors.placeholder}
+                          value={ipa}
+                          onChangeText={setIpa}
+                        />
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.pointsPreview}>+10 base, +10 if verified = up to +20 pts</Text>
+
+                  {!languageId && !languageLoading ? (
+                    <Text style={styles.errorText}>Set your language in Profile settings before contributing.</Text>
+                  ) : null}
+                  {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
+
+                  <TouchableOpacity
+                    style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
+                    onPress={handleSubmit}
+                    disabled={!canSubmit}
+                  >
+                    {isSubmitting ? (
+                      <ActivityIndicator color={colors.inkInverted} />
+                    ) : (
+                      <Text style={styles.submitButtonText}>Submit</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
+              )}
+            </>
+          )}
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
@@ -274,44 +324,52 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  backButton: {
+    padding: 4,
+  },
   heading: {
     color: colors.ink,
     fontSize: 22,
     fontWeight: '700',
   },
-  skipText: {
-    color: colors.brand,
-    fontSize: 16,
+  subheading: {
+    color: colors.inkMuted,
+    fontSize: 14,
     fontWeight: '600',
+    marginBottom: 12,
   },
-  chipRow: {
-    marginTop: 14,
-    maxHeight: 44,
+  gridContent: {
+    padding: 20,
   },
-  chipRowContent: {
-    paddingHorizontal: 20,
-    gap: 8,
-  },
-  chip: {
+  grid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  gridCard: {
+    width: '47%',
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
+    paddingVertical: 24,
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  chipSelected: {
-    backgroundColor: colors.brand,
-  },
-  chipText: {
+  gridCardLabel: {
     color: colors.ink,
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '600',
+    textAlign: 'center',
   },
-  chipTextSelected: {
-    color: colors.inkInverted,
+  gridCardMeta: {
+    color: colors.inkMuted,
+    fontSize: 12,
   },
   content: {
     padding: 20,
@@ -385,8 +443,43 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 20,
   },
-  input: {
+  recorderCard: {
     backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
+    paddingVertical: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  recorderLabel: {
+    color: colors.inkMuted,
+    fontSize: 13,
+  },
+  detailsCard: {
+    backgroundColor: colors.surfaceCard,
+    borderRadius: 16,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  detailsToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  detailsToggleLabel: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  detailsBody: {
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  input: {
+    backgroundColor: colors.surface,
     color: colors.ink,
     borderRadius: 16,
     paddingHorizontal: 16,
@@ -396,11 +489,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  recorderLabel: {
-    color: colors.inkMuted,
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 8,
+  inputLast: {
+    marginBottom: 0,
   },
   pointsPreview: {
     color: colors.inkMuted,

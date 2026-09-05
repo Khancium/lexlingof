@@ -296,7 +296,7 @@ export type SubmitWordInput = {
   conceptId: string;
   languageId: string;
   dialectId?: string;
-  nativeWord: string;
+  nativeWord?: string;
   romanization?: string;
   ipa?: string;
   synonymIndex: 1 | 2 | 3;

@@ -1,0 +1,1 @@
+ALTER TABLE "word_recordings" ALTER COLUMN "native_word" DROP NOT NULL;
