@@ -8,10 +8,7 @@ import { canReview } from "@/lib/level";
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
-  { href: "/contribute/concept", label: "Record Word" },
-  { href: "/contribute/audio", label: "Upload Audio" },
-  { href: "/contribute/translate", label: "Translate" },
-  { href: "/contribute/scene", label: "Describe Scene" },
+  { href: "/contribute", label: "Contribute" },
   { href: "/contributions", label: "My Contributions" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/corpus", label: "Corpus" },
@@ -40,7 +37,7 @@ export default function Nav() {
 
         <div className="flex flex-wrap items-center gap-1">
           {links.map((link) => {
-            const active = pathname === link.href;
+            const active = pathname === link.href || pathname?.startsWith(`${link.href}/`);
             return (
               <Link
                 key={link.href}
