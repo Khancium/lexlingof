@@ -26,7 +26,10 @@ export default function Nav() {
     router.push("/login");
   }
 
-  const links = canReview(user?.level) ? [...LINKS, { href: "/review", label: "Review" }] : LINKS;
+  let links = canReview(user?.level) ? [...LINKS, { href: "/review", label: "Review" }] : LINKS;
+  if (user?.role === "admin" || user?.role === "super_admin") {
+    links = [...links, { href: "/admin/dashboard", label: "Admin" }];
+  }
 
   return (
     <nav className="border-b border-border bg-surface">
@@ -37,7 +40,10 @@ export default function Nav() {
 
         <div className="flex flex-wrap items-center gap-1">
           {links.map((link) => {
-            const active = pathname === link.href || pathname?.startsWith(`${link.href}/`);
+            const active =
+              link.href === "/admin/dashboard"
+                ? pathname?.startsWith("/admin")
+                : pathname === link.href || pathname?.startsWith(`${link.href}/`);
             return (
               <Link
                 key={link.href}
