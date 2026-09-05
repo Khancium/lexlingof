@@ -140,6 +140,27 @@ class AuthService {
     await db.update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.tokenHash, tokenHash));
   }
 
+  async changePassword(userId: string, currentPassword: string, newPassword: string): Promise<void> {
+    const [user] = await db.select({ passwordHash: users.passwordHash }).from(users).where(eq(users.id, userId)).limit(1);
+    if (!user) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+
+    const matches = user.passwordHash ? await bcrypt.compare(currentPassword, user.passwordHash) : false;
+    if (!matches) {
+      throw new HttpError(401, "INVALID_CREDENTIALS", "Current password is incorrect");
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
+    await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, userId));
+
+    // Every session's refresh token is revoked on a password change,
+    // including the one making this request -- its short-lived access
+    // token keeps working until it naturally expires, then re-login is
+    // required everywhere, same as any other device.
+    await db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+  }
+
   private async generateTokens(userId: string, email: string, role: string): Promise<TokenPair> {
     const accessToken = jwt.sign({ sub: userId, email, role }, process.env.JWT_SECRET!, {
       expiresIn: ACCESS_TOKEN_EXPIRY,

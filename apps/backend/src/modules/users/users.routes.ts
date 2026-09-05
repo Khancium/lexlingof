@@ -19,7 +19,10 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
+import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
+
+const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10MB
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -33,6 +36,7 @@ async function getOwnProfile(userId: string) {
       displayName: users.displayName,
       role: users.role,
       biography: users.biography,
+      avatarUrl: users.avatarUrl,
       level: userStats.level,
       totalPoints: userStats.totalPoints,
       verifiedContributions: userStats.verifiedContributions,
@@ -73,6 +77,7 @@ async function getOwnProfile(userId: string) {
     email: row.email,
     displayName: row.displayName,
     role: row.role,
+    avatarUrl: row.avatarUrl,
     level: row.level,
     totalPoints: row.totalPoints ?? 0,
     verifiedContributions: row.verifiedContributions ?? 0,
@@ -181,6 +186,35 @@ export default async function usersRoutes(fastify: FastifyInstance) {
           set: { ...profileFields, updatedAt: new Date() },
         });
     }
+
+    const profile = await getOwnProfile(userId);
+    if (!profile) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    return profile;
+  });
+
+  fastify.post("/me/avatar", { preHandler: verifyToken }, async (request) => {
+    const userId = request.user!.id;
+
+    const file = await request.file();
+    if (!file) {
+      throw new HttpError(400, "MISSING_FILE", "A multipart image file is required");
+    }
+    if (!file.mimetype.startsWith("image/")) {
+      throw new HttpError(400, "INVALID_FILE_TYPE", "Only image files are accepted");
+    }
+
+    const buffer = await file.toBuffer();
+    if (buffer.byteLength > MAX_AVATAR_BYTES) {
+      throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_AVATAR_BYTES} byte limit`);
+    }
+
+    // Fixed per-user path (not a random name) so re-uploading replaces the
+    // old avatar in storage instead of accumulating orphaned files.
+    const { publicUrl } = await storageService.uploadAvatarImage(buffer, `avatars/${userId}.jpg`);
+
+    await db.update(users).set({ avatarUrl: publicUrl, updatedAt: new Date() }).where(eq(users.id, userId));
 
     const profile = await getOwnProfile(userId);
     if (!profile) {

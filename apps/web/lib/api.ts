@@ -153,6 +153,7 @@ export type UserProfile = {
   email: string;
   displayName: string;
   role: string;
+  avatarUrl: string | null;
   level: ContributorLevel;
   totalPoints: number;
   verifiedContributions: number;
@@ -651,6 +652,9 @@ export const api = {
       setStoredRefreshToken(data.refreshToken);
       return data;
     },
+
+    changePassword: (currentPassword: string, newPassword: string) =>
+      apiClient.post<{ success: boolean }>("/api/v1/auth/change-password", { currentPassword, newPassword }).then((r) => r.data),
   },
 
   users: {
@@ -659,6 +663,11 @@ export const api = {
     getStats: () => apiClient.get<UserStatsResponse>("/api/v1/users/me/stats").then((r) => r.data),
     getContributions: (params?: ContributionsQuery) =>
       apiClient.get<ContributionsResponse>("/api/v1/users/me/contributions", { params }).then((r) => r.data),
+    uploadAvatar: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.post<UserProfile>("/api/v1/users/me/avatar", form).then((r) => r.data);
+    },
   },
 
   languages: {

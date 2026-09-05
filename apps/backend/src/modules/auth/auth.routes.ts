@@ -22,6 +22,11 @@ const logoutSchema = z.object({
   refreshToken: z.string().min(1),
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+
 export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/register", async (request, reply) => {
     const body = registerSchema.parse(request.body);
@@ -49,6 +54,12 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/logout", { preHandler: verifyToken }, async (request, reply) => {
     const body = logoutSchema.parse(request.body);
     await authService.logout(body.refreshToken);
+    reply.code(200).send({ success: true });
+  });
+
+  fastify.post("/change-password", { preHandler: verifyToken }, async (request, reply) => {
+    const body = changePasswordSchema.parse(request.body);
+    await authService.changePassword(request.user!.id, body.currentPassword, body.newPassword);
     reply.code(200).send({ success: true });
   });
 }

@@ -135,6 +135,33 @@ class StorageService {
     return { path: data.path, publicUrl, mimeType: "image/jpeg", fileSizeBytes: resized.byteLength };
   }
 
+  private static readonly AVATAR_MAX_DIMENSION = 512;
+  private static readonly AVATAR_JPEG_QUALITY = 85;
+
+  async uploadAvatarImage(fileBuffer: Buffer, filename: string): Promise<{ path: string; publicUrl: string }> {
+    const resized = await sharp(fileBuffer)
+      .rotate()
+      .resize({
+        width: StorageService.AVATAR_MAX_DIMENSION,
+        height: StorageService.AVATAR_MAX_DIMENSION,
+        fit: "cover",
+      })
+      .jpeg({ quality: StorageService.AVATAR_JPEG_QUALITY, mozjpeg: true })
+      .toBuffer();
+
+    const jpegFilename = filename.replace(/\.[^./]+$/, "") + ".jpg";
+
+    const { data, error } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(jpegFilename, resized, { contentType: "image/jpeg", upsert: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return { path: data.path, publicUrl: this.getImagePublicUrl(data.path) };
+  }
+
   getImagePublicUrl(path: string): string {
     const {
       data: { publicUrl },

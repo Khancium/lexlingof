@@ -244,16 +244,20 @@ export default function OnboardingPage() {
             </div>
             <div>
               <label className={labelClass}>City</label>
-              <select {...register("city")} className={inputClass} defaultValue="" disabled={!countryCode}>
-                <option value="" disabled>
-                  Select city
-                </option>
-                {cities.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
+              <Controller
+                name="city"
+                control={control}
+                render={({ field }) => (
+                  <Combobox
+                    id="city"
+                    value={field.value ?? ""}
+                    onChange={field.onChange}
+                    options={cities.map((name) => ({ id: name, name }))}
+                    placeholder="City"
+                    disabled={!countryCode}
+                  />
+                )}
+              />
               {errors.city && <p className="mt-1 text-xs text-red-600">{errors.city.message}</p>}
             </div>
           </div>
