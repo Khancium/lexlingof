@@ -39,6 +39,8 @@ export default function OnboardingPage() {
   const [quarters, setQuarters] = useState<NamedOption[]>([]);
   const [countries, setCountries] = useState<{ code: string; name: string }[]>([]);
   const [cities, setCities] = useState<string[]>([]);
+  const [subTribeOpen, setSubTribeOpen] = useState(false);
+  const [quarterOpen, setQuarterOpen] = useState(false);
 
   const {
     register,
@@ -184,35 +186,45 @@ export default function OnboardingPage() {
             {errors.motherTongue && <p className="mt-1 text-xs text-red-600">{errors.motherTongue.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>Tribe</label>
-              <Controller
-                name="tribe"
-                control={control}
-                render={({ field }) => (
-                  <Combobox id="tribe" value={field.value ?? ""} onChange={field.onChange} options={tribes} placeholder="Tribe" />
-                )}
-              />
-              {errors.tribe && <p className="mt-1 text-xs text-red-600">{errors.tribe.message}</p>}
-            </div>
-            <div>
-              <label className={labelClass}>Sub-tribe (optional)</label>
-              <Controller
-                name="subTribe"
-                control={control}
-                render={({ field }) => (
-                  <Combobox
-                    id="sub-tribe"
-                    value={field.value ?? ""}
-                    onChange={field.onChange}
-                    options={subTribes}
-                    placeholder="Sub-tribe"
-                    disabled={!tribe}
-                  />
-                )}
-              />
-            </div>
+          <div>
+            <label className={labelClass}>Tribe</label>
+            <Controller
+              name="tribe"
+              control={control}
+              render={({ field }) => (
+                <Combobox id="tribe" value={field.value ?? ""} onChange={field.onChange} options={tribes} placeholder="Tribe" />
+              )}
+            />
+            {errors.tribe && <p className="mt-1 text-xs text-red-600">{errors.tribe.message}</p>}
+
+            {subTribeOpen ? (
+              <div className="mt-2 pl-4">
+                <label className="mb-1 block text-xs font-medium text-ink-muted">Sub-tribe (optional)</label>
+                <Controller
+                  name="subTribe"
+                  control={control}
+                  render={({ field }) => (
+                    <Combobox
+                      id="sub-tribe"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      options={subTribes}
+                      placeholder="Sub-tribe"
+                      disabled={!tribe}
+                    />
+                  )}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSubTribeOpen(true)}
+                disabled={!tribe}
+                className="mt-2 text-sm font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:text-ink-muted disabled:no-underline"
+              >
+                + Add sub-tribe
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -246,41 +258,51 @@ export default function OnboardingPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>Village</label>
-              <Controller
-                name="village"
-                control={control}
-                render={({ field }) => (
-                  <Combobox
-                    id="village"
-                    value={field.value ?? ""}
-                    onChange={field.onChange}
-                    options={villages}
-                    placeholder="Village"
-                  />
-                )}
-              />
-              {errors.village && <p className="mt-1 text-xs text-red-600">{errors.village.message}</p>}
-            </div>
-            <div>
-              <label className={labelClass}>Quarter (optional)</label>
-              <Controller
-                name="quarter"
-                control={control}
-                render={({ field }) => (
-                  <Combobox
-                    id="quarter"
-                    value={field.value ?? ""}
-                    onChange={field.onChange}
-                    options={quarters}
-                    placeholder="Quarter"
-                    disabled={!village}
-                  />
-                )}
-              />
-            </div>
+          <div>
+            <label className={labelClass}>Village</label>
+            <Controller
+              name="village"
+              control={control}
+              render={({ field }) => (
+                <Combobox
+                  id="village"
+                  value={field.value ?? ""}
+                  onChange={field.onChange}
+                  options={villages}
+                  placeholder="Village"
+                />
+              )}
+            />
+            {errors.village && <p className="mt-1 text-xs text-red-600">{errors.village.message}</p>}
+
+            {quarterOpen ? (
+              <div className="mt-2 pl-4">
+                <label className="mb-1 block text-xs font-medium text-ink-muted">Quarter (optional)</label>
+                <Controller
+                  name="quarter"
+                  control={control}
+                  render={({ field }) => (
+                    <Combobox
+                      id="quarter"
+                      value={field.value ?? ""}
+                      onChange={field.onChange}
+                      options={quarters}
+                      placeholder="Quarter"
+                      disabled={!village}
+                    />
+                  )}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setQuarterOpen(true)}
+                disabled={!village}
+                className="mt-2 text-sm font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:text-ink-muted disabled:no-underline"
+              >
+                + Add quarter
+              </button>
+            )}
           </div>
 
           <div>
