@@ -570,6 +570,7 @@ export type AdminSceneUpdateInput = Partial<{
 export type AdminSceneConceptInput = { sceneId: string; conceptId: string; categoryId: string; importance?: number };
 
 export type AdminSentenceInput = { englishText: string; categoryId?: string; difficulty?: number };
+export type BulkUploadResult = { created: number; errors: { row: number; message: string }[] };
 export type AdminSentence = {
   id: string;
   englishText: string;
@@ -791,6 +792,7 @@ export const api = {
     createConcept: (data: AdminConceptInput) => apiClient.post<ConceptDetail>("/api/v1/admin/concepts", data).then((r) => r.data),
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>
       apiClient.put<ConceptDetail>(`/api/v1/admin/concepts/${id}`, data).then((r) => r.data),
+    deleteConcept: (id: string) => apiClient.delete(`/api/v1/admin/concepts/${id}`).then((r) => r.data),
     uploadConceptMedia: (id: string, file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -798,10 +800,16 @@ export const api = {
         .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media`, form)
         .then((r) => r.data);
     },
+    bulkUploadConcepts: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/bulk", form).then((r) => r.data);
+    },
 
     createScene: (data: AdminSceneInput) => apiClient.post<Scene>("/api/v1/admin/scenes", data).then((r) => r.data),
     updateScene: (id: string, data: AdminSceneUpdateInput) =>
       apiClient.put<Scene>(`/api/v1/admin/scenes/${id}`, data).then((r) => r.data),
+    deleteScene: (id: string) => apiClient.delete(`/api/v1/admin/scenes/${id}`).then((r) => r.data),
     uploadSceneMedia: (id: string, file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -809,12 +817,23 @@ export const api = {
         .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media`, form)
         .then((r) => r.data);
     },
+    bulkUploadScenes: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/bulk", form).then((r) => r.data);
+    },
     createSceneConcept: (data: AdminSceneConceptInput) =>
       apiClient.post<{ id: string }>("/api/v1/admin/scene-concepts", data).then((r) => r.data),
 
     getSentences: (params?: { limit?: number; offset?: number }) =>
       apiClient.get<AdminSentence[]>("/api/v1/admin/sentences", { params }).then((r) => r.data),
     createSentence: (data: AdminSentenceInput) => apiClient.post<AdminSentence>("/api/v1/admin/sentences", data).then((r) => r.data),
+    deleteSentence: (id: string) => apiClient.delete(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
+    bulkUploadSentences: (file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.post<BulkUploadResult>("/api/v1/admin/sentences/bulk", form).then((r) => r.data);
+    },
   },
 
   superadmin: {

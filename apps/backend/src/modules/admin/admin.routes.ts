@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, asc, desc, eq, gte, ilike, isNull, or, sql } from "drizzle-orm";
+import { parse as csvParse } from "csv-parse/sync";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -82,6 +83,59 @@ async function readImageFile(request: FastifyRequest) {
 
   return { buffer, filename: file.filename, mimetype: file.mimetype };
 }
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+const MAX_BULK_FILE_BYTES = 5 * 1024 * 1024; // 5MB
+
+/**
+ * Bulk-import file formats: CSV (header row + data rows) or JSON (an array
+ * of row objects). Both parse down to the same `Record<string, string>[]`
+ * shape so every bulk endpoint below only has to deal with one representation
+ * regardless of which format the admin uploaded.
+ */
+async function readBulkRows(request: FastifyRequest): Promise<Record<string, string>[]> {
+  const file = await request.file();
+  if (!file) {
+    throw new HttpError(400, "MISSING_FILE", "A CSV or JSON file is required");
+  }
+
+  const buffer = await file.toBuffer();
+  if (buffer.byteLength > MAX_BULK_FILE_BYTES) {
+    throw new HttpError(400, "FILE_TOO_LARGE", `File exceeds the ${MAX_BULK_FILE_BYTES} byte limit`);
+  }
+
+  const isJson = file.filename.toLowerCase().endsWith(".json") || file.mimetype === "application/json";
+
+  if (isJson) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(buffer.toString("utf-8"));
+    } catch {
+      throw new HttpError(400, "INVALID_FILE", "File is not valid JSON");
+    }
+    if (!Array.isArray(parsed)) {
+      throw new HttpError(400, "INVALID_FILE", "JSON file must contain an array of row objects");
+    }
+    return parsed.map((row) =>
+      Object.fromEntries(Object.entries(row as Record<string, unknown>).map(([k, v]) => [k, v == null ? "" : String(v)])),
+    );
+  }
+
+  try {
+    return csvParse(buffer, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
+  } catch {
+    throw new HttpError(400, "INVALID_FILE", "File is not valid CSV");
+  }
+}
+
+type BulkResult = { created: number; errors: { row: number; message: string }[] };
 
 /* -------------------------------------------------------------------------- */
 /*                                   Schemas                                  */
@@ -363,12 +417,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     // concepts.slug is NOT NULL and globally unique; the request body has no
     // slug field, so this derives one from the category + label, matching
     // the convention used by the database seed (category-prefixed slug).
-    const wordSlug = body.labelEnglish
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-    const slug = `${category.slug}-${wordSlug}`;
+    const slug = `${category.slug}-${slugify(body.labelEnglish)}`;
 
     const [concept] = await db
       .insert(concepts)
@@ -384,6 +433,61 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.code(201).send(concept);
   });
 
+  // Bulk create from a CSV or JSON file. Expected row fields: category
+  // (slug or English name -- resolved against existing categories),
+  // labelEnglish (required), description (optional), difficulty (optional,
+  // 1-5, defaults to 1). Rows that fail validation are skipped and reported
+  // back individually rather than failing the whole batch.
+  fastify.post("/admin/concepts/bulk", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const rows = await readBulkRows(request);
+    const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
+    const categoryByKey = new Map(
+      allCategories.flatMap((c) => [
+        [c.slug.toLowerCase(), c],
+        [c.nameEnglish.toLowerCase(), c],
+      ]),
+    );
+
+    const result: BulkResult = { created: 0, errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      const rowNum = i + 2; // +1 for 0-index, +1 for the header row
+      const categoryKey = (row.category ?? "").trim().toLowerCase();
+      const labelEnglish = (row.labelEnglish ?? "").trim();
+
+      const category = categoryByKey.get(categoryKey);
+      if (!category) {
+        result.errors.push({ row: rowNum, message: `Unknown category "${row.category ?? ""}"` });
+        continue;
+      }
+      if (!labelEnglish) {
+        result.errors.push({ row: rowNum, message: "labelEnglish is required" });
+        continue;
+      }
+      const difficulty = row.difficulty ? Number(row.difficulty) : 1;
+      if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 5) {
+        result.errors.push({ row: rowNum, message: `Invalid difficulty "${row.difficulty}" (must be 1-5)` });
+        continue;
+      }
+
+      try {
+        await db.insert(concepts).values({
+          categoryId: category.id,
+          slug: `${category.slug}-${slugify(labelEnglish)}`,
+          labelEnglish,
+          description: row.description?.trim() || null,
+          difficulty,
+        });
+        result.created++;
+      } catch (err) {
+        result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
+      }
+    }
+
+    return result;
+  });
+
   fastify.put("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const body = updateConceptSchema.parse(request.body);
@@ -395,6 +499,27 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const [updated] = await db.update(concepts).set({ ...body, updatedAt: new Date() }).where(eq(concepts.id, id)).returning();
     return updated;
+  });
+
+  fastify.delete("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [existing] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, id)).limit(1);
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Concept not found");
+    }
+
+    await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(eq(concepts.id, id));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_concept_delete",
+      resourceType: "concept",
+      resourceId: id,
+    });
+
+    return { id, deleted: true };
   });
 
   fastify.post("/admin/concepts/:id/media", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
@@ -441,6 +566,61 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.code(201).send(scene);
   });
 
+  // Bulk create from a CSV or JSON file. Expected row fields: slug
+  // (required, must be globally unique), title (required), description
+  // (optional), difficulty (optional, one of sceneDifficulty's values,
+  // defaults to "medium"), estimatedDurationSeconds (optional). Images
+  // still have to be uploaded individually afterward via the media endpoint
+  // -- bulk row data can't carry a file per row.
+  fastify.post("/admin/scenes/bulk", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const rows = await readBulkRows(request);
+    const result: BulkResult = { created: 0, errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      const rowNum = i + 2;
+      const slug = (row.slug ?? "").trim();
+      const title = (row.title ?? "").trim();
+
+      if (!slug) {
+        result.errors.push({ row: rowNum, message: "slug is required" });
+        continue;
+      }
+      if (!title) {
+        result.errors.push({ row: rowNum, message: "title is required" });
+        continue;
+      }
+      const difficultyRaw = (row.difficulty ?? "medium").trim().toLowerCase();
+      if (!sceneDifficulty.enumValues.includes(difficultyRaw as (typeof sceneDifficulty.enumValues)[number])) {
+        result.errors.push({
+          row: rowNum,
+          message: `Invalid difficulty "${row.difficulty}" (must be one of ${sceneDifficulty.enumValues.join(", ")})`,
+        });
+        continue;
+      }
+      const estimatedDurationSeconds = row.estimatedDurationSeconds ? Number(row.estimatedDurationSeconds) : null;
+      if (row.estimatedDurationSeconds && (!Number.isInteger(estimatedDurationSeconds) || estimatedDurationSeconds! <= 0)) {
+        result.errors.push({ row: rowNum, message: `Invalid estimatedDurationSeconds "${row.estimatedDurationSeconds}"` });
+        continue;
+      }
+
+      try {
+        await db.insert(scenes).values({
+          slug,
+          title,
+          description: row.description?.trim() || null,
+          difficulty: difficultyRaw as (typeof sceneDifficulty.enumValues)[number],
+          estimatedDurationSeconds,
+        });
+        result.created++;
+      } catch (err) {
+        result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
+      }
+    }
+
+    return result;
+  });
+
   fastify.put("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const body = updateSceneSchema.parse(request.body);
@@ -452,6 +632,27 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const [updated] = await db.update(scenes).set({ ...body, updatedAt: new Date() }).where(eq(scenes.id, id)).returning();
     return updated;
+  });
+
+  fastify.delete("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [existing] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, id)).limit(1);
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Scene not found");
+    }
+
+    await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(eq(scenes.id, id));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_scene_delete",
+      resourceType: "scene",
+      resourceId: id,
+    });
+
+    return { id, deleted: true };
   });
 
   fastify.post("/admin/scenes/:id/media", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
@@ -531,6 +732,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return db
       .select()
       .from(sentences)
+      .where(isNull(sentences.deletedAt))
       .orderBy(desc(sentences.createdAt))
       .limit(limit)
       .offset(offset);
@@ -545,6 +747,78 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .returning();
 
     reply.code(201).send(sentence);
+  });
+
+  // Bulk create from a CSV or JSON file. Expected row fields: englishText
+  // (required), category (optional, slug or English name), difficulty
+  // (optional, 1-5, defaults to 1).
+  fastify.post("/admin/sentences/bulk", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const rows = await readBulkRows(request);
+    const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
+    const categoryByKey = new Map(
+      allCategories.flatMap((c) => [
+        [c.slug.toLowerCase(), c],
+        [c.nameEnglish.toLowerCase(), c],
+      ]),
+    );
+
+    const result: BulkResult = { created: 0, errors: [] };
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]!;
+      const rowNum = i + 2;
+      const englishText = (row.englishText ?? "").trim();
+
+      if (!englishText) {
+        result.errors.push({ row: rowNum, message: "englishText is required" });
+        continue;
+      }
+      let categoryId: string | null = null;
+      const categoryKey = (row.category ?? "").trim().toLowerCase();
+      if (categoryKey) {
+        const category = categoryByKey.get(categoryKey);
+        if (!category) {
+          result.errors.push({ row: rowNum, message: `Unknown category "${row.category}"` });
+          continue;
+        }
+        categoryId = category.id;
+      }
+      const difficulty = row.difficulty ? Number(row.difficulty) : 1;
+      if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 5) {
+        result.errors.push({ row: rowNum, message: `Invalid difficulty "${row.difficulty}" (must be 1-5)` });
+        continue;
+      }
+
+      try {
+        await db.insert(sentences).values({ englishText, categoryId, difficulty });
+        result.created++;
+      } catch (err) {
+        result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
+      }
+    }
+
+    return result;
+  });
+
+  fastify.delete("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [existing] = await db.select({ id: sentences.id }).from(sentences).where(eq(sentences.id, id)).limit(1);
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Sentence not found");
+    }
+
+    await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(eq(sentences.id, id));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_sentence_delete",
+      resourceType: "sentence",
+      resourceId: id,
+    });
+
+    return { id, deleted: true };
   });
 
   /* -------------------------------- Analytics -------------------------------- */

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, type Category, type ConceptListItem } from "@/lib/api";
+import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 
 export default function AdminConceptsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -24,6 +25,8 @@ export default function AdminConceptsPage() {
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -70,6 +73,17 @@ export default function AdminConceptsPage() {
       setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Upload failed", error: true });
     } finally {
       setUploadingId(null);
+    }
+  }
+
+  async function handleDelete(concept: ConceptListItem) {
+    if (!confirm(`Delete "${concept.labelEnglish}"? This cannot be undone from here.`)) return;
+    setDeletingId(concept.id);
+    try {
+      await api.admin.deleteConcept(concept.id);
+      await load();
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -149,6 +163,12 @@ export default function AdminConceptsPage() {
         </div>
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
+
+      <AdminBulkUpload
+        label="Bulk Upload Concepts"
+        onUpload={(file) => api.admin.bulkUploadConcepts(file)}
+        onDone={load}
+      />
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
@@ -252,9 +272,18 @@ export default function AdminConceptsPage() {
                       ) : null}
                     </td>
                     <td className="px-4 py-3">
-                      <button onClick={() => startEdit(concept)} className="text-xs font-semibold text-brand hover:underline">
-                        Edit
-                      </button>
+                      <div className="flex gap-3">
+                        <button onClick={() => startEdit(concept)} className="text-xs font-semibold text-brand hover:underline">
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(concept)}
+                          disabled={deletingId === concept.id}
+                          className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                        >
+                          {deletingId === concept.id ? "Deleting..." : "Delete"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ),

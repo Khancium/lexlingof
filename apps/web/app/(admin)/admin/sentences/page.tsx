@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, type AdminSentence, type Category } from "@/lib/api";
+import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 
 export default function AdminSentencesPage() {
   const [sentences, setSentences] = useState<AdminSentence[]>([]);
@@ -13,6 +14,8 @@ export default function AdminSentencesPage() {
   const [difficulty, setDifficulty] = useState(1);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -43,6 +46,17 @@ export default function AdminSentencesPage() {
       setCreateError(err instanceof Error ? err.message : "Failed to create sentence");
     } finally {
       setIsCreating(false);
+    }
+  }
+
+  async function handleDelete(sentence: AdminSentence) {
+    if (!confirm(`Delete "${sentence.englishText}"? This cannot be undone from here.`)) return;
+    setDeletingId(sentence.id);
+    try {
+      await api.admin.deleteSentence(sentence.id);
+      await load();
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -98,6 +112,8 @@ export default function AdminSentencesPage() {
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
 
+      <AdminBulkUpload label="Bulk Upload Sentences" onUpload={(file) => api.admin.bulkUploadSentences(file)} onDone={load} />
+
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
@@ -109,6 +125,7 @@ export default function AdminSentencesPage() {
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Difficulty</th>
                 <th className="px-4 py-3">Used</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -118,6 +135,15 @@ export default function AdminSentencesPage() {
                   <td className="px-4 py-3 text-ink-muted">{categoryName(sentence.categoryId)}</td>
                   <td className="px-4 py-3 text-ink-muted">{sentence.difficulty}</td>
                   <td className="px-4 py-3 text-ink-muted">{sentence.usageCount}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => handleDelete(sentence)}
+                      disabled={deletingId === sentence.id}
+                      className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                    >
+                      {deletingId === sentence.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

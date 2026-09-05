@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api, type ConceptListItem, type Scene, type SceneDifficulty } from "@/lib/api";
+import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
 
@@ -26,6 +27,8 @@ export default function AdminScenesPage() {
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -75,6 +78,17 @@ export default function AdminScenesPage() {
       setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Upload failed", error: true });
     } finally {
       setUploadingId(null);
+    }
+  }
+
+  async function handleDelete(scene: Scene) {
+    if (!confirm(`Delete "${scene.title}"? This cannot be undone from here.`)) return;
+    setDeletingId(scene.id);
+    try {
+      await api.admin.deleteScene(scene.id);
+      await load();
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -153,6 +167,8 @@ export default function AdminScenesPage() {
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
 
+      <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
+
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
@@ -185,6 +201,13 @@ export default function AdminScenesPage() {
                     className="text-xs font-semibold text-brand hover:underline"
                   >
                     {coverageSceneId === scene.id ? "Close" : "Add Concept Coverage"}
+                  </button>
+                  <button
+                    onClick={() => handleDelete(scene)}
+                    disabled={deletingId === scene.id}
+                    className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                  >
+                    {deletingId === scene.id ? "Deleting..." : "Delete"}
                   </button>
                 </div>
               </div>
