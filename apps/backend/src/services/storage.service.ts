@@ -6,6 +6,7 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { createClient } from "@supabase/supabase-js";
+import sharp from "sharp";
 
 import type { contributionModule } from "../db/schema.js";
 
@@ -93,14 +94,37 @@ class StorageService {
   /*                        Images — Supabase Storage                       */
   /* ---------------------------------------------------------------------- */
 
+  /**
+   * Concept/scene images are shown as small thumbnails (grids, review
+   * cards) but were previously uploaded and served at whatever resolution
+   * the contributor's camera produced -- often several MB. Re-encoding to a
+   * capped JPEG here means every future upload is thumbnail-appropriate at
+   * the source, which is the main fix for "images take forever to load"
+   * (existing already-uploaded originals are unaffected by this).
+   */
+  private static readonly IMAGE_MAX_DIMENSION = 1600;
+  private static readonly IMAGE_JPEG_QUALITY = 82;
+
   async uploadSceneImage(
     fileBuffer: Buffer,
     filename: string,
-    mimeType: string,
-  ): Promise<{ path: string; publicUrl: string }> {
+  ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
+    const resized = await sharp(fileBuffer)
+      .rotate() // apply EXIF orientation before stripping metadata below
+      .resize({
+        width: StorageService.IMAGE_MAX_DIMENSION,
+        height: StorageService.IMAGE_MAX_DIMENSION,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .jpeg({ quality: StorageService.IMAGE_JPEG_QUALITY, mozjpeg: true })
+      .toBuffer();
+
+    const jpegFilename = filename.replace(/\.[^./]+$/, "") + ".jpg";
+
     const { data, error } = await supabase.storage
       .from(IMAGE_BUCKET)
-      .upload(filename, fileBuffer, { contentType: mimeType });
+      .upload(jpegFilename, resized, { contentType: "image/jpeg" });
 
     if (error) {
       throw error;
@@ -108,7 +132,7 @@ class StorageService {
 
     const publicUrl = this.getImagePublicUrl(data.path);
 
-    return { path: data.path, publicUrl };
+    return { path: data.path, publicUrl, mimeType: "image/jpeg", fileSizeBytes: resized.byteLength };
   }
 
   getImagePublicUrl(path: string): string {

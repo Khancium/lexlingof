@@ -405,18 +405,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       throw new HttpError(404, "NOT_FOUND", "Concept not found");
     }
 
-    const { buffer, filename, mimetype } = await readImageFile(request);
+    const { buffer, filename } = await readImageFile(request);
     const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
     const storageFilename = `concepts/${id}/${randomUUID()}.${ext}`;
 
-    const { path, publicUrl } = await storageService.uploadSceneImage(buffer, storageFilename, mimetype);
+    const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadSceneImage(buffer, storageFilename);
 
     const [existingCount] = await db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(conceptMedia).where(eq(conceptMedia.conceptId, id));
     const isPrimary = (existingCount?.value ?? 0) === 0;
 
     const [media] = await db
       .insert(conceptMedia)
-      .values({ conceptId: id, storageKey: path, publicUrl, mimeType: mimetype, fileSizeBytes: buffer.byteLength, isPrimary })
+      .values({ conceptId: id, storageKey: path, publicUrl, mimeType, fileSizeBytes, isPrimary })
       .returning();
 
     reply.code(201).send(media);
@@ -462,18 +462,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       throw new HttpError(404, "NOT_FOUND", "Scene not found");
     }
 
-    const { buffer, filename, mimetype } = await readImageFile(request);
+    const { buffer, filename } = await readImageFile(request);
     const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
     const storageFilename = `scenes/${id}/${randomUUID()}.${ext}`;
 
-    const { path, publicUrl } = await storageService.uploadSceneImage(buffer, storageFilename, mimetype);
+    const { path, publicUrl, mimeType } = await storageService.uploadSceneImage(buffer, storageFilename);
 
     const [existingCount] = await db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sceneMedia).where(eq(sceneMedia.sceneId, id));
     const isPrimary = (existingCount?.value ?? 0) === 0;
 
     const [media] = await db
       .insert(sceneMedia)
-      .values({ sceneId: id, storageKey: path, publicUrl, mimeType: mimetype, isPrimary })
+      .values({ sceneId: id, storageKey: path, publicUrl, mimeType, isPrimary })
       .returning();
 
     reply.code(201).send(media);

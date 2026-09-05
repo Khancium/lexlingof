@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, count, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -227,44 +227,68 @@ export default async function usersRoutes(fastify: FastifyInstance) {
 
     const [totalRow] = await db.select({ value: count() }).from(contributions).where(whereClause);
 
-    const items = await Promise.all(
-      rows.map(async ({ wordRecordingId, audioUploadId, translationId, sceneContributionId, ...base }) => {
-        let detail: Record<string, unknown> | null = null;
+    // Batched by module type (one query per type, not per row) -- with up
+    // to `limit` rows per page potentially spanning all four module types,
+    // the previous per-row Promise.all could fire that many extra queries
+    // for a single page load.
+    const wordRecordingIds = rows.filter((r) => r.moduleType === "WORD" && r.wordRecordingId).map((r) => r.wordRecordingId!);
+    const audioUploadIds = rows.filter((r) => r.moduleType === "TRANSCRIPTION" && r.audioUploadId).map((r) => r.audioUploadId!);
+    const translationIds = rows.filter((r) => r.moduleType === "TRANSLATION" && r.translationId).map((r) => r.translationId!);
+    const sceneContributionIds = rows
+      .filter((r) => r.moduleType === "SCENE" && r.sceneContributionId)
+      .map((r) => r.sceneContributionId!);
 
-        if (base.moduleType === "WORD" && wordRecordingId) {
-          const [d] = await db
-            .select({ nativeWord: wordRecordings.nativeWord, romanization: wordRecordings.romanization, durationMs: wordRecordings.durationMs })
+    const [wordDetails, audioDetails, translationDetails, sceneDetails] = await Promise.all([
+      wordRecordingIds.length
+        ? db
+            .select({
+              id: wordRecordings.id,
+              nativeWord: wordRecordings.nativeWord,
+              romanization: wordRecordings.romanization,
+              durationMs: wordRecordings.durationMs,
+            })
             .from(wordRecordings)
-            .where(eq(wordRecordings.id, wordRecordingId))
-            .limit(1);
-          detail = d ?? null;
-        } else if (base.moduleType === "TRANSCRIPTION" && audioUploadId) {
-          const [d] = await db
-            .select({ title: audioUploads.title, recordingType: audioUploads.recordingType })
+            .where(inArray(wordRecordings.id, wordRecordingIds))
+        : [],
+      audioUploadIds.length
+        ? db
+            .select({ id: audioUploads.id, title: audioUploads.title, recordingType: audioUploads.recordingType })
             .from(audioUploads)
-            .where(eq(audioUploads.id, audioUploadId))
-            .limit(1);
-          detail = d ?? null;
-        } else if (base.moduleType === "TRANSLATION" && translationId) {
-          const [d] = await db
-            .select({ nativeText: translations.nativeText, romanization: translations.romanization })
+            .where(inArray(audioUploads.id, audioUploadIds))
+        : [],
+      translationIds.length
+        ? db
+            .select({ id: translations.id, nativeText: translations.nativeText, romanization: translations.romanization })
             .from(translations)
-            .where(eq(translations.id, translationId))
-            .limit(1);
-          detail = d ?? null;
-        } else if (base.moduleType === "SCENE" && sceneContributionId) {
-          const [d] = await db
-            .select({ sceneId: sceneContributions.sceneId, sceneTitle: scenes.title })
+            .where(inArray(translations.id, translationIds))
+        : [],
+      sceneContributionIds.length
+        ? db
+            .select({ id: sceneContributions.id, sceneId: sceneContributions.sceneId, sceneTitle: scenes.title })
             .from(sceneContributions)
             .leftJoin(scenes, eq(scenes.id, sceneContributions.sceneId))
-            .where(eq(sceneContributions.id, sceneContributionId))
-            .limit(1);
-          detail = d ?? null;
-        }
+            .where(inArray(sceneContributions.id, sceneContributionIds))
+        : [],
+    ]);
 
-        return { ...base, detail };
-      }),
-    );
+    const wordById = new Map(wordDetails.map(({ id, ...d }) => [id, d]));
+    const audioById = new Map(audioDetails.map(({ id, ...d }) => [id, d]));
+    const translationById = new Map(translationDetails.map(({ id, ...d }) => [id, d]));
+    const sceneById = new Map(sceneDetails.map(({ id, ...d }) => [id, d]));
+
+    const items = rows.map(({ wordRecordingId, audioUploadId, translationId, sceneContributionId, ...base }) => {
+      let detail: Record<string, unknown> | null = null;
+      if (base.moduleType === "WORD" && wordRecordingId) {
+        detail = wordById.get(wordRecordingId) ?? null;
+      } else if (base.moduleType === "TRANSCRIPTION" && audioUploadId) {
+        detail = audioById.get(audioUploadId) ?? null;
+      } else if (base.moduleType === "TRANSLATION" && translationId) {
+        detail = translationById.get(translationId) ?? null;
+      } else if (base.moduleType === "SCENE" && sceneContributionId) {
+        detail = sceneById.get(sceneContributionId) ?? null;
+      }
+      return { ...base, detail };
+    });
 
     return { items, limit, offset, total: totalRow?.value ?? 0 };
   });

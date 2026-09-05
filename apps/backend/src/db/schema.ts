@@ -490,6 +490,7 @@ export const wordRecordings = pgTable(
     uniqueIndex("uq_word_recordings_take")
       .on(t.contributionId, t.conceptId, t.synonymIndex, t.takeIndex)
       .where(sql`${t.deletedAt} is null`),
+    index("ix_word_recordings_concept").on(t.conceptId),
     /** Module 1 ONLY. 3-second limit. NEVER apply to other tables. */
     check("ck_word_recording_max_duration", sql`${t.durationMs} <= 5000`),
     check("ck_word_recording_min_duration", sql`${t.durationMs} > 0`),
@@ -508,26 +509,30 @@ export const wordRecordings = pgTable(
  * NO duration limit. Files can be seconds or hours long. Do not add a duration
  * check constraint to this table.
  */
-export const audioUploads = pgTable("audio_uploads", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
-  audioFileId: uuid("audio_file_id")
-    .notNull()
-    .references(() => audioFiles.id),
-  title: text("title").notNull(),
-  description: text("description"),
-  recordingType: text("recording_type").notNull(),
-  location: text("location"),
-  recordedAt: date("recorded_at"),
-  speakerDescription: text("speaker_description"),
-  culturalContext: text("cultural_context"),
-  source: text("source"),
-  thirdPartyConsent: boolean("third_party_consent").default(false).notNull(),
-  transcriptionStatus: text("transcription_status").default("none").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const audioUploads = pgTable(
+  "audio_uploads",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
+    audioFileId: uuid("audio_file_id")
+      .notNull()
+      .references(() => audioFiles.id),
+    title: text("title").notNull(),
+    description: text("description"),
+    recordingType: text("recording_type").notNull(),
+    location: text("location"),
+    recordedAt: date("recorded_at"),
+    speakerDescription: text("speaker_description"),
+    culturalContext: text("cultural_context"),
+    source: text("source"),
+    thirdPartyConsent: boolean("third_party_consent").default(false).notNull(),
+    transcriptionStatus: text("transcription_status").default("none").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("ix_audio_uploads_contribution").on(t.contributionId)],
+);
 
 export const transcriptions = pgTable("transcriptions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -581,25 +586,29 @@ export const transcriptionSegments = pgTable(
  * NO duration limit on the attached audio file. Do not add a duration check
  * constraint to this table.
  */
-export const translations = pgTable("translations", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
-  sentenceId: uuid("sentence_id")
-    .notNull()
-    .references(() => sentences.id),
-  audioFileId: uuid("audio_file_id").references(() => audioFiles.id),
-  nativeText: text("native_text").notNull(),
-  romanization: text("romanization"),
-  ipa: text("ipa"),
-  notes: text("notes"),
-  variantIndex: smallint("variant_index").default(1).notNull(),
-  version: integer("version").default(1).notNull(),
-  isCurrent: boolean("is_current").default(true).notNull(),
-  previousVersion: uuid("previous_version").references((): AnyPgColumn => translations.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const translations = pgTable(
+  "translations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
+    sentenceId: uuid("sentence_id")
+      .notNull()
+      .references(() => sentences.id),
+    audioFileId: uuid("audio_file_id").references(() => audioFiles.id),
+    nativeText: text("native_text").notNull(),
+    romanization: text("romanization"),
+    ipa: text("ipa"),
+    notes: text("notes"),
+    variantIndex: smallint("variant_index").default(1).notNull(),
+    version: integer("version").default(1).notNull(),
+    isCurrent: boolean("is_current").default(true).notNull(),
+    previousVersion: uuid("previous_version").references((): AnyPgColumn => translations.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("ix_translations_contribution").on(t.contributionId)],
+);
 
 /* -------------------------------------------------------------------------- */
 /*                       Module 4 — scene contributions                       */
@@ -611,23 +620,27 @@ export const translations = pgTable("translations", {
  * NO duration limit. Descriptions run to 5 minutes or longer. Do not add a
  * duration check constraint to this table.
  */
-export const sceneContributions = pgTable("scene_contributions", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
-  sceneId: uuid("scene_id")
-    .notNull()
-    .references(() => scenes.id),
-  audioFileId: uuid("audio_file_id")
-    .notNull()
-    .references(() => audioFiles.id),
-  /** Added post-submission by annotators. */
-  transcription: text("transcription"),
-  transcriptionAddedAt: timestamp("transcription_added_at", { withTimezone: true }),
-  transcriptionAddedBy: uuid("transcription_added_by").references(() => users.id),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  deletedAt: timestamp("deleted_at", { withTimezone: true }),
-});
+export const sceneContributions = pgTable(
+  "scene_contributions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
+    sceneId: uuid("scene_id")
+      .notNull()
+      .references(() => scenes.id),
+    audioFileId: uuid("audio_file_id")
+      .notNull()
+      .references(() => audioFiles.id),
+    /** Added post-submission by annotators. */
+    transcription: text("transcription"),
+    transcriptionAddedAt: timestamp("transcription_added_at", { withTimezone: true }),
+    transcriptionAddedBy: uuid("transcription_added_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [index("ix_scene_contributions_contribution").on(t.contributionId)],
+);
 
 /* -------------------------------------------------------------------------- */
 /*                       Contributions — the central hub                      */
@@ -732,32 +745,41 @@ export const reviews = pgTable(
 /*                          Stats and gamification                            */
 /* -------------------------------------------------------------------------- */
 
-export const userStats = pgTable("user_stats", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  totalContributions: integer("total_contributions").default(0).notNull(),
-  verifiedContributions: integer("verified_contributions").default(0).notNull(),
-  pendingContributions: integer("pending_contributions").default(0).notNull(),
-  rejectedContributions: integer("rejected_contributions").default(0).notNull(),
-  wordContributions: integer("word_contributions").default(0).notNull(),
-  audioContributions: integer("audio_contributions").default(0).notNull(),
-  translationContributions: integer("translation_contributions").default(0).notNull(),
-  sceneContributionsCount: integer("scene_contributions_count").default(0).notNull(),
-  verifiedWords: integer("verified_words").default(0).notNull(),
-  verifiedAudios: integer("verified_audios").default(0).notNull(),
-  verifiedTranslations: integer("verified_translations").default(0).notNull(),
-  verifiedScenes: integer("verified_scenes").default(0).notNull(),
-  totalPoints: integer("total_points").default(0).notNull(),
-  pointsThisWeek: integer("points_this_week").default(0).notNull(),
-  pointsThisMonth: integer("points_this_month").default(0).notNull(),
-  level: contributorLevel("level").default("BRONZE").notNull(),
-  reviewsCompleted: integer("reviews_completed").default(0).notNull(),
-  totalAudioDurationMs: bigint("total_audio_duration_ms", { mode: "number" }).default(0).notNull(),
-  lastContributionAt: timestamp("last_contribution_at", { withTimezone: true }),
-  lastContributionModule: contributionModule("last_contribution_module"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const userStats = pgTable(
+  "user_stats",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    totalContributions: integer("total_contributions").default(0).notNull(),
+    verifiedContributions: integer("verified_contributions").default(0).notNull(),
+    pendingContributions: integer("pending_contributions").default(0).notNull(),
+    rejectedContributions: integer("rejected_contributions").default(0).notNull(),
+    wordContributions: integer("word_contributions").default(0).notNull(),
+    audioContributions: integer("audio_contributions").default(0).notNull(),
+    translationContributions: integer("translation_contributions").default(0).notNull(),
+    sceneContributionsCount: integer("scene_contributions_count").default(0).notNull(),
+    verifiedWords: integer("verified_words").default(0).notNull(),
+    verifiedAudios: integer("verified_audios").default(0).notNull(),
+    verifiedTranslations: integer("verified_translations").default(0).notNull(),
+    verifiedScenes: integer("verified_scenes").default(0).notNull(),
+    totalPoints: integer("total_points").default(0).notNull(),
+    pointsThisWeek: integer("points_this_week").default(0).notNull(),
+    pointsThisMonth: integer("points_this_month").default(0).notNull(),
+    level: contributorLevel("level").default("BRONZE").notNull(),
+    reviewsCompleted: integer("reviews_completed").default(0).notNull(),
+    totalAudioDurationMs: bigint("total_audio_duration_ms", { mode: "number" }).default(0).notNull(),
+    lastContributionAt: timestamp("last_contribution_at", { withTimezone: true }),
+    lastContributionModule: contributionModule("last_contribution_module"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  // Leaderboard and admin analytics both ORDER BY these -- an unindexed
+  // sort over every user_stats row gets slower as the user base grows.
+  (t) => [
+    index("ix_user_stats_total_points").on(t.totalPoints),
+    index("ix_user_stats_points_this_week").on(t.pointsThisWeek),
+  ],
+);
 
 export const streaks = pgTable("streaks", {
   userId: uuid("user_id")

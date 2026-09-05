@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import Image from "next/image";
 import { useAuthStore } from "@/lib/store";
 import { api, type ModuleType, type ReviewDecision, type ReviewQueueItem } from "@/lib/api";
 import { canReview, LEVEL_THRESHOLDS } from "@/lib/level";
@@ -146,8 +147,9 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
       </div>
 
       {item.detail.imageUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={item.detail.imageUrl} alt="" className="h-40 w-full rounded-lg object-cover" />
+        <div className="relative h-40 w-full overflow-hidden rounded-lg">
+          <Image src={item.detail.imageUrl} alt="" fill sizes="100vw" className="object-cover" />
+        </div>
       ) : null}
 
       {item.moduleType === "WORD" ? (

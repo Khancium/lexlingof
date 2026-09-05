@@ -29,6 +29,13 @@
       "when": 1788616178249,
       "tag": "0003_faithful_gladiator",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788618722878,
+      "tag": "0004_worthless_hex",
+      "breakpoints": true
     }
   ]
 }

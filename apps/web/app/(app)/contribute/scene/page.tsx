@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import { api, type Scene } from "@/lib/api";
 import { uploadAudioBlob } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
@@ -84,10 +85,9 @@ export default function ScenePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="relative overflow-hidden rounded-2xl bg-surface shadow-sm">
+      <div className="relative h-80 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
         {scene.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={scene.imageUrl} alt={scene.title} className="h-80 w-full object-cover" />
+          <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" />
         ) : (
           <div className="flex h-80 w-full items-center justify-center text-5xl">🖼️</div>
         )}

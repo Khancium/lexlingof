@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import {
   api,
   type Category,
@@ -201,10 +202,11 @@ export default function ConceptPage() {
             <>
               <div className="rounded-2xl bg-surface p-8 text-center shadow-sm">
                 {concept.media[0]?.publicUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
+                  <Image
                     src={concept.media[0].publicUrl}
                     alt={concept.labelEnglish}
+                    width={160}
+                    height={160}
                     className="mx-auto mb-4 h-40 w-40 rounded-lg object-cover"
                   />
                 ) : (
