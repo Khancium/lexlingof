@@ -242,9 +242,13 @@ export default function HomeScreen({ navigation }: Props) {
 }
 
 function StatCard({ label, value }: { label: string; value: number }) {
+  const prefix = label === 'Streak' ? '🔥 ' : label === 'Points' ? '⚡ ' : '';
   return (
     <View style={styles.statCard}>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statValue}>
+        {prefix}
+        {value}
+      </Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
@@ -352,6 +356,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 14,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   statValue: {
     color: colors.ink,
@@ -368,6 +377,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 18,
     marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   dailyHeaderRow: {
     flexDirection: 'row',
@@ -423,6 +437,11 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     padding: 14,
     minHeight: 110,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   moduleBadge: {
     position: 'absolute',

@@ -12,6 +12,7 @@ import type { AppTabParamList } from '../../navigation/AppNavigator';
 import type { CompositeScreenProps } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = CompositeScreenProps<
   NativeStackScreenProps<ReviewStackParamList, 'ReviewListScreen'>,
@@ -76,12 +77,10 @@ function UnlockReviewAccess({ navigation, verifiedContributions }: { navigation:
           {verifiedContributions} / {threshold}
         </Text>
         <Text style={styles.unlockHint}>Keep contributing to unlock!</Text>
-        <TouchableOpacity
-          style={styles.contributeButton}
+        <DuoButton
+          title="Contribute Now"
           onPress={() => navigation.navigate('Contribute', { screen: 'ContributeHub' })}
-        >
-          <Text style={styles.contributeButtonText}>Contribute Now</Text>
-        </TouchableOpacity>
+        />
       </View>
     </SafeAreaView>
   );
@@ -241,6 +240,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   cardTopRow: {
     flexDirection: 'row',
@@ -322,16 +326,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 20,
     marginBottom: 24,
-  },
-  contributeButton: {
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-  },
-  contributeButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

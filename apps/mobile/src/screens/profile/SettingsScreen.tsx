@@ -16,6 +16,7 @@ import { useAuthStore } from '../../store/auth.store';
 import { useAppStore, type Dialect, type Language } from '../../store/app.store';
 import { api } from '../../services/api.service';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 // Tracks apps/mobile/package.json's "version" field -- no expo-constants
 // dependency is installed to read it at runtime, and adding one just for a
@@ -155,9 +156,13 @@ export default function SettingsScreen() {
           <Text style={styles.rowValueMuted}>Coming soon</Text>
         </View>
 
-        <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
-          <Text style={styles.signOutButtonText}>Sign Out</Text>
-        </TouchableOpacity>
+        <DuoButton
+          title="Sign Out"
+          onPress={handleSignOut}
+          color={colors.danger}
+          shadowColor={colors.dangerDark}
+          style={styles.signOutButtonSpacing}
+        />
 
         <TouchableOpacity style={styles.deleteAccountButton} onPress={handleDeleteAccount}>
           <Text style={styles.deleteAccountText}>Delete Account</Text>
@@ -191,9 +196,13 @@ export default function SettingsScreen() {
                 </View>
               ))}
             </ScrollView>
-            <TouchableOpacity style={styles.sheetCloseButton} onPress={() => setIsPickerOpen(false)}>
-              <Text style={styles.sheetCloseText}>Close</Text>
-            </TouchableOpacity>
+            <DuoButton
+              title="Close"
+              onPress={() => setIsPickerOpen(false)}
+              color={colors.surfaceCard}
+              shadowColor={colors.border}
+              textColor={colors.ink}
+            />
           </View>
         </View>
       </Modal>
@@ -284,17 +293,8 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 10,
   },
-  signOutButton: {
-    backgroundColor: colors.danger,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
+  signOutButtonSpacing: {
     marginTop: 32,
-  },
-  signOutButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '700',
   },
   deleteAccountButton: {
     alignItems: 'center',
@@ -339,16 +339,5 @@ const styles = StyleSheet.create({
   pickerRowText: {
     color: colors.ink,
     fontSize: 15,
-  },
-  sheetCloseButton: {
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  sheetCloseText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
   },
 });

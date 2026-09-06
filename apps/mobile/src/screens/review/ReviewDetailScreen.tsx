@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Modal,
   ScrollView,
   StyleSheet,
@@ -17,6 +16,7 @@ import recorderPlayer, { type PlayBackType } from 'react-native-audio-recorder-p
 import { api } from '../../services/api.service';
 import type { ReviewStackParamList, ReviewQueueItem } from '../../navigation/ReviewStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<ReviewStackParamList, 'ReviewDetailScreen'>;
 
@@ -133,9 +133,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
       <SafeAreaView style={styles.safeArea}>
         <View style={styles.doneContainer}>
           <Text style={styles.doneText}>All reviews done! 🎉</Text>
-          <TouchableOpacity style={styles.doneButton} onPress={() => navigation.goBack()}>
-            <Text style={styles.doneButtonText}>Back to Review Queue</Text>
-          </TouchableOpacity>
+          <DuoButton title="Back to Review Queue" onPress={() => navigation.goBack()} />
         </View>
       </SafeAreaView>
     );
@@ -248,12 +246,20 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
               multiline
             />
             <View style={styles.sheetButtonRow}>
-              <TouchableOpacity style={styles.sheetCancelButton} onPress={() => setPendingDecision(null)}>
-                <Text style={styles.sheetCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.sheetConfirmButton} onPress={confirmDecision} disabled={isSubmitting}>
-                {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.sheetConfirmText}>Confirm</Text>}
-              </TouchableOpacity>
+              <DuoButton
+                title="Cancel"
+                onPress={() => setPendingDecision(null)}
+                color={colors.surfaceCard}
+                shadowColor={colors.border}
+                textColor={colors.ink}
+                style={styles.sheetButtonFlex}
+              />
+              <DuoButton
+                title="Confirm"
+                onPress={confirmDecision}
+                disabled={isSubmitting}
+                style={styles.sheetButtonFlex}
+              />
             </View>
           </View>
         </View>
@@ -304,6 +310,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 18,
     marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   detailImage: {
     width: '100%',
@@ -424,29 +435,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  sheetCancelButton: {
+  sheetButtonFlex: {
     flex: 1,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  sheetCancelText: {
-    color: colors.ink,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  sheetConfirmButton: {
-    flex: 1,
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  sheetConfirmText: {
-    color: colors.inkInverted,
-    fontSize: 15,
-    fontWeight: '600',
   },
   toast: {
     position: 'absolute',
@@ -474,16 +464,5 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     marginBottom: 24,
-  },
-  doneButton: {
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    paddingHorizontal: 28,
-  },
-  doneButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

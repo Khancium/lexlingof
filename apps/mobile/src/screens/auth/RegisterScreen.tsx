@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -15,6 +14,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useAuthStore } from '../../store/auth.store';
 import type { AuthStackParamList } from '../../navigation/AuthStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
@@ -112,9 +112,7 @@ export default function RegisterScreen({ navigation }: Props) {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={isLoading}>
-          {isLoading ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.buttonText}>Register</Text>}
-        </TouchableOpacity>
+        <DuoButton title="Register" onPress={handleSubmit} disabled={isLoading} style={styles.buttonSpacing} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -165,18 +163,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     textAlign: 'center',
   },
-  button: {
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
+  buttonSpacing: {
     marginTop: 8,
-  },
-  buttonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

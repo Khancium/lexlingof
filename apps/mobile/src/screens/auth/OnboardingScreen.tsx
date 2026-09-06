@@ -15,6 +15,7 @@ import { useAuthStore } from '../../store/auth.store';
 import { useAppStore, type Dialect, type Language } from '../../store/app.store';
 import { api } from '../../services/api.service';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 function PickerCard({
   title,
@@ -150,9 +151,7 @@ export default function OnboardingScreen() {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <TouchableOpacity style={styles.button} onPress={handleStart} disabled={isSubmitting}>
-          {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.buttonText}>Start Contributing</Text>}
-        </TouchableOpacity>
+        <DuoButton title="Start Contributing" onPress={handleStart} disabled={isSubmitting} style={styles.buttonSpacing} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -241,18 +240,7 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     textAlign: 'center',
   },
-  button: {
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
+  buttonSpacing: {
     marginTop: 12,
-  },
-  buttonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

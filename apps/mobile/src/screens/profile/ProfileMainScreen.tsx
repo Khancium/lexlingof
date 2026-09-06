@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import { api } from '../../services/api.service';
 import { LEVEL_GRADIENT, LEVEL_THRESHOLDS, NEXT_LEVEL } from '../../utils/level';
 import type { ProfileStackParamList } from '../../navigation/ProfileStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<ProfileStackParamList, 'ProfileMainScreen'>;
 
@@ -242,18 +243,24 @@ export default function ProfileMainScreen({ navigation }: Props) {
             />
             {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
             <View style={styles.editButtonRow}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setIsEditing(false)}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={saveProfile} disabled={isSaving}>
-                {isSaving ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.saveButtonText}>Save</Text>}
-              </TouchableOpacity>
+              <DuoButton
+                title="Cancel"
+                onPress={() => setIsEditing(false)}
+                color={colors.surfaceCard}
+                shadowColor={colors.border}
+                textColor={colors.ink}
+                style={styles.editButtonFlex}
+              />
+              <DuoButton
+                title="Save"
+                onPress={saveProfile}
+                disabled={isSaving}
+                style={styles.editButtonFlex}
+              />
             </View>
           </View>
         ) : (
-          <TouchableOpacity style={styles.editProfileButton} onPress={startEditing}>
-            <Text style={styles.editProfileButtonText}>Edit Profile</Text>
-          </TouchableOpacity>
+          <DuoButton title="Edit Profile" onPress={startEditing} style={styles.editProfileButtonSpacing} />
         )}
       </ScrollView>
     </SafeAreaView>
@@ -261,9 +268,13 @@ export default function ProfileMainScreen({ navigation }: Props) {
 }
 
 function StatCell({ label, value }: { label: string; value: number }) {
+  const prefix = label === 'Current Streak' ? '🔥 ' : label === 'Total Points' ? '⚡ ' : '';
   return (
     <View style={styles.statCell}>
-      <Text style={styles.statValue}>{value}</Text>
+      <Text style={styles.statValue}>
+        {prefix}
+        {value}
+      </Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
@@ -329,6 +340,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
   },
   statValue: {
     color: colors.ink,
@@ -445,17 +461,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  editProfileButton: {
+  editProfileButtonSpacing: {
     marginTop: 20,
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  editProfileButtonText: {
-    color: colors.inkInverted,
-    fontSize: 15,
-    fontWeight: '600',
   },
   editCard: {
     marginTop: 20,
@@ -487,28 +494,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
-  cancelButton: {
+  editButtonFlex: {
     flex: 1,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: colors.ink,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  saveButton: {
-    flex: 1,
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  saveButtonText: {
-    color: colors.inkInverted,
-    fontSize: 14,
-    fontWeight: '600',
   },
 });

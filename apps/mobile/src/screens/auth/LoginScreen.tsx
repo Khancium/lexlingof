@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -8,12 +7,12 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
 } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../store/auth.store';
 import type { AuthStackParamList } from '../../navigation/AuthStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -59,9 +58,7 @@ export default function LoginScreen({ navigation }: Props) {
 
         {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
-        <TouchableOpacity style={styles.button} onPress={handleSubmit} disabled={isLoading}>
-          {isLoading ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.buttonText}>Log In</Text>}
-        </TouchableOpacity>
+        <DuoButton title="Log In" onPress={handleSubmit} disabled={isLoading} />
 
         <TouchableOpacity style={styles.linkRow} onPress={() => navigation.navigate('Register')}>
           <Text style={styles.linkText}>Don't have an account? Register</Text>
@@ -110,20 +107,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginBottom: 14,
     textAlign: 'center',
-  },
-  button: {
-    width: '100%',
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  buttonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
   linkRow: {
     marginTop: 20,

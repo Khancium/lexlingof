@@ -19,6 +19,7 @@ import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module3Screen'>;
 
@@ -181,19 +182,20 @@ export default function Module3Screen({ navigation }: Props) {
               {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
               <View style={styles.buttonRow}>
-                <TouchableOpacity
-                  style={styles.skipButton}
+                <DuoButton
+                  title="Skip"
                   onPress={() => languageId && loadSentence(languageId)}
-                >
-                  <Text style={styles.skipButtonText}>Skip</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
+                  color={colors.surfaceCard}
+                  shadowColor={colors.border}
+                  textColor={colors.ink}
+                  style={styles.skipButtonFlex}
+                />
+                <DuoButton
+                  title="Submit"
                   onPress={handleSubmit}
                   disabled={!canSubmit}
-                >
-                  {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.submitButtonText}>Submit</Text>}
-                </TouchableOpacity>
+                  style={styles.submitButtonFlex}
+                />
               </View>
             </>
           )}
@@ -310,34 +312,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
-  skipButton: {
+  skipButtonFlex: {
     flex: 1,
-    backgroundColor: colors.surfaceMuted,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  skipButtonText: {
-    color: colors.ink,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  submitButton: {
+  submitButtonFlex: {
     flex: 2,
-    backgroundColor: colors.success,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

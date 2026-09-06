@@ -13,6 +13,7 @@ import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
 import { colors } from '../../theme/colors';
 import { seededShuffle } from '../../utils/shuffle';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module1Screen'>;
 
@@ -299,17 +300,7 @@ export default function Module1Screen({ navigation }: Props) {
                   ) : null}
                   {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
-                  <TouchableOpacity
-                    style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]}
-                    onPress={handleSubmit}
-                    disabled={!canSubmit}
-                  >
-                    {isSubmitting ? (
-                      <ActivityIndicator color={colors.inkInverted} />
-                    ) : (
-                      <Text style={styles.submitButtonText}>Submit</Text>
-                    )}
-                  </TouchableOpacity>
+                  <DuoButton title="Submit" onPress={handleSubmit} disabled={!canSubmit} />
                 </>
               )}
             </>
@@ -505,21 +496,5 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginVertical: 12,
-  },
-  submitButton: {
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
 });

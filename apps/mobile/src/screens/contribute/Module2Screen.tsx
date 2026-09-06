@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -23,6 +22,7 @@ import { useAppStore } from '../../store/app.store';
 import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module2Screen'>;
 
@@ -298,17 +298,12 @@ export default function Module2Screen({ navigation }: Props) {
               ) : null}
               {step1Error ? <Text style={styles.errorText}>{step1Error}</Text> : null}
 
-              <TouchableOpacity
-                style={[styles.submitButton, !canUpload && styles.submitButtonDisabled]}
+              <DuoButton
+                title="Upload & Continue"
                 onPress={handleUploadAndContinue}
                 disabled={!canUpload}
-              >
-                {isUploading ? (
-                  <ActivityIndicator color={colors.inkInverted} />
-                ) : (
-                  <Text style={styles.submitButtonText}>Upload & Continue</Text>
-                )}
-              </TouchableOpacity>
+                style={styles.submitButtonSpacing}
+              />
             </>
           ) : (
             <>
@@ -387,9 +382,12 @@ export default function Module2Screen({ navigation }: Props) {
 
               {step2Error ? <Text style={styles.errorText}>{step2Error}</Text> : null}
 
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmitStep2} disabled={isSubmittingStep2}>
-                {isSubmittingStep2 ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.submitButtonText}>Submit</Text>}
-              </TouchableOpacity>
+              <DuoButton
+                title="Submit"
+                onPress={handleSubmitStep2}
+                disabled={isSubmittingStep2}
+                style={styles.submitButtonSpacing}
+              />
             </>
           )}
         </ScrollView>
@@ -508,22 +506,8 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     textAlign: 'center',
   },
-  submitButton: {
-    backgroundColor: colors.accent,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
+  submitButtonSpacing: {
     marginTop: 8,
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
   playerBar: {
     flexDirection: 'row',

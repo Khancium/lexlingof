@@ -9,6 +9,7 @@ import { useContributorLanguage } from '../../hooks/useContributorLanguage';
 import AudioRecorder from '../../components/AudioRecorder';
 import type { ContributeStackParamList } from '../../navigation/ContributeStack';
 import { colors } from '../../theme/colors';
+import DuoButton from '../../components/DuoButton';
 
 type Props = NativeStackScreenProps<ContributeStackParamList, 'Module4Screen'>;
 
@@ -142,9 +143,7 @@ export default function Module4Screen({ navigation }: Props) {
         ) : null}
         {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
 
-        <TouchableOpacity style={[styles.submitButton, !canSubmit && styles.submitButtonDisabled]} onPress={handleSubmit} disabled={!canSubmit}>
-          {isSubmitting ? <ActivityIndicator color={colors.inkInverted} /> : <Text style={styles.submitButtonText}>Submit</Text>}
-        </TouchableOpacity>
+        <DuoButton title="Submit" onPress={handleSubmit} disabled={!canSubmit} />
 
         <TouchableOpacity style={styles.differentSceneButton} onPress={() => loadScene(scene.id)}>
           <Text style={styles.differentSceneText}>Different scene</Text>
@@ -221,22 +220,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     marginVertical: 14,
-  },
-  submitButton: {
-    backgroundColor: colors.brand,
-    borderRadius: 999,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 50,
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: colors.inkInverted,
-    fontSize: 16,
-    fontWeight: '600',
   },
   differentSceneButton: {
     alignItems: 'center',
