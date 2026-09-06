@@ -337,7 +337,7 @@ export type SubmitAudioInput = {
   audioFileId: string;
   languageId: string;
   dialectId?: string;
-  title: string;
+  title?: string;
   description?: string;
   recordingType: string;
   location?: string;
@@ -352,7 +352,7 @@ export type SubmitAudioInput = {
 };
 export type SubmitAudioResponse = { contributionId: string; audioUploadId: string; pointsAwarded: number };
 
-export type AddTranscriptionInput = { nativeText?: string; romanization?: string; ipa?: string };
+export type AddTranscriptionInput = { nativeText?: string; romanization?: string; ipa?: string; englishTranslation?: string };
 export type AddTranscriptionResponse = { transcriptionId: string; version: number; pointsAwarded: number };
 
 export type AddSegmentInput = {

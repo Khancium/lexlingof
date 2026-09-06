@@ -17,7 +17,7 @@ const submitSchema = z.object({
   audioFileId: z.string().uuid(),
   languageId: z.string().uuid(),
   dialectId: z.string().uuid().optional(),
-  title: z.string().min(1).max(300),
+  title: z.string().max(300).optional(),
   description: z.string().optional(),
   recordingType: z.string().min(1),
   location: z.string().optional(),
@@ -36,9 +36,10 @@ const transcriptionSchema = z
     nativeText: z.string().optional(),
     romanization: z.string().optional(),
     ipa: z.string().optional(),
+    englishTranslation: z.string().optional(),
   })
-  .refine((data) => data.nativeText || data.romanization || data.ipa, {
-    message: "At least one of nativeText, romanization or ipa is required",
+  .refine((data) => data.nativeText || data.romanization || data.ipa || data.englishTranslation, {
+    message: "At least one of nativeText, romanization, ipa or englishTranslation is required",
   });
 
 const segmentSchema = z

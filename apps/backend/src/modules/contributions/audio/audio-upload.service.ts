@@ -20,7 +20,7 @@ export type SubmitAudioUploadInput = {
   audioFileId: string;
   languageId: string;
   dialectId?: string | null;
-  title: string;
+  title?: string | null;
   description?: string | null;
   recordingType: string;
   location?: string | null;
@@ -38,6 +38,7 @@ export type AddTranscriptionInput = {
   nativeText?: string | null;
   romanization?: string | null;
   ipa?: string | null;
+  englishTranslation?: string | null;
 };
 
 export type AddSegmentInput = {
@@ -91,7 +92,7 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
       .insert(audioUploads)
       .values({
         audioFileId: data.audioFileId,
-        title: data.title,
+        title: data.title?.trim() || null,
         description: data.description ?? null,
         recordingType: data.recordingType,
         location: data.location ?? null,
@@ -200,6 +201,7 @@ export async function addTranscription(userId: string, audioUploadId: string, da
         nativeText: data.nativeText ?? null,
         romanization: data.romanization ?? null,
         ipa: data.ipa ?? null,
+        englishTranslation: data.englishTranslation ?? null,
         version,
         isCurrent: true,
         previousVersion: previous?.id ?? null,
@@ -214,6 +216,7 @@ export async function addTranscription(userId: string, audioUploadId: string, da
     if (data.nativeText) pointsAwarded += await readConfigValue(tx, "points.audio.native_text");
     if (data.romanization) pointsAwarded += await readConfigValue(tx, "points.audio.romanization");
     if (data.ipa) pointsAwarded += await readConfigValue(tx, "points.audio.ipa");
+    if (data.englishTranslation) pointsAwarded += await readConfigValue(tx, "points.audio.translation");
 
     if (pointsAwarded > 0) {
       await tx

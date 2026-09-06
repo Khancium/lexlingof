@@ -511,7 +511,7 @@ export const audioUploads = pgTable(
     audioFileId: uuid("audio_file_id")
       .notNull()
       .references(() => audioFiles.id),
-    title: text("title").notNull(),
+    title: text("title"),
     description: text("description"),
     recordingType: text("recording_type").notNull(),
     location: text("location"),
@@ -539,6 +539,7 @@ export const transcriptions = pgTable("transcriptions", {
   nativeText: text("native_text"),
   romanization: text("romanization"),
   ipa: text("ipa"),
+  englishTranslation: text("english_translation"),
   version: integer("version").default(1).notNull(),
   isCurrent: boolean("is_current").default(true).notNull(),
   previousVersion: uuid("previous_version").references((): AnyPgColumn => transcriptions.id),

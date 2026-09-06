@@ -79,6 +79,7 @@ const GAMIFICATION_CONFIG: { configKey: string; value: number; description: stri
   { configKey: "points.audio.native_text", value: 10, description: "Bonus points for adding native-script text" },
   { configKey: "points.audio.romanization", value: 5, description: "Bonus points for adding romanization" },
   { configKey: "points.audio.ipa", value: 10, description: "Bonus points for adding IPA transcription" },
+  { configKey: "points.audio.translation", value: 10, description: "Bonus points for adding an English translation" },
   { configKey: "points.audio.segment", value: 5, description: "Bonus points per transcribed segment" },
   { configKey: "points.audio.verified_bonus", value: 10, description: "Bonus points when an audio upload is verified" },
   { configKey: "points.translation.base", value: 10, description: "Base points for a sentence translation" },
