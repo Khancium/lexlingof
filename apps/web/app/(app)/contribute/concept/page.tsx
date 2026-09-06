@@ -144,7 +144,7 @@ export default function ConceptPage() {
         {step !== "categories" && (
           <button
             onClick={() => (step === "record" ? setStep("concepts") : setStep("categories"))}
-            className="rounded-full bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+            className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
           >
             ← Back
           </button>
@@ -158,7 +158,7 @@ export default function ConceptPage() {
             <button
               key={c.id}
               onClick={() => openCategory(c)}
-              className="flex flex-col items-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
+              className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
             >
               <span className="text-4xl">{c.icon ?? "📦"}</span>
               <span className="font-semibold text-ink">{c.nameEnglish}</span>
@@ -181,7 +181,7 @@ export default function ConceptPage() {
                 <button
                   key={item.id}
                   onClick={() => openConcept(item)}
-                  className="flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
+                  className="card-duo flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
                 >
                   <span className="text-3xl">🖼️</span>
                   <span className="font-semibold text-ink">{item.labelEnglish}</span>
@@ -200,7 +200,7 @@ export default function ConceptPage() {
             <p className="text-red-600">{conceptError ?? "Failed to load object"}</p>
           ) : (
             <>
-              <div className="rounded-2xl bg-surface p-8 text-center shadow-sm">
+              <div className="card-duo rounded-2xl bg-surface p-8 text-center shadow-sm">
                 {concept.media[0]?.publicUrl ? (
                   <Image
                     src={concept.media[0].publicUrl}
@@ -245,7 +245,7 @@ export default function ConceptPage() {
                 <p className="text-center text-emerald-600">This synonym slot is complete. Pick another synonym.</p>
               ) : (
                 <>
-                  <div className="flex flex-col items-center justify-center gap-4 rounded-2xl bg-surface py-10 shadow-sm">
+                  <div className="card-duo flex flex-col items-center justify-center gap-4 rounded-2xl bg-surface py-10 shadow-sm">
                     <AudioRecorder
                       maxDurationMs={5000}
                       onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
@@ -298,7 +298,7 @@ export default function ConceptPage() {
                   <button
                     onClick={handleSubmit}
                     disabled={!canSubmit}
-                    className="w-full rounded-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
+                    className="btn-duo w-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
                   >
                     {isSubmitting ? "Submitting..." : "Submit"}
                   </button>

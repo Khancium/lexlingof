@@ -119,7 +119,7 @@ export default function TranslatePage() {
         <p className="text-red-600">{sentenceError ?? "No sentences available"}</p>
       ) : (
         <>
-          <div className="rounded-2xl bg-surface p-8 shadow-sm">
+          <div className="card-duo rounded-2xl bg-surface p-8 shadow-sm">
             {sentence.category ? (
               <span className="mb-3 inline-block rounded-full bg-surface-card px-2 py-1 text-xs font-semibold text-ink">
                 {sentence.category.name}
@@ -148,7 +148,7 @@ export default function TranslatePage() {
             className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
 
-          <div className="flex flex-col items-center gap-2 rounded-2xl bg-surface py-8 shadow-sm">
+          <div className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface py-8 shadow-sm">
             <AudioRecorder
               maxDurationMs={MAX_DURATION_MS}
               onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
@@ -170,14 +170,14 @@ export default function TranslatePage() {
           <div className="flex gap-3">
             <button
               onClick={() => languageId && loadSentence(languageId)}
-              className="flex-1 rounded-full bg-surface-card py-3 font-semibold text-ink transition hover:bg-border"
+              className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border"
             >
               Skip
             </button>
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className="flex-[2] rounded-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              className="btn-duo flex-[2] bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
             >
               {isSubmitting ? "Submitting..." : "Submit"}
             </button>

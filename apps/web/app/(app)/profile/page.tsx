@@ -161,8 +161,8 @@ export default function ProfilePage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Total" value={stats?.totalContributions ?? user.totalContributions} />
         <StatCard label="Verified" value={verified} />
-        <StatCard label="Points" value={stats?.totalPoints ?? user.totalPoints} />
-        <StatCard label="Streak" value={streak} />
+        <StatCard label="Points" value={stats?.totalPoints ?? user.totalPoints} emoji="⚡" />
+        <StatCard label="Streak" value={streak} emoji="🔥" />
       </div>
 
       <div>
@@ -172,7 +172,7 @@ export default function ProfilePage() {
         ) : (
           <div className="grid grid-cols-3 gap-4 sm:grid-cols-5">
             {badges.map((badge) => (
-              <div key={badge.id} className="flex flex-col items-center gap-2 rounded-2xl bg-surface p-4 shadow-sm text-center">
+              <div key={badge.id} className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-4 shadow-sm text-center">
                 <span className="text-3xl">{badge.icon}</span>
                 <span className="text-xs font-medium text-ink">{badge.name}</span>
               </div>
@@ -185,7 +185,7 @@ export default function ProfilePage() {
         <div>
           <h2 className="mb-3 text-lg font-bold text-ink">My Details</h2>
           <p className="mb-3 text-xs text-ink-muted">These were set during sign-up and can&apos;t be changed here.</p>
-          <div className="grid grid-cols-2 gap-4 rounded-2xl bg-surface p-5 shadow-sm sm:grid-cols-3">
+          <div className="card-duo grid grid-cols-2 gap-4 rounded-2xl bg-surface p-5 shadow-sm sm:grid-cols-3">
             <DetailField label="Full Name" value={demographics.fullName} />
             <DetailField label="Age" value={String(demographics.age)} />
             <DetailField label="Gender" value={GENDER_LABELS[demographics.gender]} />
@@ -204,7 +204,7 @@ export default function ProfilePage() {
       <div>
         <h2 className="mb-3 text-lg font-bold text-ink">Biography</h2>
         {isEditingBio ? (
-          <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+          <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
             <textarea
               value={biography}
               onChange={(e) => setBiography(e.target.value)}
@@ -216,23 +216,23 @@ export default function ProfilePage() {
             <div className="flex gap-3">
               <button
                 onClick={() => setIsEditingBio(false)}
-                className="flex-1 rounded-full bg-surface-card py-2.5 font-semibold text-ink hover:bg-border"
+                className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-2.5 font-semibold text-ink hover:bg-border"
               >
                 Cancel
               </button>
               <button
                 onClick={saveBiography}
                 disabled={isSavingBio}
-                className="flex-1 rounded-full bg-brand py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                className="btn-duo flex-1 bg-brand py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
               >
                 {isSavingBio ? "Saving..." : "Save"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+          <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
             <p className="text-sm text-ink">{user.biography || <span className="text-ink-muted">No biography yet.</span>}</p>
-            <button onClick={startEditingBio} className="rounded-full bg-surface-card px-5 py-2 text-sm font-semibold text-ink hover:bg-border">
+            <button onClick={startEditingBio} className="btn-duo btn-duo-secondary bg-surface-card px-5 py-2 text-sm font-semibold text-ink hover:bg-border">
               Edit Biography
             </button>
           </div>
@@ -241,7 +241,7 @@ export default function ProfilePage() {
 
       <div>
         <h2 className="mb-3 text-lg font-bold text-ink">Change Password</h2>
-        <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+        <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
           <input
             type="password"
             value={currentPassword}
@@ -271,7 +271,7 @@ export default function ProfilePage() {
           <button
             onClick={handleChangePassword}
             disabled={isChangingPassword || !currentPassword || !newPassword || !confirmPassword}
-            className="rounded-full bg-brand px-5 py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+            className="btn-duo bg-brand px-5 py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
           >
             {isChangingPassword ? "Changing..." : "Change Password"}
           </button>
@@ -281,10 +281,13 @@ export default function ProfilePage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value, emoji }: { label: string; value: number; emoji?: string }) {
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-sm text-center">
-      <div className="text-2xl font-bold text-ink">{value}</div>
+    <div className="card-duo rounded-2xl bg-surface p-5 shadow-sm text-center">
+      <div className="animate-duo-pop text-2xl font-bold text-ink">
+        {emoji ? `${emoji} ` : ""}
+        {value}
+      </div>
       <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>
   );

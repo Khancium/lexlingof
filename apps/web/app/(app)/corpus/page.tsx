@@ -55,7 +55,7 @@ export default function CorpusPage() {
           {(Object.keys(MODULE_INFO) as ModuleType[]).map((moduleType) => {
             const info = MODULE_INFO[moduleType];
             return (
-              <div key={moduleType} className={`rounded-2xl border-l-4 bg-surface p-5 shadow-sm ${info.color}`}>
+              <div key={moduleType} className={`card-duo rounded-2xl border-l-4 bg-surface p-5 shadow-sm ${info.color}`}>
                 <div className="text-2xl">{info.icon}</div>
                 <div className="mt-2 text-2xl font-bold text-ink">{stats.countByModuleType[moduleType] ?? 0}</div>
                 <div className="text-sm text-ink-muted">{info.label}</div>
@@ -68,7 +68,7 @@ export default function CorpusPage() {
       {/* Category coverage */}
       <div>
         <h2 className="mb-4 text-xl font-bold text-ink">Category Coverage</h2>
-        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
+        <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
@@ -86,8 +86,8 @@ export default function CorpusPage() {
                   <td className="px-4 py-3 text-ink-muted">{category.conceptsWithRecordings}</td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="h-2 w-24 overflow-hidden rounded-full bg-surface-card">
-                        <div className="h-full bg-brand" style={{ width: `${category.wordRecordingCoveragePct}%` }} />
+                      <div className="progress-duo-track w-24" style={{ height: "0.5rem" }}>
+                        <div className="progress-duo-fill" style={{ width: `${category.wordRecordingCoveragePct}%` }} />
                       </div>
                       <span className="font-semibold text-ink">
                         Word Recording Coverage: {category.wordRecordingCoveragePct}%
@@ -104,13 +104,13 @@ export default function CorpusPage() {
       {/* Language breakdown */}
       <div>
         <h2 className="mb-4 text-xl font-bold text-ink">Contributions by Language</h2>
-        <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+        <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
           {languages.map((language) => (
             <div key={language.id} className="flex items-center gap-4">
               <span className="w-32 shrink-0 text-sm font-medium text-ink">{language.nameEnglish}</span>
-              <div className="h-4 flex-1 overflow-hidden rounded-full bg-surface-card">
+              <div className="progress-duo-track flex-1">
                 <div
-                  className="h-full bg-emerald-500"
+                  className="progress-duo-fill bg-emerald-500"
                   style={{ width: `${(language.contributionCount / maxLanguageCount) * 100}%` }}
                 />
               </div>
@@ -133,7 +133,7 @@ export default function CorpusPage() {
 
 function HeroStat({ value, label }: { value: number; label: string }) {
   return (
-    <div className="rounded-2xl bg-surface p-6 shadow-sm text-center">
+    <div className="card-duo rounded-2xl bg-surface p-6 shadow-sm text-center">
       <div className="text-3xl font-extrabold text-brand">{value.toLocaleString()}</div>
       <div className="mt-1 text-sm text-ink-muted">{label}</div>
     </div>

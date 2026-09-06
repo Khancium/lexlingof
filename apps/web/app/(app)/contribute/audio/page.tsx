@@ -272,7 +272,7 @@ export default function AudioUploadPage() {
           <button
             onClick={handleUploadAndContinue}
             disabled={!canUpload}
-            className="w-full rounded-full bg-accent py-3 font-semibold text-ink-inverted transition hover:opacity-90 disabled:opacity-50"
+            className="btn-duo w-full bg-accent py-3 font-semibold text-ink-inverted transition hover:opacity-90 disabled:opacity-50"
           >
             {isUploading ? "Uploading..." : "Upload & Continue"}
           </button>
@@ -343,7 +343,7 @@ export default function AudioUploadPage() {
           <button
             onClick={handleSubmitStep2}
             disabled={isSubmittingStep2}
-            className="w-full rounded-full bg-accent py-3 font-semibold text-ink-inverted transition hover:opacity-90 disabled:opacity-50"
+            className="btn-duo w-full bg-accent py-3 font-semibold text-ink-inverted transition hover:opacity-90 disabled:opacity-50"
           >
             {isSubmittingStep2 ? "Submitting..." : "Submit"}
           </button>

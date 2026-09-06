@@ -66,7 +66,7 @@ export default function GamificationConfigPage() {
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
+        <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
@@ -98,13 +98,13 @@ export default function GamificationConfigPage() {
                         <button
                           onClick={() => saveEdit(row.configKey)}
                           disabled={isSaving}
-                          className="rounded-full bg-brand px-3 py-1 text-xs font-semibold text-ink-inverted hover:bg-brand-dark"
+                          className="btn-duo bg-brand px-3 py-1 text-xs font-semibold text-ink-inverted hover:bg-brand-dark"
                         >
                           Save
                         </button>
                         <button
                           onClick={() => setEditingKey(null)}
-                          className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
+                          className="btn-duo btn-duo-secondary bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
                         >
                           Cancel
                         </button>

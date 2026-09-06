@@ -115,7 +115,7 @@ export default function ContributionsPage() {
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <div key={item.id} className="flex items-center gap-4 rounded-2xl bg-surface p-4 shadow-sm">
+            <div key={item.id} className="card-duo flex items-center gap-4 rounded-2xl bg-surface p-4 shadow-sm">
               {item.detail?.imageUrl ? (
                 <Image
                   src={item.detail.imageUrl}
@@ -151,7 +151,7 @@ export default function ContributionsPage() {
                 {item.detail?.audioFileId ? (
                   <button
                     onClick={() => togglePlay(item)}
-                    className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark"
+                    className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark"
                   >
                     {playingId === item.id ? "Stop" : "▶ Play"}
                   </button>

@@ -37,7 +37,7 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-muted px-4">
-      <div className="w-full max-w-sm rounded-3xl bg-surface p-8 shadow-sm border border-border">
+      <div className="card-duo w-full max-w-sm rounded-3xl bg-surface p-8 shadow-sm border border-border">
         <h1 className="mb-1 text-3xl font-bold text-brand">Lexlingo</h1>
         <p className="mb-6 text-sm text-ink-muted">Document languages together</p>
 
@@ -69,7 +69,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
+            className="btn-duo w-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
           >
             {isSubmitting ? "Logging in..." : "Log In"}
           </button>

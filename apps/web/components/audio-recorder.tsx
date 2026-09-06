@@ -196,8 +196,8 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   }
 
   const micMeter = (
-    <div className="h-2 w-56 overflow-hidden rounded-full bg-surface-card">
-      <div className="h-full bg-emerald-500 transition-[width]" style={{ width: `${Math.round(micLevel * 100)}%` }} />
+    <div className="progress-duo-track w-56" style={{ height: "0.5rem" }}>
+      <div className="progress-duo-fill bg-emerald-500" style={{ width: `${Math.round(micLevel * 100)}%` }} />
     </div>
   );
 
@@ -216,7 +216,7 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         <p className="text-sm text-red-600">{errorMessage}</p>
         <button
           onClick={requestMicAndRecord}
-          className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark"
+          className="btn-duo bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark"
         >
           Try Again
         </button>
@@ -247,12 +247,12 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     return (
       <div className="flex flex-col items-center gap-4">
         <div className="text-5xl font-bold tabular-nums text-ink">{formatRemaining(remainingMs)}</div>
-        <div className="h-3 w-64 overflow-hidden rounded-full bg-surface-card">
-          <div className="h-full bg-brand transition-[width]" style={{ width: `${progressPct}%` }} />
+        <div className="progress-duo-track w-64">
+          <div className="progress-duo-fill" style={{ width: `${progressPct}%` }} />
         </div>
         {micMeter}
         <p className="text-sm font-semibold text-brand">Recording... auto-stops at {(maxDurationMs / 1000).toFixed(0)} seconds</p>
-        <button onClick={stopRecording} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
+        <button onClick={stopRecording} className="btn-duo bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
           Stop
         </button>
       </div>
@@ -265,10 +265,10 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         <div className="text-4xl font-bold tabular-nums text-ink">{formatElapsed(durationMs)}</div>
         {micMeter}
         <div className="flex gap-3">
-          <button onClick={pauseRecording} className="rounded-full bg-surface-card px-5 py-3 font-semibold text-ink hover:bg-border">
+          <button onClick={pauseRecording} className="btn-duo btn-duo-secondary bg-surface-card px-5 py-3 font-semibold text-ink hover:bg-border">
             Pause
           </button>
-          <button onClick={stopRecording} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
+          <button onClick={stopRecording} className="btn-duo bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
             Stop
           </button>
         </div>
@@ -282,10 +282,10 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         <div className="text-4xl font-bold tabular-nums text-ink">{formatElapsed(durationMs)}</div>
         {micMeter}
         <div className="flex gap-3">
-          <button onClick={resumeRecording} className="rounded-full bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-500">
+          <button onClick={resumeRecording} className="btn-duo bg-emerald-600 px-5 py-3 font-semibold text-white hover:bg-emerald-500">
             Resume
           </button>
-          <button onClick={stopRecording} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
+          <button onClick={stopRecording} className="btn-duo bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
             Stop
           </button>
         </div>
@@ -308,10 +308,10 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         Recording ready -- {(durationMs / 1000).toFixed(1)}s
       </p>
       <div className="flex gap-3">
-        <button onClick={togglePlayback} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
+        <button onClick={togglePlayback} className="btn-duo bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
           {isPlaying ? "Pause" : "Play"}
         </button>
-        <button onClick={retake} className="rounded-full bg-surface-card px-5 py-3 font-semibold text-ink hover:bg-border">
+        <button onClick={retake} className="btn-duo btn-duo-secondary bg-surface-card px-5 py-3 font-semibold text-ink hover:bg-border">
           Retake
         </button>
       </div>

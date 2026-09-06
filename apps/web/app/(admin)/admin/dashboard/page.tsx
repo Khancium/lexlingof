@@ -53,7 +53,7 @@ export default function AdminDashboardPage() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="rounded-2xl bg-surface-card p-4 text-center text-sm font-semibold text-ink hover:bg-border shadow-sm"
+                  className="card-duo rounded-2xl bg-surface-card p-4 text-center text-sm font-semibold text-ink hover:bg-border shadow-sm"
                 >
                   {link.label}
                 </Link>
@@ -63,7 +63,7 @@ export default function AdminDashboardPage() {
 
           <div>
             <h2 className="mb-3 text-lg font-bold text-ink">Recent Contributions</h2>
-            <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
+            <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
               <table className="w-full text-left text-sm">
                 <thead className="border-b border-border text-ink-muted">
                   <tr>
@@ -94,7 +94,7 @@ export default function AdminDashboardPage() {
 
 function Card({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-2xl bg-surface p-5 shadow-sm text-center">
+    <div className="card-duo rounded-2xl bg-surface p-5 shadow-sm text-center">
       <div className="text-3xl font-bold text-ink">{value}</div>
       <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>

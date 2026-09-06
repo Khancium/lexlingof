@@ -24,7 +24,7 @@ export default function LeaderboardPage() {
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
+        <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
@@ -51,9 +51,11 @@ export default function LeaderboardPage() {
                         {row.level}
                       </span>
                     </td>
-                    <td className="px-4 py-3 font-semibold text-ink">{row.totalPoints.toLocaleString()}</td>
+                    <td className={`px-4 py-3 font-semibold text-ink ${isMe ? "animate-duo-pop" : ""}`}>
+                      ⚡ {row.totalPoints.toLocaleString()}
+                    </td>
                     <td className="px-4 py-3 text-ink-muted">{row.verifiedContributions}</td>
-                    <td className="px-4 py-3 text-orange-400">🔥 {row.currentStreak}</td>
+                    <td className={`px-4 py-3 text-orange-400 ${isMe ? "animate-duo-pop" : ""}`}>🔥 {row.currentStreak}</td>
                   </tr>
                 );
               })}

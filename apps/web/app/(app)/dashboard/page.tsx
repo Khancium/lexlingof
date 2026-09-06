@@ -53,7 +53,7 @@ export default function DashboardPage() {
     <div className="space-y-8">
       <h1 className="text-3xl font-bold text-ink">Welcome back, {user?.displayName}</h1>
 
-      <div className={`rounded-2xl p-6 text-white shadow-sm ${LEVEL_COLOR[level]}`}>
+      <div className={`card-duo rounded-2xl p-6 text-white shadow-sm ${LEVEL_COLOR[level]}`}>
         <div className="flex items-center justify-between">
           <div>
             <div className="text-2xl font-extrabold">{level}</div>
@@ -68,8 +68,8 @@ export default function DashboardPage() {
           )}
         </div>
         {nextThreshold ? (
-          <div className="mt-4 h-2 overflow-hidden rounded-full bg-black/20">
-            <div className="h-full bg-white" style={{ width: `${progressPct}%` }} />
+          <div className="progress-duo-track mt-4 bg-black/20">
+            <div className="progress-duo-fill bg-white" style={{ width: `${progressPct}%` }} />
           </div>
         ) : null}
       </div>
@@ -77,8 +77,8 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Total Contributions" value={stats?.totalContributions ?? 0} />
         <StatCard label="Verified" value={verified} />
-        <StatCard label="Points" value={stats?.totalPoints ?? user?.totalPoints ?? 0} />
-        <StatCard label="Streak" value={streak} />
+        <StatCard label="Points" value={stats?.totalPoints ?? user?.totalPoints ?? 0} emoji="⚡" />
+        <StatCard label="Streak" value={streak} emoji="🔥" />
       </div>
 
       <div>
@@ -88,7 +88,7 @@ export default function DashboardPage() {
             <Link
               key={action.href}
               href={action.href}
-              className={`rounded-2xl border-l-4 bg-surface p-6 font-semibold text-ink shadow-sm transition hover:bg-surface-card ${action.color}`}
+              className={`card-duo rounded-2xl border-l-4 bg-surface p-6 font-semibold text-ink shadow-sm transition hover:bg-surface-card ${action.color}`}
             >
               {action.title}
             </Link>
@@ -103,7 +103,7 @@ export default function DashboardPage() {
         ) : (
           <div className="space-y-2">
             {recent.map((item) => (
-              <div key={item.id} className="flex items-center justify-between rounded-xl bg-surface p-4 shadow-sm">
+              <div key={item.id} className="card-duo flex items-center justify-between rounded-xl bg-surface p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <span>{MODULE_ICON[item.moduleType]}</span>
                   <span
@@ -123,10 +123,13 @@ export default function DashboardPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number }) {
+function StatCard({ label, value, emoji }: { label: string; value: number; emoji?: string }) {
   return (
-    <div className="rounded-2xl bg-surface-card p-5 text-center shadow-sm">
-      <div className="text-2xl font-bold text-ink">{value}</div>
+    <div className="card-duo rounded-2xl bg-surface-card p-5 text-center shadow-sm">
+      <div className="animate-duo-pop text-2xl font-bold text-ink">
+        {emoji ? `${emoji} ` : ""}
+        {value}
+      </div>
       <div className="mt-1 text-xs text-ink-muted">{label}</div>
     </div>
   );

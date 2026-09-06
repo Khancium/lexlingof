@@ -34,11 +34,11 @@ export function AdminBulkBar({
       <button
         onClick={handleDelete}
         disabled={isDeleting}
-        className="rounded-full bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+        className="btn-duo btn-duo-danger bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-500 disabled:opacity-50"
       >
         {isDeleting ? "Deleting..." : "Delete Selected"}
       </button>
-      <button onClick={onClear} className="ml-auto rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border">
+      <button onClick={onClear} className="btn-duo btn-duo-secondary ml-auto bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border">
         Clear
       </button>
     </div>

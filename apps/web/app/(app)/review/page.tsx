@@ -46,8 +46,8 @@ export default function ReviewPage() {
         <div className="text-6xl">🏆</div>
         <h1 className="text-2xl font-bold text-ink">Unlock Review Access</h1>
         <p className="text-ink-muted">Review access requires SILVER level (100 verified contributions)</p>
-        <div className="h-2.5 overflow-hidden rounded-full bg-surface-card">
-          <div className="h-full bg-yellow-500" style={{ width: `${progressPct}%` }} />
+        <div className="progress-duo-track">
+          <div className="progress-duo-fill bg-yellow-500" style={{ width: `${progressPct}%` }} />
         </div>
         <p className="text-sm font-semibold text-ink">
           {verified} / {threshold}
@@ -135,7 +135,7 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
   }
 
   return (
-    <div className="space-y-4 rounded-2xl bg-surface p-5 shadow-sm">
+    <div className="card-duo space-y-4 rounded-2xl bg-surface p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <div>
           <p className="font-semibold text-ink">{item.contributor.displayName}</p>
@@ -186,7 +186,7 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
         <button
           onClick={togglePlay}
           disabled={!item.detail.audioFileId || isLoadingAudio}
-          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+          className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
         >
           {isLoadingAudio ? "Loading..." : isPlaying ? "Pause" : "Play"}
         </button>
@@ -217,21 +217,21 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
         <button
           onClick={() => submitDecision("valid")}
           disabled={pendingDecision !== null}
-          className="flex-1 rounded-full bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          className="btn-duo flex-1 bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
         >
           ✓ Valid
         </button>
         <button
           onClick={() => submitDecision("needs_correction")}
           disabled={pendingDecision !== null}
-          className="flex-1 rounded-full bg-yellow-500 py-2.5 font-semibold text-ink hover:bg-yellow-400 disabled:opacity-50"
+          className="btn-duo flex-1 bg-yellow-500 py-2.5 font-semibold text-ink hover:bg-yellow-400 disabled:opacity-50"
         >
           ⚠ Needs Correction
         </button>
         <button
           onClick={() => submitDecision("invalid")}
           disabled={pendingDecision !== null}
-          className="flex-1 rounded-full bg-red-600 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+          className="btn-duo btn-duo-danger flex-1 bg-red-600 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
         >
           ✕ Invalid
         </button>

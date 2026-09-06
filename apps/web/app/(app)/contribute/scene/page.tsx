@@ -85,7 +85,7 @@ export default function ScenePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="relative h-80 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
+      <div className="card-duo relative h-80 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
         {scene.imageUrl ? (
           <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" />
         ) : (
@@ -106,7 +106,7 @@ export default function ScenePage() {
         need.
       </p>
 
-      <div className="flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
+      <div className="card-duo flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
         <AudioRecorder
           onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
           onError={(message) => setSubmitError(message)}
@@ -126,7 +126,7 @@ export default function ScenePage() {
       <button
         onClick={handleSubmit}
         disabled={!canSubmit}
-        className="w-full rounded-full bg-amber-600 py-3 font-semibold text-white transition hover:bg-amber-500 disabled:opacity-50"
+        className="btn-duo w-full bg-amber-600 py-3 font-semibold text-white transition hover:bg-amber-500 disabled:opacity-50"
       >
         {isSubmitting ? "Submitting..." : "Submit"}
       </button>

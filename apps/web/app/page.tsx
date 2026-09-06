@@ -46,7 +46,7 @@ export default async function LandingPage() {
             <Link href="/login" className="rounded-full px-4 py-2 text-sm font-medium text-ink-muted hover:text-ink">
               Log In
             </Link>
-            <Link href="/register" className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark">
+            <Link href="/register" className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark">
               Register
             </Link>
           </div>
@@ -61,7 +61,7 @@ export default async function LandingPage() {
         </p>
         <Link
           href="/register"
-          className="mt-10 inline-block rounded-full bg-brand px-8 py-4 text-lg font-semibold text-ink-inverted shadow-sm transition hover:bg-brand-dark"
+          className="btn-duo mt-10 inline-block bg-brand px-8 py-4 text-lg font-semibold text-ink-inverted shadow-sm transition hover:bg-brand-dark"
         >
           Start Contributing
         </Link>
@@ -69,7 +69,7 @@ export default async function LandingPage() {
 
       <section className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-6 pb-24 sm:grid-cols-2 lg:grid-cols-4">
         {MODULES.map((m) => (
-          <div key={m.title} className={`rounded-2xl border-l-4 bg-surface p-6 shadow-sm ${m.color}`}>
+          <div key={m.title} className={`card-duo rounded-2xl border-l-4 bg-surface p-6 shadow-sm ${m.color}`}>
             <h3 className="text-lg font-bold text-ink">{m.title}</h3>
             <p className="mt-2 text-sm text-ink-muted">{m.description}</p>
           </div>

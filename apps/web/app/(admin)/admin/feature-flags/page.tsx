@@ -43,7 +43,7 @@ export default function FeatureFlagsPage() {
       ) : (
         <div className="space-y-3">
           {flags.map((flag) => (
-            <div key={flag.flagKey} className="flex items-center justify-between rounded-2xl bg-surface p-4 shadow-sm">
+            <div key={flag.flagKey} className="card-duo flex items-center justify-between rounded-2xl bg-surface p-4 shadow-sm">
               <div>
                 <p className="font-mono text-sm text-ink">{flag.flagKey}</p>
                 <p className="text-xs text-ink-muted">{flag.description}</p>

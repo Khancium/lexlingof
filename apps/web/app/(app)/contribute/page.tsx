@@ -41,7 +41,7 @@ export default function ContributePage() {
           <Link
             key={card.href}
             href={card.href}
-            className={`flex items-center gap-4 rounded-2xl border-l-4 bg-surface p-5 shadow-sm transition hover:shadow-md ${card.color}`}
+            className={`card-duo flex items-center gap-4 rounded-2xl border-l-4 bg-surface p-5 shadow-sm transition hover:shadow-md ${card.color}`}
           >
             <span className="text-3xl">{card.icon}</span>
             <div className="flex-1">

@@ -33,10 +33,10 @@ export function AdminBulkUpload({
   }
 
   return (
-    <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+    <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-ink">{label}</h2>
-        <label className="cursor-pointer rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border">
+        <label className="btn-duo btn-duo-secondary cursor-pointer bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border">
           {isUploading ? "Uploading..." : "Choose File (.csv, .json)"}
           <input
             type="file"

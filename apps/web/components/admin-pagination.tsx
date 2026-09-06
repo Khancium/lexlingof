@@ -21,7 +21,7 @@ export function Pagination({
       <button
         onClick={() => onChange(Math.max(0, offset - limit))}
         disabled={offset === 0}
-        className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
+        className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
       >
         ← Previous
       </button>
@@ -31,7 +31,7 @@ export function Pagination({
       <button
         onClick={() => onChange(offset + limit)}
         disabled={offset + limit >= total}
-        className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
+        className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
       >
         Next →
       </button>

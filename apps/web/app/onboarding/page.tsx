@@ -129,7 +129,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-muted px-4 py-12">
-      <div className="w-full max-w-lg rounded-3xl bg-surface p-8 shadow-sm border border-border">
+      <div className="card-duo w-full max-w-lg rounded-3xl bg-surface p-8 shadow-sm border border-border">
         <h1 className="mb-1 text-2xl font-bold text-ink">Tell us about yourself</h1>
         <p className="mb-6 text-sm text-ink-muted">
           This helps us understand who&apos;s contributing to the corpus.
@@ -319,7 +319,7 @@ export default function OnboardingPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full rounded-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
+            className="btn-duo w-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
           >
             {isSubmitting ? "Saving..." : "Continue"}
           </button>

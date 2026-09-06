@@ -153,7 +153,7 @@ export default function AdminConceptsPage() {
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-ink">Concepts</h1>
 
-      <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+      <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
         <h2 className="text-lg font-bold text-ink">Add New Concept</h2>
         <div className="flex flex-wrap gap-3">
           <select
@@ -183,7 +183,7 @@ export default function AdminConceptsPage() {
           <button
             onClick={handleCreate}
             disabled={isCreating}
-            className="rounded-full bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+            className="btn-duo bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
           >
             {isCreating ? "Adding..." : "Add"}
           </button>
@@ -213,7 +213,7 @@ export default function AdminConceptsPage() {
         <button
           onClick={handleBulkMoveCategory}
           disabled={!bulkCategoryId || isBulkEditing}
-          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+          className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
         >
           {isBulkEditing ? "Applying..." : "Apply"}
         </button>
@@ -222,7 +222,7 @@ export default function AdminConceptsPage() {
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
+        <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
@@ -278,13 +278,13 @@ export default function AdminConceptsPage() {
                         <button
                           onClick={() => saveEdit(concept.id)}
                           disabled={isSaving}
-                          className="rounded-full bg-brand px-3 py-1 text-xs font-semibold text-ink-inverted hover:bg-brand-dark"
+                          className="btn-duo bg-brand px-3 py-1 text-xs font-semibold text-ink-inverted hover:bg-brand-dark"
                         >
                           Save
                         </button>
                         <button
                           onClick={() => setEditingId(null)}
-                          className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
+                          className="btn-duo btn-duo-secondary bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
                         >
                           Cancel
                         </button>

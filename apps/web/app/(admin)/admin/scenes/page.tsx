@@ -164,7 +164,7 @@ export default function AdminScenesPage() {
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-ink">Scenes</h1>
 
-      <div className="space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+      <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
         <h2 className="text-lg font-bold text-ink">Add New Scene</h2>
         <div className="flex flex-wrap gap-3">
           <input
@@ -205,7 +205,7 @@ export default function AdminScenesPage() {
           <button
             onClick={handleCreate}
             disabled={isCreating}
-            className="rounded-full bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+            className="btn-duo bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
           >
             {isCreating ? "Adding..." : "Add Scene"}
           </button>
@@ -231,7 +231,7 @@ export default function AdminScenesPage() {
         <button
           onClick={handleBulkSetDifficulty}
           disabled={!bulkDifficulty || isBulkEditing}
-          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+          className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
         >
           {isBulkEditing ? "Applying..." : "Apply"}
         </button>
@@ -248,7 +248,7 @@ export default function AdminScenesPage() {
             </label>
           )}
           {scenes.map((scene) => (
-            <div key={scene.id} className="rounded-2xl bg-surface p-4 shadow-sm">
+            <div key={scene.id} className="card-duo rounded-2xl bg-surface p-4 shadow-sm">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <input type="checkbox" checked={selected.has(scene.id)} onChange={() => toggleSelected(scene.id)} />
@@ -325,7 +325,7 @@ export default function AdminScenesPage() {
                     <button
                       onClick={handleAddCoverage}
                       disabled={isAddingCoverage || !coverageConceptId}
-                      className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
                     >
                       Add
                     </button>

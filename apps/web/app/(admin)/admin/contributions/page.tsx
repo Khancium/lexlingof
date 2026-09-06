@@ -108,7 +108,7 @@ export default function AdminContributionsPage() {
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
+        <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
@@ -137,14 +137,14 @@ export default function AdminContributionsPage() {
                       <button
                         onClick={() => handleAction(item.contributionId, "verified")}
                         disabled={actioningId === item.contributionId || item.status === "verified"}
-                        className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
+                        className="btn-duo bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-40"
                       >
                         Verify
                       </button>
                       <button
                         onClick={() => handleAction(item.contributionId, "rejected")}
                         disabled={actioningId === item.contributionId || item.status === "rejected"}
-                        className="rounded-full bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-40"
+                        className="btn-duo btn-duo-danger bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-40"
                       >
                         Reject
                       </button>
