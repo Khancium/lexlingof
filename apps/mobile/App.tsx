@@ -1,10 +1,19 @@
-import { useEffect, useRef } from 'react';
-import { Alert, Platform } from 'react-native';
+import { useCallback, useEffect, useRef } from 'react';
+import { Alert, Platform, Text, TextInput } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SplashScreen from 'expo-splash-screen';
+import {
+  useFonts,
+  Nunito_400Regular,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Nunito_800ExtraBold,
+  Nunito_900Black,
+} from '@expo-google-fonts/nunito';
 import {
   AuthorizationStatus,
   getMessaging,
@@ -18,6 +27,20 @@ import { syncService } from './src/services/sync.service';
 import { api } from './src/services/api.service';
 
 const DEVICE_TOKEN_KEY = 'lexlingo_device_token';
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
+
+// Applies Nunito app-wide as the default text font without having to add
+// fontFamily to every individual StyleSheet -- RN still honors
+// Text/TextInput.defaultProps.style for this even as function components.
+// Bold headings that explicitly want a heavier cut can still override with
+// fontFamily: 'Nunito_800ExtraBold' locally; this patch only sets the
+// regular-weight default.
+type DefaultPropsHost = { defaultProps?: { style?: unknown } };
+for (const Component of [Text, TextInput] as unknown as DefaultPropsHost[]) {
+  Component.defaultProps = Component.defaultProps ?? {};
+  Component.defaultProps.style = [{ fontFamily: 'Nunito_400Regular' }, Component.defaultProps.style];
+}
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -101,8 +124,26 @@ function AppInitializer({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
+  const [fontsLoaded] = useFonts({
+    Nunito_400Regular,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
+    Nunito_800ExtraBold,
+    Nunito_900Black,
+  });
+
+  const onLayoutRootView = useCallback(async () => {
+    if (fontsLoaded) {
+      await SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [fontsLoaded]);
+
+  if (!fontsLoaded) {
+    return null;
+  }
+
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <NavigationContainer>

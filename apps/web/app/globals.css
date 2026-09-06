@@ -1,29 +1,129 @@
 @import "tailwindcss";
 
 /*
- * Lexlingo light theme -- crimson-red primary + light-violet accent on a
- * white/near-white surface, replacing the earlier dark slate/blue theme.
- * Semantic tokens so components can reference `bg-brand`, `text-ink`, etc.
- * instead of raw Tailwind color/shade pairs.
+ * Lexlingo "Duolingo-inspired" theme -- signature green primary, sky-blue
+ * secondary, gold streak/points accent, and violet accent, on a white
+ * surface. Token names stay the same as the previous theme (--color-brand,
+ * --color-ink, etc.) so most existing className strings keep working
+ * unchanged; only their values moved. The one genuinely new thing is the
+ * chunky "3D press" button/card treatment below, which needs actual classes
+ * added to markup (see .btn-duo*, .card-duo).
  */
 @theme {
-  --color-brand: #ef1e4b;
-  --color-brand-dark: #c8123a;
-  --color-brand-light: #fde2e8;
-  --color-accent: #a78bfa;
-  --color-accent-light: #ede9fe;
+  --color-brand: #58cc02; /* Duolingo green */
+  --color-brand-dark: #46a302; /* bottom-shadow shade + hover */
+  --color-brand-light: #d7ffb8;
+
+  --color-secondary: #1cb0f6; /* sky blue -- selected states, links */
+  --color-secondary-dark: #1899d6;
+  --color-secondary-light: #ddf4ff;
+
+  --color-accent: #ce82ff; /* violet -- decorative/secondary accent */
+  --color-accent-dark: #a568cc;
+  --color-accent-light: #f3e3ff;
+
+  --color-gold: #ffc800; /* streak flame / XP */
+  --color-gold-dark: #e0ac00;
+  --color-danger: #ff4b4b; /* hearts / errors */
+  --color-danger-dark: #e63e3e;
 
   --color-surface: #ffffff;
-  --color-surface-muted: #f7f7f8;
-  --color-surface-card: #f3f4f6;
-  --color-border: #e5e7eb;
+  --color-surface-muted: #f7f7f7;
+  --color-surface-card: #f0f0f0;
+  --color-border: #e5e5e5;
 
-  --color-ink: #111827;
-  --color-ink-muted: #6b7280;
+  --color-ink: #3c3c3c;
+  --color-ink-muted: #777777;
   --color-ink-inverted: #ffffff;
+
+  --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
 }
 
 body {
   background-color: var(--color-surface-muted);
   color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/*
+ * The signature Duolingo button: a flat-top color block sitting on a
+ * solid, no-blur "shadow" a few pixels tall in a darker shade, which reads
+ * as a chunky 3D button. Pressing it drops the button onto its shadow
+ * (translate down by the shadow's height, shadow disappears) for a tactile
+ * click. `active:` covers touch/mouse press; no JS needed.
+ */
+.btn-duo {
+  border-radius: 1rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  transition:
+    transform 0.1s ease,
+    box-shadow 0.1s ease,
+    background-color 0.15s ease;
+  box-shadow: 0 4px 0 0 var(--btn-duo-shadow, var(--color-brand-dark));
+}
+.btn-duo:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 0 var(--btn-duo-shadow, var(--color-brand-dark));
+}
+.btn-duo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-duo-secondary {
+  --btn-duo-shadow: #d6d6d6;
+}
+.btn-duo-blue {
+  --btn-duo-shadow: var(--color-secondary-dark);
+}
+.btn-duo-danger {
+  --btn-duo-shadow: var(--color-danger-dark);
+}
+
+/* Rounded, gently-lifted card with a soft hover bounce -- used for lesson
+   nodes, dashboard tiles, and list cards throughout. */
+.card-duo {
+  border-radius: 1.25rem;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.card-duo:hover {
+  transform: translateY(-2px);
+}
+
+/* Thick pill progress bar (onboarding steps, lesson/level progress). Animate
+   the width from JS/inline style; this just handles the smoothing + shape. */
+.progress-duo-track {
+  height: 1rem;
+  border-radius: 999px;
+  background-color: var(--color-surface-card);
+  overflow: hidden;
+}
+.progress-duo-fill {
+  height: 100%;
+  border-radius: 999px;
+  background-color: var(--color-brand);
+  transition: width 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Small pop-in used for streak/points/heart badges and newly-revealed
+   content (e.g. a correct-answer state) so numbers don't just snap in. */
+@keyframes duo-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.animate-duo-pop {
+  animation: duo-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }

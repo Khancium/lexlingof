@@ -1,35 +1,47 @@
-// Shared light "Strava-like" theme palette. Import this instead of
-// hardcoding hex color strings in component/screen styles.
+// Duolingo-inspired light theme -- signature green primary, sky-blue
+// secondary, gold streak/points accent, violet accent. Key names are kept
+// identical to the previous (red) theme so most `colors.brand` / `colors.ink`
+// usages keep working unchanged; only the values moved.
 export const colors = {
-  // Brand red -- primary actions, active tab, brand accents.
-  brand: '#EF1E4B',
-  brandDark: '#C8123A',
-  brandLight: '#FBD5DE',
+  // Brand green -- primary actions, active tab, brand accents.
+  brand: '#58CC02',
+  brandDark: '#46A302', // bottom-shadow shade for the 3D press button + hover
+  brandLight: '#D7FFB8',
 
-  // Secondary violet accent -- decorative/illustrative use only.
-  accent: '#A78BFA',
-  accentLight: '#EDE9FE',
+  // Sky blue -- selected states, secondary CTAs, links.
+  secondary: '#1CB0F6',
+  secondaryDark: '#1899D6',
+  secondaryLight: '#DDF4FF',
+
+  // Gold -- streak flame / XP / points.
+  gold: '#FFC800',
+  goldDark: '#E0AC00',
+
+  // Violet accent -- decorative/illustrative use only.
+  accent: '#CE82FF',
+  accentLight: '#F3E3FF',
 
   // Backgrounds.
-  surface: '#F7F7F8',
-  surfaceMuted: '#F3F4F6',
+  surface: '#F7F7F7',
+  surfaceMuted: '#F0F0F0',
   surfaceCard: '#FFFFFF',
 
   // Borders.
-  border: '#E5E7EB',
+  border: '#E5E5E5',
 
   // Text.
-  ink: '#111827',
-  inkMuted: '#6B7280',
+  ink: '#3C3C3C',
+  inkMuted: '#777777',
   inkInverted: '#FFFFFF',
 
   // Placeholder text.
-  placeholder: '#9CA3AF',
+  placeholder: '#AFAFAF',
 
   // Status colors.
-  danger: '#DC2626',
-  success: '#059669',
-  warning: '#CA8A04',
+  danger: '#FF4B4B',
+  dangerDark: '#E63E3E',
+  success: '#58CC02',
+  warning: '#FFC800',
 } as const;
 
 export type Colors = typeof colors;
