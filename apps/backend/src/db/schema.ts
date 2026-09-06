@@ -589,7 +589,7 @@ export const translations = pgTable(
       .notNull()
       .references(() => sentences.id),
     audioFileId: uuid("audio_file_id").references(() => audioFiles.id),
-    nativeText: text("native_text").notNull(),
+    nativeText: text("native_text"),
     romanization: text("romanization"),
     ipa: text("ipa"),
     notes: text("notes"),

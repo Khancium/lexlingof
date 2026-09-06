@@ -12,10 +12,10 @@ const randomQuerySchema = z.object({ languageId: z.string().uuid() });
 const idParamSchema = z.object({ id: z.string().uuid() });
 
 const submitTranslationSchema = z.object({
-  nativeText: z.string().min(1),
+  nativeText: z.string().min(1).optional(),
   romanization: z.string().optional(),
   ipa: z.string().optional(),
-  audioFileId: z.string().uuid().optional(),
+  audioFileId: z.string().uuid(),
   languageId: z.string().uuid(),
   dialectId: z.string().uuid().optional(),
   deviceId: z.string().optional(),

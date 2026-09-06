@@ -1,91 +1,122 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type Language, type RandomSentence } from "@/lib/api";
+import { api, type RandomSentence } from "@/lib/api";
 import { uploadAudioBlob } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
+type Draft = { translation: string; romanization: string; ipa: string; recording: Recording | null };
 
 // The backend enforces no duration cap for Module 3, but the spec calls for
 // a soft ceiling here ("no 3-second limit, can go up to 60 seconds").
 const MAX_DURATION_MS = 60000;
 
-export default function TranslatePage() {
-  const { languageId: defaultLanguageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
-  const [languages, setLanguages] = useState<Language[]>([]);
-  const [languageId, setLanguageId] = useState<string | null>(null);
+const emptyDraft: Draft = { translation: "", romanization: "", ipa: "", recording: null };
 
-  const [sentence, setSentence] = useState<RandomSentence | null>(null);
+export default function TranslatePage() {
+  const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+
+  // History of sentences visited this session, so Previous/Next can move
+  // back and forth without re-fetching or losing in-progress drafts.
+  const [history, setHistory] = useState<RandomSentence[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
+
   const [loadingSentence, setLoadingSentence] = useState(true);
   const [sentenceError, setSentenceError] = useState<string | null>(null);
 
-  const [translation, setTranslation] = useState("");
-  const [romanization, setRomanization] = useState("");
-  const [ipa, setIpa] = useState("");
-  const [recording, setRecording] = useState<Recording | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.languages.getAll().then(setLanguages);
-  }, []);
+  const sentence = historyIndex >= 0 ? history[historyIndex] : null;
+  const draft = sentence ? (drafts[sentence.id] ?? emptyDraft) : emptyDraft;
+
+  function updateDraft(patch: Partial<Draft>) {
+    if (!sentence) return;
+    setDrafts((prev) => ({ ...prev, [sentence.id]: { ...(prev[sentence.id] ?? emptyDraft), ...patch } }));
+  }
+
+  const fetchNewSentence = useCallback(
+    async (forLanguageId: string) => {
+      setLoadingSentence(true);
+      setSentenceError(null);
+      setSuccessMessage(null);
+      setDetailsOpen(false);
+      try {
+        const next = await api.contributions.getRandomSentence(forLanguageId);
+        setHistory((prev) => {
+          const updated = [...prev, next];
+          setHistoryIndex(updated.length - 1);
+          return updated;
+        });
+      } catch (err) {
+        setSentenceError(err instanceof Error ? err.message : "No sentences available");
+      } finally {
+        setLoadingSentence(false);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
-    if (defaultLanguageId && languageId === null) setLanguageId(defaultLanguageId);
-  }, [defaultLanguageId, languageId]);
+    if (languageId && history.length === 0) fetchNewSentence(languageId);
+  }, [languageId, history.length, fetchNewSentence]);
 
-  const loadSentence = useCallback(async (forLanguageId: string) => {
-    setLoadingSentence(true);
-    setSentenceError(null);
-    setTranslation("");
-    setRomanization("");
-    setIpa("");
-    setRecording(null);
+  function goPrevious() {
+    if (historyIndex <= 0) return;
     setSuccessMessage(null);
-    try {
-      setSentence(await api.contributions.getRandomSentence(forLanguageId));
-    } catch (err) {
-      setSentence(null);
-      setSentenceError(err instanceof Error ? err.message : "No sentences available");
-    } finally {
-      setLoadingSentence(false);
-    }
-  }, []);
+    setSubmitError(null);
+    setDetailsOpen(false);
+    setHistoryIndex((i) => i - 1);
+  }
 
-  useEffect(() => {
-    if (languageId) loadSentence(languageId);
-  }, [languageId, loadSentence]);
+  function goNext() {
+    setSuccessMessage(null);
+    setSubmitError(null);
+    if (historyIndex < history.length - 1) {
+      setDetailsOpen(false);
+      setHistoryIndex((i) => i + 1);
+    } else if (languageId) {
+      fetchNewSentence(languageId);
+    }
+  }
 
   async function handleSubmit() {
-    if (!sentence || !languageId || translation.trim().length === 0) return;
+    if (!sentence || !languageId || !draft.recording) return;
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      let audioFileId: string | undefined;
-      if (recording) {
-        audioFileId = await uploadAudioBlob({
-          blob: recording.file,
-          filename: recording.file.name,
-          mimeType: recording.file.type,
-          durationMs: recording.durationMs,
-          module: "TRANSLATION",
-        });
-      }
+      const audioFileId = await uploadAudioBlob({
+        blob: draft.recording.file,
+        filename: draft.recording.file.name,
+        mimeType: draft.recording.file.type,
+        durationMs: draft.recording.durationMs,
+        module: "TRANSLATION",
+      });
 
       const result = await api.contributions.submitTranslation(sentence.id, {
-        nativeText: translation.trim(),
-        romanization: romanization.trim() || undefined,
-        ipa: ipa.trim() || undefined,
+        nativeText: draft.translation.trim() || undefined,
+        romanization: draft.romanization.trim() || undefined,
+        ipa: draft.ipa.trim() || undefined,
         audioFileId,
         languageId,
         dialectId: dialectId ?? undefined,
       });
 
       setSuccessMessage(`Submitted! +${result.pointsAwarded} points`);
-      loadSentence(languageId);
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[sentence.id];
+        return next;
+      });
+      // Drop the submitted sentence from history and load a fresh one.
+      setHistory((prev) => prev.filter((s) => s.id !== sentence.id));
+      setHistoryIndex((i) => i - 1);
+      fetchNewSentence(languageId);
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Failed to submit translation");
     } finally {
@@ -93,25 +124,11 @@ export default function TranslatePage() {
     }
   }
 
-  const canSubmit = !!sentence && !!languageId && translation.trim().length > 0 && !isSubmitting;
+  const canSubmit = !!sentence && !!languageId && !!draft.recording && !isSubmitting;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <h1 className="text-2xl font-bold text-ink">Translate a Sentence</h1>
-
-      {languages.length > 1 ? (
-        <select
-          value={languageId ?? ""}
-          onChange={(e) => setLanguageId(e.target.value)}
-          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
-        >
-          {languages.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.nameEnglish}
-            </option>
-          ))}
-        </select>
-      ) : null}
 
       {loadingSentence ? (
         <p className="text-ink-muted">Loading...</p>
@@ -128,40 +145,55 @@ export default function TranslatePage() {
             <p className="text-2xl font-bold text-ink">{sentence.englishText}</p>
           </div>
 
-          <textarea
-            value={translation}
-            onChange={(e) => setTranslation(e.target.value)}
-            placeholder="Translation *"
-            rows={3}
-            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-          />
-          <input
-            value={romanization}
-            onChange={(e) => setRomanization(e.target.value)}
-            placeholder="Romanization"
-            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-          />
-          <input
-            value={ipa}
-            onChange={(e) => setIpa(e.target.value)}
-            placeholder="IPA"
-            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-          />
-
           <div className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface py-8 shadow-sm">
             <AudioRecorder
+              key={sentence.id}
               maxDurationMs={MAX_DURATION_MS}
-              onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
+              onRecordingComplete={(file, durationMs, checksum) => updateDraft({ recording: { file, durationMs, checksum } })}
               onError={(message) => setSubmitError(message)}
             />
-            <p className="text-xs text-ink-muted">Optional -- record yourself reading your translation (up to 60s)</p>
+            <p className="text-xs text-ink-muted">Record yourself reading your translation (up to 60s)</p>
+          </div>
+
+          <div className="overflow-hidden rounded-2xl bg-surface shadow-sm">
+            <button
+              type="button"
+              onClick={() => setDetailsOpen((v) => !v)}
+              className="flex w-full items-center justify-between px-5 py-4 text-left"
+            >
+              <span className="font-medium text-ink">Add translation text (optional)</span>
+              <span className={`text-ink-muted transition-transform ${detailsOpen ? "rotate-180" : ""}`}>▾</span>
+            </button>
+            {detailsOpen && (
+              <div className="space-y-3 px-5 pb-5">
+                <textarea
+                  value={draft.translation}
+                  onChange={(e) => updateDraft({ translation: e.target.value })}
+                  placeholder="Translation"
+                  rows={3}
+                  className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                />
+                <input
+                  value={draft.romanization}
+                  onChange={(e) => updateDraft({ romanization: e.target.value })}
+                  placeholder="Romanization"
+                  className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                />
+                <input
+                  value={draft.ipa}
+                  onChange={(e) => updateDraft({ ipa: e.target.value })}
+                  placeholder="IPA"
+                  className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                />
+              </div>
+            )}
           </div>
 
           <p className="text-center text-sm text-ink-muted">
-            Base points, plus bonuses for romanization, IPA, and an audio recording.
+            Base points, plus bonuses for romanization and IPA.
           </p>
 
-          {!defaultLanguageId && !languageLoading ? (
+          {!languageId && !languageLoading ? (
             <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
           ) : null}
           {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
@@ -169,19 +201,26 @@ export default function TranslatePage() {
 
           <div className="flex gap-3">
             <button
-              onClick={() => languageId && loadSentence(languageId)}
-              className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border"
+              onClick={goPrevious}
+              disabled={historyIndex <= 0}
+              className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
             >
-              Skip
+              ← Previous
             </button>
             <button
-              onClick={handleSubmit}
-              disabled={!canSubmit}
-              className="btn-duo flex-[2] bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              onClick={goNext}
+              className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border"
             >
-              {isSubmitting ? "Submitting..." : "Submit"}
+              Next →
             </button>
           </div>
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="btn-duo w-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {isSubmitting ? "Submitting..." : "Submit"}
+          </button>
         </>
       )}
     </div>

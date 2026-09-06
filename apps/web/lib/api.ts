@@ -373,10 +373,10 @@ export type RandomSentence = {
 };
 
 export type SubmitTranslationInput = {
-  nativeText: string;
+  nativeText?: string;
   romanization?: string;
   ipa?: string;
-  audioFileId?: string;
+  audioFileId: string;
   languageId: string;
   dialectId?: string;
   deviceId?: string;

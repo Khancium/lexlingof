@@ -1,0 +1,1 @@
+ALTER TABLE "translations" ALTER COLUMN "native_text" DROP NOT NULL;

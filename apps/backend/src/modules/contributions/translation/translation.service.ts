@@ -17,10 +17,10 @@ import { HttpError } from "../../../utils/http-error.js";
 // Audio can be any duration.
 
 export type SubmitTranslationInput = {
-  nativeText: string;
+  nativeText?: string | null;
   romanization?: string | null;
   ipa?: string | null;
-  audioFileId?: string | null;
+  audioFileId: string;
   languageId: string;
   dialectId?: string | null;
   deviceId?: string | null;
@@ -95,8 +95,8 @@ export async function submitTranslation(userId: string, sentenceId: string, data
       .insert(translations)
       .values({
         sentenceId,
-        audioFileId: data.audioFileId ?? null,
-        nativeText: data.nativeText,
+        audioFileId: data.audioFileId,
+        nativeText: data.nativeText?.trim() || null,
         romanization: data.romanization ?? null,
         ipa: data.ipa ?? null,
         version: 1,
