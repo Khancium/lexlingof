@@ -65,7 +65,6 @@ export async function getRandomSentence(userId: string, languageId: string) {
     .select({
       id: sentences.id,
       englishText: sentences.englishText,
-      difficulty: sentences.difficulty,
       categoryId: categories.id,
       categoryName: categories.nameEnglish,
       categorySlug: categories.slug,
@@ -86,7 +85,6 @@ export async function getRandomSentence(userId: string, languageId: string) {
     id: sentence.id,
     englishText: sentence.englishText,
     category: sentence.categoryId ? { id: sentence.categoryId, name: sentence.categoryName, slug: sentence.categorySlug } : null,
-    difficulty: sentence.difficulty,
   };
 }
 

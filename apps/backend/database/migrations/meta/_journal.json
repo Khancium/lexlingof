@@ -36,6 +36,13 @@
       "when": 1788618722878,
       "tag": "0004_worthless_hex",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788674441397,
+      "tag": "0005_rainy_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

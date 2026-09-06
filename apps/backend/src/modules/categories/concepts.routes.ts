@@ -35,7 +35,6 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
         slug: concepts.slug,
         labelEnglish: concepts.labelEnglish,
         description: concepts.description,
-        difficulty: concepts.difficulty,
       })
       .from(concepts)
       .innerJoin(categories, eq(categories.id, concepts.categoryId))
@@ -59,7 +58,6 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
           slug: concepts.slug,
           labelEnglish: concepts.labelEnglish,
           description: concepts.description,
-          difficulty: concepts.difficulty,
           isActive: concepts.isActive,
           deletedAt: concepts.deletedAt,
           categoryId: categories.id,
@@ -82,7 +80,6 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
       slug: row.slug,
       labelEnglish: row.labelEnglish,
       description: row.description,
-      difficulty: row.difficulty,
       category: { id: row.categoryId, name: row.categoryName, slug: row.categorySlug },
       media,
     };

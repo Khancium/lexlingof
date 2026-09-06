@@ -26,7 +26,6 @@ type Sentence = {
   id: string;
   englishText: string;
   category: { id: string; name: string; slug: string } | null;
-  difficulty: string;
 };
 
 type RecordingState = { path: string; durationMs: number; checksum: string };

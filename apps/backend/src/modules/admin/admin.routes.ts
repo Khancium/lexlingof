@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, asc, desc, eq, gte, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { parse as csvParse } from "csv-parse/sync";
 import { z } from "zod";
 
@@ -170,7 +170,6 @@ const createConceptSchema = z.object({
   categoryId: z.string().uuid(),
   labelEnglish: z.string().min(1),
   description: z.string().optional(),
-  difficulty: z.number().int().min(1).max(5).optional(),
 });
 
 const updateConceptSchema = z
@@ -178,11 +177,20 @@ const updateConceptSchema = z
     categoryId: z.string().uuid().optional(),
     labelEnglish: z.string().min(1).optional(),
     description: z.string().optional(),
-    difficulty: z.number().int().min(1).max(5).optional(),
     isActive: z.boolean().optional(),
     sortOrder: z.number().int().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: "At least one field is required" });
+
+const bulkIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
+
+const bulkEditConceptsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  categoryId: z.string().uuid().optional(),
+  isActive: z.boolean().optional(),
+}).refine((data) => data.categoryId !== undefined || data.isActive !== undefined, {
+  message: "At least one field to change is required",
+});
 
 const createSceneSchema = z.object({
   slug: z.string().min(1),
@@ -204,6 +212,14 @@ const updateSceneSchema = z
   })
   .refine((data) => Object.keys(data).length > 0, { message: "At least one field is required" });
 
+const bulkEditScenesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  difficulty: z.enum(sceneDifficulty.enumValues).optional(),
+  isActive: z.boolean().optional(),
+}).refine((data) => data.difficulty !== undefined || data.isActive !== undefined, {
+  message: "At least one field to change is required",
+});
+
 const createSceneConceptSchema = z.object({
   sceneId: z.string().uuid(),
   conceptId: z.string().uuid(),
@@ -224,7 +240,14 @@ const sentencesQuerySchema = z.object({
 const createSentenceSchema = z.object({
   englishText: z.string().min(1),
   categoryId: z.string().uuid().optional(),
-  difficulty: z.number().int().min(1).max(5).optional(),
+});
+
+const bulkEditSentencesSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1),
+  categoryId: z.string().uuid().optional(),
+  isActive: z.boolean().optional(),
+}).refine((data) => data.categoryId !== undefined || data.isActive !== undefined, {
+  message: "At least one field to change is required",
 });
 
 const updateGamificationConfigSchema = z.object({ value: z.number() });
@@ -426,7 +449,6 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         slug,
         labelEnglish: body.labelEnglish,
         description: body.description ?? null,
-        difficulty: body.difficulty ?? 1,
       })
       .returning();
 
@@ -435,9 +457,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // Bulk create from a CSV or JSON file. Expected row fields: category
   // (slug or English name -- resolved against existing categories),
-  // labelEnglish (required), description (optional), difficulty (optional,
-  // 1-5, defaults to 1). Rows that fail validation are skipped and reported
-  // back individually rather than failing the whole batch.
+  // labelEnglish (required), description (optional). Rows that fail
+  // validation are skipped and reported back individually rather than
+  // failing the whole batch.
   fastify.post("/admin/concepts/bulk", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const rows = await readBulkRows(request);
     const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
@@ -465,11 +487,6 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         result.errors.push({ row: rowNum, message: "labelEnglish is required" });
         continue;
       }
-      const difficulty = row.difficulty ? Number(row.difficulty) : 1;
-      if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 5) {
-        result.errors.push({ row: rowNum, message: `Invalid difficulty "${row.difficulty}" (must be 1-5)` });
-        continue;
-      }
 
       try {
         await db.insert(concepts).values({
@@ -477,7 +494,6 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           slug: `${category.slug}-${slugify(labelEnglish)}`,
           labelEnglish,
           description: row.description?.trim() || null,
-          difficulty,
         });
         result.created++;
       } catch (err) {
@@ -499,6 +515,38 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const [updated] = await db.update(concepts).set({ ...body, updatedAt: new Date() }).where(eq(concepts.id, id)).returning();
     return updated;
+  });
+
+  fastify.post("/admin/concepts/bulk-delete", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(inArray(concepts.id, ids));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_concept_bulk_delete",
+      resourceType: "concept",
+      afterState: { ids },
+    });
+
+    return { deleted: ids.length };
+  });
+
+  fastify.post("/admin/concepts/bulk-edit", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { ids, ...fields } = bulkEditConceptsSchema.parse(request.body);
+
+    await db.update(concepts).set({ ...fields, updatedAt: new Date() }).where(inArray(concepts.id, ids));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_concept_bulk_edit",
+      resourceType: "concept",
+      afterState: { ids, ...fields },
+    });
+
+    return { updated: ids.length };
   });
 
   fastify.delete("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request) => {
@@ -634,6 +682,38 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return updated;
   });
 
+  fastify.post("/admin/scenes/bulk-delete", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(inArray(scenes.id, ids));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_scene_bulk_delete",
+      resourceType: "scene",
+      afterState: { ids },
+    });
+
+    return { deleted: ids.length };
+  });
+
+  fastify.post("/admin/scenes/bulk-edit", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { ids, ...fields } = bulkEditScenesSchema.parse(request.body);
+
+    await db.update(scenes).set({ ...fields, updatedAt: new Date() }).where(inArray(scenes.id, ids));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_scene_bulk_edit",
+      resourceType: "scene",
+      afterState: { ids, ...fields },
+    });
+
+    return { updated: ids.length };
+  });
+
   fastify.delete("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
@@ -743,15 +823,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const [sentence] = await db
       .insert(sentences)
-      .values({ englishText: body.englishText, categoryId: body.categoryId ?? null, difficulty: body.difficulty ?? 1 })
+      .values({ englishText: body.englishText, categoryId: body.categoryId ?? null })
       .returning();
 
     reply.code(201).send(sentence);
   });
 
   // Bulk create from a CSV or JSON file. Expected row fields: englishText
-  // (required), category (optional, slug or English name), difficulty
-  // (optional, 1-5, defaults to 1).
+  // (required), category (optional, slug or English name).
   fastify.post("/admin/sentences/bulk", { preHandler: requirePermission("sentences.manage") }, async (request) => {
     const rows = await readBulkRows(request);
     const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
@@ -783,14 +862,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         }
         categoryId = category.id;
       }
-      const difficulty = row.difficulty ? Number(row.difficulty) : 1;
-      if (!Number.isInteger(difficulty) || difficulty < 1 || difficulty > 5) {
-        result.errors.push({ row: rowNum, message: `Invalid difficulty "${row.difficulty}" (must be 1-5)` });
-        continue;
-      }
 
       try {
-        await db.insert(sentences).values({ englishText, categoryId, difficulty });
+        await db.insert(sentences).values({ englishText, categoryId });
         result.created++;
       } catch (err) {
         result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
@@ -798,6 +872,38 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     return result;
+  });
+
+  fastify.post("/admin/sentences/bulk-delete", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(inArray(sentences.id, ids));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_sentence_bulk_delete",
+      resourceType: "sentence",
+      afterState: { ids },
+    });
+
+    return { deleted: ids.length };
+  });
+
+  fastify.post("/admin/sentences/bulk-edit", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { ids, ...fields } = bulkEditSentencesSchema.parse(request.body);
+
+    await db.update(sentences).set({ ...fields, updatedAt: new Date() }).where(inArray(sentences.id, ids));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: await getActorRole(request.user!.id),
+      action: "admin_sentence_bulk_edit",
+      resourceType: "sentence",
+      afterState: { ids, ...fields },
+    });
+
+    return { updated: ids.length };
   });
 
   fastify.delete("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request) => {

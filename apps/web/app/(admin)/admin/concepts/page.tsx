@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type Category, type ConceptListItem } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
+import { AdminBulkBar } from "@/components/admin-bulk-bar";
 
 export default function AdminConceptsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -12,14 +13,12 @@ export default function AdminConceptsPage() {
   const [newCategoryId, setNewCategoryId] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [newDescription, setNewDescription] = useState("");
-  const [newDifficulty, setNewDifficulty] = useState(1);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editDifficulty, setEditDifficulty] = useState(1);
   const [editCategoryId, setEditCategoryId] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
@@ -27,6 +26,10 @@ export default function AdminConceptsPage() {
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -49,11 +52,9 @@ export default function AdminConceptsPage() {
         categoryId: newCategoryId,
         labelEnglish: newLabel.trim(),
         description: newDescription.trim() || undefined,
-        difficulty: newDifficulty,
       });
       setNewLabel("");
       setNewDescription("");
-      setNewDifficulty(1);
       await load();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create concept");
@@ -91,7 +92,6 @@ export default function AdminConceptsPage() {
     setEditingId(concept.id);
     setEditLabel(concept.labelEnglish);
     setEditDescription(concept.description ?? "");
-    setEditDifficulty(Number(concept.difficulty) || 1);
     setEditCategoryId(concept.categoryId);
   }
 
@@ -102,12 +102,43 @@ export default function AdminConceptsPage() {
         categoryId: editCategoryId,
         labelEnglish: editLabel.trim(),
         description: editDescription.trim() || undefined,
-        difficulty: editDifficulty,
       });
       setEditingId(null);
       await load();
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === concepts.length ? new Set() : new Set(concepts.map((c) => c.id))));
+  }
+
+  async function handleBulkDelete() {
+    await api.admin.bulkDeleteConcepts([...selected]);
+    setSelected(new Set());
+    await load();
+  }
+
+  async function handleBulkMoveCategory() {
+    if (!bulkCategoryId) return;
+    setIsBulkEditing(true);
+    try {
+      await api.admin.bulkEditConcepts({ ids: [...selected], categoryId: bulkCategoryId });
+      setSelected(new Set());
+      setBulkCategoryId("");
+      await load();
+    } finally {
+      setIsBulkEditing(false);
     }
   }
 
@@ -142,17 +173,6 @@ export default function AdminConceptsPage() {
             placeholder="Description"
             className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
           />
-          <select
-            value={newDifficulty}
-            onChange={(e) => setNewDifficulty(Number(e.target.value))}
-            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
-          >
-            {[1, 2, 3, 4, 5].map((d) => (
-              <option key={d} value={d}>
-                Difficulty {d}
-              </option>
-            ))}
-          </select>
           <button
             onClick={handleCreate}
             disabled={isCreating}
@@ -170,6 +190,28 @@ export default function AdminConceptsPage() {
         onDone={load}
       />
 
+      <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
+        <select
+          value={bulkCategoryId}
+          onChange={(e) => setBulkCategoryId(e.target.value)}
+          className="rounded-full bg-surface-card px-4 py-2 text-sm text-ink ring-1 ring-border"
+        >
+          <option value="">Move to category...</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nameEnglish}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={handleBulkMoveCategory}
+          disabled={!bulkCategoryId || isBulkEditing}
+          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+        >
+          {isBulkEditing ? "Applying..." : "Apply"}
+        </button>
+      </AdminBulkBar>
+
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
@@ -177,10 +219,16 @@ export default function AdminConceptsPage() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
+                <th className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={concepts.length > 0 && selected.size === concepts.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="px-4 py-3">Label</th>
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Description</th>
-                <th className="px-4 py-3">Difficulty</th>
                 <th className="px-4 py-3">Image</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
@@ -189,6 +237,7 @@ export default function AdminConceptsPage() {
               {concepts.map((concept) =>
                 editingId === concept.id ? (
                   <tr key={concept.id} className="border-b border-border bg-surface-card">
+                    <td className="px-4 py-2" />
                     <td className="px-4 py-2">
                       <input
                         value={editLabel}
@@ -216,19 +265,6 @@ export default function AdminConceptsPage() {
                         className="w-full rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       />
                     </td>
-                    <td className="px-4 py-2">
-                      <select
-                        value={editDifficulty}
-                        onChange={(e) => setEditDifficulty(Number(e.target.value))}
-                        className="rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
-                      >
-                        {[1, 2, 3, 4, 5].map((d) => (
-                          <option key={d} value={d}>
-                            {d}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
                     <td className="px-4 py-2 text-xs text-ink-muted">--</td>
                     <td className="px-4 py-2">
                       <div className="flex gap-2">
@@ -250,10 +286,12 @@ export default function AdminConceptsPage() {
                   </tr>
                 ) : (
                   <tr key={concept.id} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3">
+                      <input type="checkbox" checked={selected.has(concept.id)} onChange={() => toggleSelected(concept.id)} />
+                    </td>
                     <td className="px-4 py-3 text-ink">{concept.labelEnglish}</td>
                     <td className="px-4 py-3 text-ink-muted">{concept.categoryName}</td>
                     <td className="px-4 py-3 text-ink-muted">{concept.description ?? "--"}</td>
-                    <td className="px-4 py-3 text-ink-muted">{concept.difficulty}</td>
                     <td className="px-4 py-3">
                       <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
                         {uploadingId === concept.id ? "Uploading..." : "Upload Image"}

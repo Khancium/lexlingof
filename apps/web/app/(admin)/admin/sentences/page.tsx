@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type AdminSentence, type Category } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
+import { AdminBulkBar } from "@/components/admin-bulk-bar";
 
 export default function AdminSentencesPage() {
   const [sentences, setSentences] = useState<AdminSentence[]>([]);
@@ -11,11 +12,14 @@ export default function AdminSentencesPage() {
 
   const [englishText, setEnglishText] = useState("");
   const [categoryId, setCategoryId] = useState("");
-  const [difficulty, setDifficulty] = useState(1);
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkCategoryId, setBulkCategoryId] = useState("");
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -37,10 +41,8 @@ export default function AdminSentencesPage() {
       await api.admin.createSentence({
         englishText: englishText.trim(),
         categoryId: categoryId || undefined,
-        difficulty,
       });
       setEnglishText("");
-      setDifficulty(1);
       await load();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create sentence");
@@ -63,6 +65,38 @@ export default function AdminSentencesPage() {
   function categoryName(id: string | null): string {
     if (!id) return "--";
     return categories.find((c) => c.id === id)?.nameEnglish ?? "--";
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === sentences.length ? new Set() : new Set(sentences.map((s) => s.id))));
+  }
+
+  async function handleBulkDelete() {
+    await api.admin.bulkDeleteSentences([...selected]);
+    setSelected(new Set());
+    await load();
+  }
+
+  async function handleBulkMoveCategory() {
+    if (!bulkCategoryId) return;
+    setIsBulkEditing(true);
+    try {
+      await api.admin.bulkEditSentences({ ids: [...selected], categoryId: bulkCategoryId });
+      setSelected(new Set());
+      setBulkCategoryId("");
+      await load();
+    } finally {
+      setIsBulkEditing(false);
+    }
   }
 
   return (
@@ -90,17 +124,6 @@ export default function AdminSentencesPage() {
               </option>
             ))}
           </select>
-          <select
-            value={difficulty}
-            onChange={(e) => setDifficulty(Number(e.target.value))}
-            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
-          >
-            {[1, 2, 3, 4, 5].map((d) => (
-              <option key={d} value={d}>
-                Difficulty {d}
-              </option>
-            ))}
-          </select>
           <button
             onClick={handleCreate}
             disabled={isCreating}
@@ -114,6 +137,28 @@ export default function AdminSentencesPage() {
 
       <AdminBulkUpload label="Bulk Upload Sentences" onUpload={(file) => api.admin.bulkUploadSentences(file)} onDone={load} />
 
+      <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
+        <select
+          value={bulkCategoryId}
+          onChange={(e) => setBulkCategoryId(e.target.value)}
+          className="rounded-full bg-surface-card px-4 py-2 text-sm text-ink ring-1 ring-border"
+        >
+          <option value="">Move to category...</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nameEnglish}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={handleBulkMoveCategory}
+          disabled={!bulkCategoryId || isBulkEditing}
+          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+        >
+          {isBulkEditing ? "Applying..." : "Apply"}
+        </button>
+      </AdminBulkBar>
+
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
@@ -121,9 +166,15 @@ export default function AdminSentencesPage() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
+                <th className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={sentences.length > 0 && selected.size === sentences.length}
+                    onChange={toggleSelectAll}
+                  />
+                </th>
                 <th className="px-4 py-3">English Text</th>
                 <th className="px-4 py-3">Category</th>
-                <th className="px-4 py-3">Difficulty</th>
                 <th className="px-4 py-3">Used</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
@@ -131,9 +182,11 @@ export default function AdminSentencesPage() {
             <tbody>
               {sentences.map((sentence) => (
                 <tr key={sentence.id} className="border-b border-border last:border-0">
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={selected.has(sentence.id)} onChange={() => toggleSelected(sentence.id)} />
+                  </td>
                   <td className="px-4 py-3 text-ink">{sentence.englishText}</td>
                   <td className="px-4 py-3 text-ink-muted">{categoryName(sentence.categoryId)}</td>
-                  <td className="px-4 py-3 text-ink-muted">{sentence.difficulty}</td>
                   <td className="px-4 py-3 text-ink-muted">{sentence.usageCount}</td>
                   <td className="px-4 py-3">
                     <button

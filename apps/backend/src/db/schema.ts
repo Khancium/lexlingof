@@ -281,7 +281,6 @@ export const concepts = pgTable(
     slug: text("slug").notNull(),
     labelEnglish: text("label_english").notNull(),
     description: text("description"),
-    difficulty: integer("difficulty").default(1).notNull(),
     isActive: boolean("is_active").default(true).notNull(),
     sortOrder: integer("sort_order").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -292,7 +291,6 @@ export const concepts = pgTable(
     uniqueIndex("uq_concepts_slug_active")
       .on(t.slug)
       .where(sql`${t.deletedAt} is null`),
-    check("ck_concepts_difficulty_range", sql`${t.difficulty} between 1 and 5`),
   ],
 );
 
@@ -316,17 +314,13 @@ export const sentences = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     englishText: text("english_text").notNull(),
     categoryId: uuid("category_id").references(() => categories.id),
-    difficulty: integer("difficulty").default(1).notNull(),
     isActive: boolean("is_active").default(true).notNull(),
     usageCount: integer("usage_count").default(0).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [
-    index("ix_sentences_fts").using("gin", sql`to_tsvector('english', ${t.englishText})`),
-    check("ck_sentences_difficulty_range", sql`${t.difficulty} between 1 and 5`),
-  ],
+  (t) => [index("ix_sentences_fts").using("gin", sql`to_tsvector('english', ${t.englishText})`)],
 );
 
 export const scenes = pgTable(

@@ -259,7 +259,6 @@ export type ConceptListItem = {
   slug: string;
   labelEnglish: string;
   description: string | null;
-  difficulty: string;
 };
 export type ConceptsResponse = { items: ConceptListItem[]; limit: number; offset: number };
 export type ConceptDetail = {
@@ -267,13 +266,12 @@ export type ConceptDetail = {
   slug: string;
   labelEnglish: string;
   description: string | null;
-  difficulty: string;
   category: { id: string; name: string; slug: string };
   media: { id: string; publicUrl: string; isPrimary: boolean }[];
 };
 
 export type NextConceptResponse = {
-  concept: { id: string; slug: string; labelEnglish: string; description: string | null; difficulty: string };
+  concept: { id: string; slug: string; labelEnglish: string; description: string | null };
   category: { id: string; name: string; slug: string };
   publicUrl: string | null;
   limits: WordLimits;
@@ -360,7 +358,6 @@ export type RandomSentence = {
   id: string;
   englishText: string;
   category: { id: string; name: string; slug: string } | null;
-  difficulty: string;
 };
 
 export type SubmitTranslationInput = {
@@ -541,15 +538,15 @@ export type AdminUser = {
   lastSeenAt: string | null;
 };
 
-export type AdminConceptInput = { categoryId: string; labelEnglish: string; description?: string; difficulty?: number };
+export type AdminConceptInput = { categoryId: string; labelEnglish: string; description?: string };
 export type AdminConceptUpdateInput = Partial<{
   categoryId: string;
   labelEnglish: string;
   description: string;
-  difficulty: number;
   isActive: boolean;
   sortOrder: number;
 }>;
+export type BulkEditConceptsInput = { ids: string[]; categoryId?: string; isActive?: boolean };
 
 export type AdminSceneInput = {
   slug: string;
@@ -569,18 +566,19 @@ export type AdminSceneUpdateInput = Partial<{
 }>;
 
 export type AdminSceneConceptInput = { sceneId: string; conceptId: string; categoryId: string; importance?: number };
+export type BulkEditScenesInput = { ids: string[]; difficulty?: SceneDifficulty; isActive?: boolean };
 
-export type AdminSentenceInput = { englishText: string; categoryId?: string; difficulty?: number };
+export type AdminSentenceInput = { englishText: string; categoryId?: string };
 export type BulkUploadResult = { created: number; errors: { row: number; message: string }[] };
 export type AdminSentence = {
   id: string;
   englishText: string;
   categoryId: string | null;
-  difficulty: number;
   isActive: boolean;
   usageCount: number;
   createdAt: string;
 };
+export type BulkEditSentencesInput = { ids: string[]; categoryId?: string; isActive?: boolean };
 
 export type GamificationConfigRow = {
   id: string;
@@ -802,6 +800,10 @@ export const api = {
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>
       apiClient.put<ConceptDetail>(`/api/v1/admin/concepts/${id}`, data).then((r) => r.data),
     deleteConcept: (id: string) => apiClient.delete(`/api/v1/admin/concepts/${id}`).then((r) => r.data),
+    bulkDeleteConcepts: (ids: string[]) =>
+      apiClient.post<{ deleted: number }>("/api/v1/admin/concepts/bulk-delete", { ids }).then((r) => r.data),
+    bulkEditConcepts: (data: BulkEditConceptsInput) =>
+      apiClient.post<{ updated: number }>("/api/v1/admin/concepts/bulk-edit", data).then((r) => r.data),
     uploadConceptMedia: (id: string, file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -819,6 +821,10 @@ export const api = {
     updateScene: (id: string, data: AdminSceneUpdateInput) =>
       apiClient.put<Scene>(`/api/v1/admin/scenes/${id}`, data).then((r) => r.data),
     deleteScene: (id: string) => apiClient.delete(`/api/v1/admin/scenes/${id}`).then((r) => r.data),
+    bulkDeleteScenes: (ids: string[]) =>
+      apiClient.post<{ deleted: number }>("/api/v1/admin/scenes/bulk-delete", { ids }).then((r) => r.data),
+    bulkEditScenes: (data: BulkEditScenesInput) =>
+      apiClient.post<{ updated: number }>("/api/v1/admin/scenes/bulk-edit", data).then((r) => r.data),
     uploadSceneMedia: (id: string, file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -838,6 +844,10 @@ export const api = {
       apiClient.get<AdminSentence[]>("/api/v1/admin/sentences", { params }).then((r) => r.data),
     createSentence: (data: AdminSentenceInput) => apiClient.post<AdminSentence>("/api/v1/admin/sentences", data).then((r) => r.data),
     deleteSentence: (id: string) => apiClient.delete(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
+    bulkDeleteSentences: (ids: string[]) =>
+      apiClient.post<{ deleted: number }>("/api/v1/admin/sentences/bulk-delete", { ids }).then((r) => r.data),
+    bulkEditSentences: (data: BulkEditSentencesInput) =>
+      apiClient.post<{ updated: number }>("/api/v1/admin/sentences/bulk-edit", data).then((r) => r.data),
     bulkUploadSentences: (file: File) => {
       const form = new FormData();
       form.append("file", file);

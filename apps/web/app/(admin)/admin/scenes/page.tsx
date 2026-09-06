@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type ConceptListItem, type Scene, type SceneDifficulty } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
+import { AdminBulkBar } from "@/components/admin-bulk-bar";
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
 
@@ -29,6 +30,10 @@ export default function AdminScenesPage() {
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkDifficulty, setBulkDifficulty] = useState<SceneDifficulty | "">("");
+  const [isBulkEditing, setIsBulkEditing] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -89,6 +94,38 @@ export default function AdminScenesPage() {
       await load();
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === scenes.length ? new Set() : new Set(scenes.map((s) => s.id))));
+  }
+
+  async function handleBulkDelete() {
+    await api.admin.bulkDeleteScenes([...selected]);
+    setSelected(new Set());
+    await load();
+  }
+
+  async function handleBulkSetDifficulty() {
+    if (!bulkDifficulty) return;
+    setIsBulkEditing(true);
+    try {
+      await api.admin.bulkEditScenes({ ids: [...selected], difficulty: bulkDifficulty });
+      setSelected(new Set());
+      setBulkDifficulty("");
+      await load();
+    } finally {
+      setIsBulkEditing(false);
     }
   }
 
@@ -169,18 +206,49 @@ export default function AdminScenesPage() {
 
       <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
 
+      <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
+        <select
+          value={bulkDifficulty}
+          onChange={(e) => setBulkDifficulty(e.target.value as SceneDifficulty)}
+          className="rounded-full bg-surface-card px-4 py-2 text-sm text-ink ring-1 ring-border"
+        >
+          <option value="">Set difficulty...</option>
+          {DIFFICULTIES.map((d) => (
+            <option key={d} value={d} className="capitalize">
+              {d}
+            </option>
+          ))}
+        </select>
+        <button
+          onClick={handleBulkSetDifficulty}
+          disabled={!bulkDifficulty || isBulkEditing}
+          className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+        >
+          {isBulkEditing ? "Applying..." : "Apply"}
+        </button>
+      </AdminBulkBar>
+
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
         <div className="space-y-3">
+          {scenes.length > 0 && (
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              <input type="checkbox" checked={selected.size === scenes.length} onChange={toggleSelectAll} />
+              Select all
+            </label>
+          )}
           {scenes.map((scene) => (
             <div key={scene.id} className="rounded-2xl bg-surface p-4 shadow-sm">
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-semibold text-ink">{scene.title}</p>
-                  <p className="text-xs capitalize text-ink-muted">
-                    {scene.slug} · {scene.difficulty}
-                  </p>
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" checked={selected.has(scene.id)} onChange={() => toggleSelected(scene.id)} />
+                  <div>
+                    <p className="font-semibold text-ink">{scene.title}</p>
+                    <p className="text-xs capitalize text-ink-muted">
+                      {scene.slug} · {scene.difficulty}
+                    </p>
+                  </div>
                 </div>
                 <div className="flex items-center gap-4">
                   <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
