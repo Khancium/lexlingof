@@ -136,39 +136,39 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
     // 4. Read points.audio.upload from gamification_config.
     const basePoints = await readConfigValue(tx, "points.audio.upload");
 
-    // 5. Points ledger, idempotent by construction.
-    await tx
-      .insert(pointsTransactions)
-      .values({
-        userId,
-        contributionId: contribution.id,
-        points: basePoints,
-        reason: "AUDIO_UPLOADED",
-        moduleType: "TRANSCRIPTION",
-        idempotencyKey: `${contribution.id}:AUDIO_UPLOADED`,
-      })
-      .onConflictDoNothing();
-
-    // 6. user_stats counters. (Spec lists only these two counters here --
-    // unlike word.service's submitWordRecording, there is no explicit step
+    // 5, 6, 7: independent of each other (none reads a value the others
+    // write), so issued together instead of as three sequential round
+    // trips -- postgres.js pipelines queries sent this way on one
+    // connection. (Spec lists only two counters here -- unlike
+    // word.service's submitWordRecording, there is no explicit step
     // incrementing user_stats.totalPoints for audio uploads or for
     // addTranscription/addSegment below; see the module-level note.)
-    await tx
-      .update(userStats)
-      .set({
-        totalContributions: sql`${userStats.totalContributions} + 1`,
-        audioContributions: sql`${userStats.audioContributions} + 1`,
-        pendingContributions: sql`${userStats.pendingContributions} + 1`,
-        lastContributionAt: new Date(),
-        lastContributionModule: "TRANSCRIPTION",
-        updatedAt: new Date(),
-      })
-      .where(eq(userStats.userId, userId));
+    await Promise.all([
+      tx
+        .insert(pointsTransactions)
+        .values({
+          userId,
+          contributionId: contribution.id,
+          points: basePoints,
+          reason: "AUDIO_UPLOADED",
+          moduleType: "TRANSCRIPTION",
+          idempotencyKey: `${contribution.id}:AUDIO_UPLOADED`,
+        })
+        .onConflictDoNothing(),
+      tx
+        .update(userStats)
+        .set({
+          totalContributions: sql`${userStats.totalContributions} + 1`,
+          audioContributions: sql`${userStats.audioContributions} + 1`,
+          pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          lastContributionAt: new Date(),
+          lastContributionModule: "TRANSCRIPTION",
+          updatedAt: new Date(),
+        })
+        .where(eq(userStats.userId, userId)),
+      updateStreakOnContribution(tx, userId),
+    ]);
 
-    // 7. Streak bookkeeping.
-    await updateStreakOnContribution(tx, userId);
-
-    // 8.
     return { contributionId: contribution.id, audioUploadId: audioUpload.id, pointsAwarded: basePoints };
   });
 }

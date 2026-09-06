@@ -82,25 +82,24 @@ export default async function audioRoutes(fastify: FastifyInstance) {
     const storageKey = `audio/${body.module.toLowerCase()}/${userId}/${audioFileId}.${ext}`;
     const format = MIME_TYPE_TO_FORMAT[body.mimeType];
 
-    await db.insert(audioFiles).values({
-      id: audioFileId,
-      storageKey,
-      originalFilename: body.filename,
-      mimeType: body.mimeType,
-      format,
-      fileSizeBytes: body.fileSizeBytes,
-      checksumSha256: body.checksumSha256,
-      processingStatus: "pending_upload",
-      uploadedBy: userId,
-      moduleType: body.module,
-    });
-
-    const { uploadUrl, expiresAt } = await storageService.generateAudioUploadUrl(
-      audioFileId,
-      storageKey,
-      body.mimeType,
-      body.module,
-    );
+    // The DB insert and the R2 presigned-URL generation don't depend on
+    // each other -- run them concurrently instead of as two sequential
+    // round trips (the second being a call to R2, not even this DB).
+    const [, { uploadUrl, expiresAt }] = await Promise.all([
+      db.insert(audioFiles).values({
+        id: audioFileId,
+        storageKey,
+        originalFilename: body.filename,
+        mimeType: body.mimeType,
+        format,
+        fileSizeBytes: body.fileSizeBytes,
+        checksumSha256: body.checksumSha256,
+        processingStatus: "pending_upload",
+        uploadedBy: userId,
+        moduleType: body.module,
+      }),
+      storageService.generateAudioUploadUrl(audioFileId, storageKey, body.mimeType, body.module),
+    ]);
 
     return { audioFileId, uploadUrl, storageKey, expiresAt };
   });
@@ -125,9 +124,9 @@ export default async function audioRoutes(fastify: FastifyInstance) {
     }
 
     // Module 1 (WORD) ONLY. NEVER apply this check to any other module.
-    if (audioFile.moduleType === "WORD" && body.durationMs > 3000) {
-      throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 3 seconds (3000ms)", {
-        maxAllowed: 3000,
+    if (audioFile.moduleType === "WORD" && body.durationMs > 5000) {
+      throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 5 seconds (5000ms)", {
+        maxAllowed: 5000,
         received: body.durationMs,
       });
     }

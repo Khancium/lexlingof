@@ -134,41 +134,45 @@ export async function submitTranslation(userId: string, sentenceId: string, data
       .set({ contributionId: contribution.id, updatedAt: new Date() })
       .where(eq(translations.id, translation.id));
 
-    // 4. Points.
-    let pointsAwarded = await readConfigValue(tx, "points.translation.base");
-    if (data.audioFileId) pointsAwarded += await readConfigValue(tx, "points.translation.audio");
-    if (data.romanization) pointsAwarded += await readConfigValue(tx, "points.translation.roman");
-    if (data.ipa) pointsAwarded += await readConfigValue(tx, "points.translation.ipa");
+    // 4. Points -- base is always read; the three bonuses are independent
+    // config lookups gated by different conditions, fetched together
+    // instead of as sequential round trips.
+    const [base, audioBonus, romanBonus, ipaBonus] = await Promise.all([
+      readConfigValue(tx, "points.translation.base"),
+      data.audioFileId ? readConfigValue(tx, "points.translation.audio") : Promise.resolve(0),
+      data.romanization ? readConfigValue(tx, "points.translation.roman") : Promise.resolve(0),
+      data.ipa ? readConfigValue(tx, "points.translation.ipa") : Promise.resolve(0),
+    ]);
+    const pointsAwarded = base + audioBonus + romanBonus + ipaBonus;
 
-    // 5. Points ledger, idempotent by construction.
-    await tx
-      .insert(pointsTransactions)
-      .values({
-        userId,
-        contributionId: contribution.id,
-        points: pointsAwarded,
-        reason: "TRANSLATION_SUBMITTED",
-        moduleType: "TRANSLATION",
-        idempotencyKey: `${contribution.id}:TRANSLATION_SUBMITTED`,
-      })
-      .onConflictDoNothing();
-
-    // 6. user_stats counters. (Spec lists only these two here; see the
-    // module-level note on user_stats.totalPoints in the summary.)
-    await tx
-      .update(userStats)
-      .set({
-        totalContributions: sql`${userStats.totalContributions} + 1`,
-        translationContributions: sql`${userStats.translationContributions} + 1`,
-        pendingContributions: sql`${userStats.pendingContributions} + 1`,
-        lastContributionAt: new Date(),
-        lastContributionModule: "TRANSLATION",
-        updatedAt: new Date(),
-      })
-      .where(eq(userStats.userId, userId));
-
-    // 7. Streak bookkeeping.
-    await updateStreakOnContribution(tx, userId);
+    // 5, 6, 7: independent of each other -- issued together instead of as
+    // three sequential round trips. (Spec lists only two user_stats
+    // counters here; see the module-level note on totalPoints.)
+    await Promise.all([
+      tx
+        .insert(pointsTransactions)
+        .values({
+          userId,
+          contributionId: contribution.id,
+          points: pointsAwarded,
+          reason: "TRANSLATION_SUBMITTED",
+          moduleType: "TRANSLATION",
+          idempotencyKey: `${contribution.id}:TRANSLATION_SUBMITTED`,
+        })
+        .onConflictDoNothing(),
+      tx
+        .update(userStats)
+        .set({
+          totalContributions: sql`${userStats.totalContributions} + 1`,
+          translationContributions: sql`${userStats.translationContributions} + 1`,
+          pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          lastContributionAt: new Date(),
+          lastContributionModule: "TRANSLATION",
+          updatedAt: new Date(),
+        })
+        .where(eq(userStats.userId, userId)),
+      updateStreakOnContribution(tx, userId),
+    ]);
 
     // 8.
     return { contributionId: contribution.id, translationId: translation.id, pointsAwarded };

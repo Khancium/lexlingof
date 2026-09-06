@@ -173,43 +173,46 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
       .set({ contributionId: contribution.id, updatedAt: new Date() })
       .where(eq(sceneContributions.id, sceneContribution.id));
 
-    // d. Points.
-    const base = await readConfigValue(tx, "points.scene.base");
-    const longBonus = data.durationMs > LONG_DESCRIPTION_THRESHOLD_MS ? await readConfigValue(tx, "points.scene.long_bonus") : 0;
-    const dailyBonus = scene.isDaily ? await readConfigValue(tx, "points.scene.daily_bonus") : 0;
-    const expertBonus = scene.difficulty === "expert" ? await readConfigValue(tx, "points.scene.expert_bonus") : 0;
+    // d. Points -- base is always read; the three bonuses are independent
+    // config lookups gated by different conditions, so all of the ones that
+    // apply are fetched together instead of as sequential round trips.
+    const [base, longBonus, dailyBonus, expertBonus] = await Promise.all([
+      readConfigValue(tx, "points.scene.base"),
+      data.durationMs > LONG_DESCRIPTION_THRESHOLD_MS ? readConfigValue(tx, "points.scene.long_bonus") : Promise.resolve(0),
+      scene.isDaily ? readConfigValue(tx, "points.scene.daily_bonus") : Promise.resolve(0),
+      scene.difficulty === "expert" ? readConfigValue(tx, "points.scene.expert_bonus") : Promise.resolve(0),
+    ]);
 
     const bonusBreakdown = { base, longBonus, dailyBonus, expertBonus };
     const pointsAwarded = base + longBonus + dailyBonus + expertBonus;
 
-    // e. Points ledger, idempotent by construction.
-    await tx
-      .insert(pointsTransactions)
-      .values({
-        userId,
-        contributionId: contribution.id,
-        points: pointsAwarded,
-        reason: "SCENE_SUBMITTED",
-        moduleType: "SCENE",
-        idempotencyKey: `${contribution.id}:SCENE_SUBMITTED`,
-      })
-      .onConflictDoNothing();
-
-    // f. user_stats counters.
-    await tx
-      .update(userStats)
-      .set({
-        totalContributions: sql`${userStats.totalContributions} + 1`,
-        sceneContributionsCount: sql`${userStats.sceneContributionsCount} + 1`,
-        pendingContributions: sql`${userStats.pendingContributions} + 1`,
-        lastContributionAt: new Date(),
-        lastContributionModule: "SCENE",
-        updatedAt: new Date(),
-      })
-      .where(eq(userStats.userId, userId));
-
-    // g. Streak bookkeeping.
-    await updateStreakOnContribution(tx, userId);
+    // e, f, g: independent of each other -- issued together instead of as
+    // three sequential round trips.
+    await Promise.all([
+      tx
+        .insert(pointsTransactions)
+        .values({
+          userId,
+          contributionId: contribution.id,
+          points: pointsAwarded,
+          reason: "SCENE_SUBMITTED",
+          moduleType: "SCENE",
+          idempotencyKey: `${contribution.id}:SCENE_SUBMITTED`,
+        })
+        .onConflictDoNothing(),
+      tx
+        .update(userStats)
+        .set({
+          totalContributions: sql`${userStats.totalContributions} + 1`,
+          sceneContributionsCount: sql`${userStats.sceneContributionsCount} + 1`,
+          pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          lastContributionAt: new Date(),
+          lastContributionModule: "SCENE",
+          updatedAt: new Date(),
+        })
+        .where(eq(userStats.userId, userId)),
+      updateStreakOnContribution(tx, userId),
+    ]);
 
     // 3.
     return {

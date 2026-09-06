@@ -106,28 +106,45 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
     );
   }
 
-  // 4. Duplicate check. The DB unique index on word_recordings is keyed by
-  // (contribution_id, concept_id, synonym_index, take_index) -- since every
-  // submission gets its own new contribution_id, that index alone can't stop
-  // the same user re-recording the same slot under a second contribution.
-  const [duplicate] = await db
-    .select({ id: wordRecordings.id })
-    .from(wordRecordings)
-    .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
-    .where(
-      and(
-        eq(contributions.userId, userId),
-        eq(wordRecordings.conceptId, data.conceptId),
-        eq(wordRecordings.synonymIndex, synonymIndex),
-        eq(wordRecordings.takeIndex, takeIndex),
-        isNull(wordRecordings.deletedAt),
-      ),
-    )
-    .limit(1);
+  // 4. Duplicate check, base-points config, and current level are all
+  // independent reads (none depend on each other or on anything this
+  // request writes) -- fetched concurrently over separate pool connections
+  // instead of as three sequential round trips. This matters because the
+  // DB is in a different region from this backend, so every round trip
+  // costs real wall-clock time regardless of query cost.
+  const [[duplicate], [config], [levelRow]] = await Promise.all([
+    db
+      .select({ id: wordRecordings.id })
+      .from(wordRecordings)
+      .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
+      .where(
+        and(
+          eq(contributions.userId, userId),
+          eq(wordRecordings.conceptId, data.conceptId),
+          eq(wordRecordings.synonymIndex, synonymIndex),
+          eq(wordRecordings.takeIndex, takeIndex),
+          isNull(wordRecordings.deletedAt),
+        ),
+      )
+      .limit(1),
+    db
+      .select({ configValue: gamificationConfig.configValue })
+      .from(gamificationConfig)
+      .where(and(eq(gamificationConfig.configKey, "points.word.base"), eq(gamificationConfig.isActive, true)))
+      .limit(1),
+    db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1),
+  ]);
 
   if (duplicate) {
     throw new HttpError(409, "DUPLICATE_RECORDING", "A recording already exists for this concept, synonym and take");
   }
+  if (!config) {
+    throw new HttpError(500, "CONFIG_MISSING", "points.word.base is not configured");
+  }
+  // This submission doesn't change level (only review/verification does),
+  // so the pre-fetched value is still correct after the writes below.
+  const basePoints = (config.configValue as { value: number }).value;
+  const userLevel = levelRow?.level ?? null;
 
   return db.transaction(async (tx) => {
     // 5. Insert word_recordings (the DB CHECK constraint is the 4th layer).
@@ -175,57 +192,44 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       .set({ contributionId: contribution.id, updatedAt: new Date() })
       .where(eq(wordRecordings.id, wordRecording.id));
 
-    // 8. Read points.word.base from gamification_config.
-    const [config] = await tx
-      .select({ configValue: gamificationConfig.configValue })
-      .from(gamificationConfig)
-      .where(and(eq(gamificationConfig.configKey, "points.word.base"), eq(gamificationConfig.isActive, true)))
-      .limit(1);
+    // 8, 9, 10: the points ledger insert, user_stats counters, and streak
+    // bookkeeping are all independent of each other (none reads a value the
+    // others write) -- issued together instead of as three sequential round
+    // trips. postgres.js pipelines queries issued this way on one
+    // connection, so this genuinely overlaps their network latency instead
+    // of just reordering it.
+    const [, , { currentStreak }] = await Promise.all([
+      tx
+        .insert(pointsTransactions)
+        .values({
+          userId,
+          contributionId: contribution.id,
+          points: basePoints,
+          reason: "WORD_SUBMITTED",
+          moduleType: "WORD",
+          idempotencyKey: `${contribution.id}:WORD_SUBMITTED`,
+        })
+        .onConflictDoNothing(),
+      tx
+        .update(userStats)
+        .set({
+          totalContributions: sql`${userStats.totalContributions} + 1`,
+          wordContributions: sql`${userStats.wordContributions} + 1`,
+          pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          totalPoints: sql`${userStats.totalPoints} + ${basePoints}`,
+          lastContributionAt: new Date(),
+          lastContributionModule: "WORD",
+          updatedAt: new Date(),
+        })
+        .where(eq(userStats.userId, userId)),
+      updateStreakOnContribution(tx, userId),
+    ]);
 
-    if (!config) {
-      throw new HttpError(500, "CONFIG_MISSING", "points.word.base is not configured");
-    }
-
-    const basePoints = (config.configValue as { value: number }).value;
-
-    // 9. Points ledger, idempotent by construction.
-    await tx
-      .insert(pointsTransactions)
-      .values({
-        userId,
-        contributionId: contribution.id,
-        points: basePoints,
-        reason: "WORD_SUBMITTED",
-        moduleType: "WORD",
-        idempotencyKey: `${contribution.id}:WORD_SUBMITTED`,
-      })
-      .onConflictDoNothing();
-
-    // 10 & 11. user_stats counters and points.
-    await tx
-      .update(userStats)
-      .set({
-        totalContributions: sql`${userStats.totalContributions} + 1`,
-        wordContributions: sql`${userStats.wordContributions} + 1`,
-        pendingContributions: sql`${userStats.pendingContributions} + 1`,
-        totalPoints: sql`${userStats.totalPoints} + ${basePoints}`,
-        lastContributionAt: new Date(),
-        lastContributionModule: "WORD",
-        updatedAt: new Date(),
-      })
-      .where(eq(userStats.userId, userId));
-
-    // 12. Streak bookkeeping.
-    const { currentStreak } = await updateStreakOnContribution(tx, userId);
-
-    const [level] = await tx.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1);
-
-    // 13.
     return {
       contributionId: contribution.id,
       wordRecordingId: wordRecording.id,
       pointsAwarded: basePoints,
-      userLevel: level?.level ?? null,
+      userLevel,
       currentStreak,
     };
   });
