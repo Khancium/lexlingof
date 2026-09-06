@@ -272,7 +272,7 @@ export type ConceptListItem = {
   labelEnglish: string;
   description: string | null;
 };
-export type ConceptsResponse = { items: ConceptListItem[]; limit: number; offset: number };
+export type ConceptsResponse = { items: ConceptListItem[]; limit: number; offset: number; total: number };
 export type ConceptDetail = {
   id: string;
   slug: string;
@@ -395,6 +395,7 @@ export type Scene = {
   isDaily: boolean;
   imageUrl: string | null;
 };
+export type ScenesResponse = { items: Scene[]; limit: number; offset: number; total: number };
 
 export type SubmitSceneInput = {
   audioFileId: string;
@@ -597,6 +598,7 @@ export type AdminSentence = {
   createdAt: string;
 };
 export type BulkEditSentencesInput = { ids: string[]; categoryId?: string; isActive?: boolean };
+export type AdminSentencesResponse = { items: AdminSentence[]; limit: number; offset: number; total: number };
 
 export type GamificationConfigRow = {
   id: string;
@@ -763,7 +765,8 @@ export const api = {
   },
 
   scenes: {
-    getAll: () => apiClient.get<Scene[]>("/api/v1/scenes").then((r) => r.data),
+    getAll: (params?: { limit?: number; offset?: number }) =>
+      apiClient.get<ScenesResponse>("/api/v1/scenes", { params }).then((r) => r.data),
     getDaily: () => apiClient.get<Scene>("/api/v1/scenes/daily").then((r) => r.data),
     getRandom: (excludeId?: string) =>
       apiClient.get<Scene>("/api/v1/scenes/random", { params: excludeId ? { exclude: excludeId } : undefined }).then((r) => r.data),
@@ -859,7 +862,7 @@ export const api = {
       apiClient.post<{ id: string }>("/api/v1/admin/scene-concepts", data).then((r) => r.data),
 
     getSentences: (params?: { limit?: number; offset?: number }) =>
-      apiClient.get<AdminSentence[]>("/api/v1/admin/sentences", { params }).then((r) => r.data),
+      apiClient.get<AdminSentencesResponse>("/api/v1/admin/sentences", { params }).then((r) => r.data),
     createSentence: (data: AdminSentenceInput) => apiClient.post<AdminSentence>("/api/v1/admin/sentences", data).then((r) => r.data),
     deleteSentence: (id: string) => apiClient.delete(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
     bulkDeleteSentences: (ids: string[]) =>

@@ -59,13 +59,22 @@ function sceneSelection() {
   };
 }
 
-export async function getScenes() {
-  return db
-    .select(sceneSelection())
-    .from(scenes)
-    .leftJoin(sceneMedia, and(eq(sceneMedia.sceneId, scenes.id), eq(sceneMedia.isPrimary, true)))
-    .where(and(eq(scenes.isActive, true), isNull(scenes.deletedAt)))
-    .orderBy(scenes.difficulty);
+export async function getScenes(limit: number, offset: number) {
+  const whereClause = and(eq(scenes.isActive, true), isNull(scenes.deletedAt));
+
+  const [items, [totalRow]] = await Promise.all([
+    db
+      .select(sceneSelection())
+      .from(scenes)
+      .leftJoin(sceneMedia, and(eq(sceneMedia.sceneId, scenes.id), eq(sceneMedia.isPrimary, true)))
+      .where(whereClause)
+      .orderBy(scenes.difficulty)
+      .limit(limit)
+      .offset(offset),
+    db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(scenes).where(whereClause),
+  ]);
+
+  return { items, limit, offset, total: totalRow?.value ?? 0 };
 }
 
 export async function getDailyScene() {

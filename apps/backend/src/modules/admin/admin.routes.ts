@@ -814,13 +814,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.get("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request) => {
     const { limit, offset } = sentencesQuerySchema.parse(request.query);
 
-    return db
-      .select()
-      .from(sentences)
-      .where(isNull(sentences.deletedAt))
-      .orderBy(desc(sentences.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const [items, [totalRow]] = await Promise.all([
+      db
+        .select()
+        .from(sentences)
+        .where(isNull(sentences.deletedAt))
+        .orderBy(desc(sentences.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(isNull(sentences.deletedAt)),
+    ]);
+
+    return { items, limit, offset, total: totalRow?.value ?? 0 };
   });
 
   fastify.post("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request, reply) => {

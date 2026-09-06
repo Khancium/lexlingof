@@ -4,10 +4,15 @@ import { useEffect, useState } from "react";
 import { api, type Category, type ConceptListItem } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
+import { Pagination } from "@/components/admin-pagination";
+
+const PAGE_SIZE = 50;
 
 export default function AdminConceptsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [newCategoryId, setNewCategoryId] = useState("");
@@ -33,15 +38,17 @@ export default function AdminConceptsPage() {
 
   async function load() {
     setLoading(true);
-    const [cats, res] = await Promise.all([api.categories.getAll(), api.concepts.getAll({ limit: 200 })]);
+    const [cats, res] = await Promise.all([api.categories.getAll(), api.concepts.getAll({ limit: PAGE_SIZE, offset })]);
     setCategories(cats);
     setConcepts(res.items);
+    setTotal(res.total);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
 
   async function handleCreate() {
     if (!newCategoryId || newLabel.trim().length === 0) return;
@@ -330,6 +337,8 @@ export default function AdminConceptsPage() {
           </table>
         </div>
       )}
+
+      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
     </div>
   );
 }

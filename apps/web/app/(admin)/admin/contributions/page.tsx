@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, type AdminContributionListItem, type ContributionStatusValue, type ModuleType } from "@/lib/api";
+import { Pagination } from "@/components/admin-pagination";
 
 const MODULE_LABEL: Record<ModuleType, string> = {
   WORD: "Word",
@@ -156,27 +157,7 @@ export default function AdminContributionsPage() {
         </div>
       )}
 
-      {!loading && total > PAGE_SIZE && (
-        <div className="flex items-center justify-center gap-4">
-          <button
-            onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
-            disabled={offset === 0}
-            className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
-          >
-            ← Previous
-          </button>
-          <span className="text-sm text-ink-muted">
-            Page {Math.floor(offset / PAGE_SIZE) + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
-          </span>
-          <button
-            onClick={() => setOffset((o) => o + PAGE_SIZE)}
-            disabled={offset + PAGE_SIZE >= total}
-            className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
-          >
-            Next →
-          </button>
-        </div>
-      )}
+      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
     </div>
   );
 }

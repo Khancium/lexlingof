@@ -4,12 +4,16 @@ import { useEffect, useState } from "react";
 import { api, type ConceptListItem, type Scene, type SceneDifficulty } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
+import { Pagination } from "@/components/admin-pagination";
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
+const PAGE_SIZE = 20;
 
 export default function AdminScenesPage() {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [slug, setSlug] = useState("");
@@ -37,15 +41,20 @@ export default function AdminScenesPage() {
 
   async function load() {
     setLoading(true);
-    const [sceneList, conceptRes] = await Promise.all([api.scenes.getAll(), api.concepts.getAll({ limit: 200 })]);
-    setScenes(sceneList);
+    const [sceneRes, conceptRes] = await Promise.all([
+      api.scenes.getAll({ limit: PAGE_SIZE, offset }),
+      api.concepts.getAll({ limit: 200 }),
+    ]);
+    setScenes(sceneRes.items);
+    setTotal(sceneRes.total);
     setConcepts(conceptRes.items);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
 
   async function handleCreate() {
     if (slug.trim().length === 0 || title.trim().length === 0) return;
@@ -328,6 +337,8 @@ export default function AdminScenesPage() {
           ))}
         </div>
       )}
+
+      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
     </div>
   );
 }

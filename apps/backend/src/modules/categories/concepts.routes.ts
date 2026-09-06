@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, ilike, isNull } from "drizzle-orm";
+import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -27,22 +27,25 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
       conditions.push(ilike(concepts.labelEnglish, `%${search}%`));
     }
 
-    const rows = await db
-      .select({
-        id: concepts.id,
-        categoryId: concepts.categoryId,
-        categoryName: categories.nameEnglish,
-        slug: concepts.slug,
-        labelEnglish: concepts.labelEnglish,
-        description: concepts.description,
-      })
-      .from(concepts)
-      .innerJoin(categories, eq(categories.id, concepts.categoryId))
-      .where(and(...conditions))
-      .limit(limit)
-      .offset(offset);
+    const [rows, [totalRow]] = await Promise.all([
+      db
+        .select({
+          id: concepts.id,
+          categoryId: concepts.categoryId,
+          categoryName: categories.nameEnglish,
+          slug: concepts.slug,
+          labelEnglish: concepts.labelEnglish,
+          description: concepts.description,
+        })
+        .from(concepts)
+        .innerJoin(categories, eq(categories.id, concepts.categoryId))
+        .where(and(...conditions))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(concepts).where(and(...conditions)),
+    ]);
 
-    return { items: rows, limit, offset };
+    return { items: rows, limit, offset, total: totalRow?.value ?? 0 };
   });
 
   fastify.get("/concepts/:id", async (request) => {

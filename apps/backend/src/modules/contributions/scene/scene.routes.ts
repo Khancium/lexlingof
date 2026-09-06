@@ -4,6 +4,10 @@ import { z } from "zod";
 import { verifyToken } from "../../../middleware/auth.js";
 import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneContribution } from "./scene.service.js";
 
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
 const randomQuerySchema = z.object({ exclude: z.string().uuid().optional() });
 const idParamSchema = z.object({ id: z.string().uuid() });
 
@@ -18,7 +22,10 @@ const submitSchema = z.object({
 });
 
 export default async function sceneRoutes(fastify: FastifyInstance) {
-  fastify.get("/", async () => getScenes());
+  fastify.get("/", async (request) => {
+    const { limit, offset } = listQuerySchema.parse(request.query);
+    return getScenes(limit, offset);
+  });
 
   fastify.get("/daily", { preHandler: verifyToken }, async () => getDailyScene());
 

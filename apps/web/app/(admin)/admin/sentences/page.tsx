@@ -4,10 +4,15 @@ import { useEffect, useState } from "react";
 import { api, type AdminSentence, type Category } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
+import { Pagination } from "@/components/admin-pagination";
+
+const PAGE_SIZE = 50;
 
 export default function AdminSentencesPage() {
   const [sentences, setSentences] = useState<AdminSentence[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const [englishText, setEnglishText] = useState("");
@@ -23,15 +28,17 @@ export default function AdminSentencesPage() {
 
   async function load() {
     setLoading(true);
-    const [cats, sentenceList] = await Promise.all([api.categories.getAll(), api.admin.getSentences({ limit: 200 })]);
+    const [cats, res] = await Promise.all([api.categories.getAll(), api.admin.getSentences({ limit: PAGE_SIZE, offset })]);
     setCategories(cats);
-    setSentences(sentenceList);
+    setSentences(res.items);
+    setTotal(res.total);
     setLoading(false);
   }
 
   useEffect(() => {
     load();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
 
   async function handleCreate() {
     if (englishText.trim().length === 0) return;
@@ -203,6 +210,8 @@ export default function AdminSentencesPage() {
           </table>
         </div>
       )}
+
+      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
     </div>
   );
 }
