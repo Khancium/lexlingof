@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import { api, type ContributionListItem, type ModuleType } from "@/lib/api";
 
 const MODULE_LABEL: Record<ModuleType, string> = {
@@ -8,15 +9,6 @@ const MODULE_LABEL: Record<ModuleType, string> = {
   TRANSCRIPTION: "Audio Upload",
   TRANSLATION: "Translation",
   SCENE: "Scene",
-};
-
-const STATUS_COLOR: Record<string, string> = {
-  draft: "bg-slate-600",
-  pending: "bg-yellow-600",
-  under_review: "bg-yellow-600",
-  verified: "bg-emerald-600",
-  needs_correction: "bg-orange-600",
-  rejected: "bg-red-600",
 };
 
 const FILTERS: { label: string; value: ModuleType | undefined }[] = [
@@ -27,18 +19,78 @@ const FILTERS: { label: string; value: ModuleType | undefined }[] = [
   { label: "Scene", value: "SCENE" },
 ];
 
+const PAGE_SIZE = 20;
+
+function contributionTitle(item: ContributionListItem): string {
+  const d = item.detail;
+  if (!d) return MODULE_LABEL[item.moduleType];
+  switch (item.moduleType) {
+    case "WORD":
+      return d.nativeWord || "(no word text)";
+    case "TRANSCRIPTION":
+      return d.title || "(untitled)";
+    case "TRANSLATION":
+      return d.nativeText || "(no translation text)";
+    case "SCENE":
+      return d.sceneTitle || "(untitled scene)";
+    default:
+      return MODULE_LABEL[item.moduleType];
+  }
+}
+
 export default function ContributionsPage() {
   const [filter, setFilter] = useState<ModuleType | undefined>(undefined);
   const [items, setItems] = useState<ContributionListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [playUrl, setPlayUrl] = useState<string | null>(null);
+  const [playError, setPlayError] = useState<string | null>(null);
+
+  const load = useCallback(() => {
     setLoading(true);
     api.users
-      .getContributions({ limit: 100, moduleType: filter })
-      .then((res) => setItems(res.items))
+      .getContributions({ limit: PAGE_SIZE, offset, moduleType: filter })
+      .then((res) => {
+        setItems(res.items);
+        setTotal(res.total);
+      })
       .finally(() => setLoading(false));
-  }, [filter]);
+  }, [filter, offset]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  function changeFilter(value: ModuleType | undefined) {
+    setFilter(value);
+    setOffset(0);
+    setPlayingId(null);
+  }
+
+  async function togglePlay(item: ContributionListItem) {
+    if (playingId === item.id) {
+      setPlayingId(null);
+      setPlayUrl(null);
+      return;
+    }
+    const audioFileId = item.detail?.audioFileId;
+    if (!audioFileId) return;
+    setPlayingId(item.id);
+    setPlayUrl(null);
+    setPlayError(null);
+    try {
+      const { url } = await api.audio.getPlayUrl(audioFileId);
+      setPlayUrl(url);
+    } catch (err) {
+      setPlayError(err instanceof Error ? err.message : "Failed to load audio");
+    }
+  }
+
+  const page = Math.floor(offset / PAGE_SIZE) + 1;
+  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-6">
@@ -48,8 +100,8 @@ export default function ContributionsPage() {
         {FILTERS.map((f) => (
           <button
             key={f.label}
-            onClick={() => setFilter(f.value)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+            onClick={() => changeFilter(f.value)}
+            className={`rounded-full px-3 py-1.5 text-sm font-medium transition ${
               filter === f.value ? "bg-brand text-ink-inverted" : "bg-surface-card text-ink-muted hover:bg-border"
             }`}
           >
@@ -63,35 +115,77 @@ export default function ContributionsPage() {
       ) : items.length === 0 ? (
         <p className="text-ink-muted">No contributions yet.</p>
       ) : (
-        <div className="overflow-x-auto rounded-2xl bg-surface shadow-sm">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-border text-ink-muted">
-              <tr>
-                <th className="px-4 py-3">Module</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Submitted</th>
-                <th className="px-4 py-3">Points</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 text-ink">{MODULE_LABEL[item.moduleType]}</td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-500"}`}
-                    >
-                      {item.status.replace("_", " ")}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</td>
-                  <td className="px-4 py-3 font-semibold text-emerald-600">
-                    {item.totalPoints != null ? `+${item.totalPoints}` : "--"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-3">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center gap-4 rounded-2xl bg-surface p-4 shadow-sm">
+              {item.detail?.imageUrl ? (
+                <Image
+                  src={item.detail.imageUrl}
+                  alt=""
+                  width={56}
+                  height={56}
+                  className="h-14 w-14 flex-shrink-0 rounded-lg object-cover"
+                />
+              ) : (
+                <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-surface-card text-xl">
+                  {item.moduleType === "SCENE" ? "🖼️" : item.moduleType === "TRANSLATION" ? "🌐" : "🎙️"}
+                </div>
+              )}
+
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{MODULE_LABEL[item.moduleType]}</p>
+                <p className="truncate font-medium text-ink">{contributionTitle(item)}</p>
+                <p className="text-xs text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</p>
+                {playingId === item.id && (
+                  <div className="mt-2">
+                    {playUrl ? (
+                      <audio src={playUrl} controls autoPlay className="h-9 max-w-full" />
+                    ) : playError ? (
+                      <p className="text-xs text-red-600">{playError}</p>
+                    ) : (
+                      <p className="text-xs text-ink-muted">Loading audio...</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-shrink-0 items-center gap-4">
+                {item.detail?.audioFileId ? (
+                  <button
+                    onClick={() => togglePlay(item)}
+                    className="rounded-full bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark"
+                  >
+                    {playingId === item.id ? "Stop" : "▶ Play"}
+                  </button>
+                ) : null}
+                <span className="text-sm font-semibold text-emerald-600">
+                  {item.totalPoints != null ? `+${item.totalPoints}` : "--"}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && total > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+            disabled={offset === 0}
+            className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
+          >
+            ← Previous
+          </button>
+          <span className="text-sm text-ink-muted">
+            Page {page} of {pageCount}
+          </span>
+          <button
+            onClick={() => setOffset((o) => o + PAGE_SIZE)}
+            disabled={offset + PAGE_SIZE >= total}
+            className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
+          >
+            Next →
+          </button>
         </div>
       )}
     </div>

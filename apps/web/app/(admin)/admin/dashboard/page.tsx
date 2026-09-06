@@ -26,7 +26,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     Promise.all([api.admin.getAnalytics(), api.admin.getContributions({ limit: 5 })]).then(([a, c]) => {
       setAnalytics(a);
-      setRecent(c);
+      setRecent(c.items);
       setLoading(false);
     });
   }, []);

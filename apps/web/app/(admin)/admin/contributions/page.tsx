@@ -22,31 +22,46 @@ const STATUS_COLOR: Record<string, string> = {
   rejected: "bg-red-600",
 };
 
+const PAGE_SIZE = 50;
+
 export default function AdminContributionsPage() {
   const [status, setStatus] = useState<ContributionStatusValue | "">("");
   const [moduleType, setModuleType] = useState<ModuleType | "">("");
   const [items, setItems] = useState<AdminContributionListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      setItems(
-        await api.admin.getContributions({
-          status: status || undefined,
-          module_type: moduleType || undefined,
-          limit: 100,
-        }),
-      );
+      const res = await api.admin.getContributions({
+        status: status || undefined,
+        module_type: moduleType || undefined,
+        limit: PAGE_SIZE,
+        offset,
+      });
+      setItems(res.items);
+      setTotal(res.total);
     } finally {
       setLoading(false);
     }
-  }, [status, moduleType]);
+  }, [status, moduleType, offset]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  function changeStatus(value: ContributionStatusValue | "") {
+    setStatus(value);
+    setOffset(0);
+  }
+
+  function changeModuleType(value: ModuleType | "") {
+    setModuleType(value);
+    setOffset(0);
+  }
 
   async function handleAction(id: string, newStatus: "verified" | "rejected") {
     setActioningId(id);
@@ -65,7 +80,7 @@ export default function AdminContributionsPage() {
       <div className="flex gap-3">
         <select
           value={status}
-          onChange={(e) => setStatus(e.target.value as ContributionStatusValue | "")}
+          onChange={(e) => changeStatus(e.target.value as ContributionStatusValue | "")}
           className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
         >
           <option value="">All statuses</option>
@@ -77,7 +92,7 @@ export default function AdminContributionsPage() {
         </select>
         <select
           value={moduleType}
-          onChange={(e) => setModuleType(e.target.value as ModuleType | "")}
+          onChange={(e) => changeModuleType(e.target.value as ModuleType | "")}
           className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
         >
           <option value="">All modules</option>
@@ -138,6 +153,28 @@ export default function AdminContributionsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {!loading && total > PAGE_SIZE && (
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => setOffset((o) => Math.max(0, o - PAGE_SIZE))}
+            disabled={offset === 0}
+            className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
+          >
+            ← Previous
+          </button>
+          <span className="text-sm text-ink-muted">
+            Page {Math.floor(offset / PAGE_SIZE) + 1} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+          </span>
+          <button
+            onClick={() => setOffset((o) => o + PAGE_SIZE)}
+            disabled={offset + PAGE_SIZE >= total}
+            className="rounded-full bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-40"
+          >
+            Next →
+          </button>
         </div>
       )}
     </div>

@@ -229,6 +229,18 @@ export type UserStatsResponse = {
 };
 
 export type ContributionsQuery = { limit?: number; offset?: number; moduleType?: ModuleType };
+export type ContributionDetail = {
+  nativeWord?: string | null;
+  romanization?: string | null;
+  durationMs?: number | null;
+  title?: string | null;
+  recordingType?: string | null;
+  nativeText?: string | null;
+  sceneId?: string | null;
+  sceneTitle?: string | null;
+  audioFileId?: string | null;
+  imageUrl?: string | null;
+};
 export type ContributionListItem = {
   id: string;
   moduleType: ModuleType;
@@ -236,7 +248,7 @@ export type ContributionListItem = {
   totalPoints: number | null;
   submittedAt: string;
   verifiedAt: string | null;
-  detail: Record<string, unknown> | null;
+  detail: ContributionDetail | null;
 };
 export type ContributionsResponse = { items: ContributionListItem[]; limit: number; offset: number; total: number };
 
@@ -504,6 +516,12 @@ export type AdminContributionListItem = {
   submittedAt: string;
   contributor: { id: string; displayName: string };
   detail: Record<string, unknown>;
+};
+export type AdminContributionsResponse = {
+  items: AdminContributionListItem[];
+  limit: number;
+  offset: number;
+  total: number;
 };
 
 export type AdminContributionsQuery = {
@@ -781,7 +799,7 @@ export const api = {
 
   admin: {
     getContributions: (params?: AdminContributionsQuery) =>
-      apiClient.get<AdminContributionListItem[]>("/api/v1/admin/contributions", { params }).then((r) => r.data),
+      apiClient.get<AdminContributionsResponse>("/api/v1/admin/contributions", { params }).then((r) => r.data),
     updateContributionStatus: (id: string, data: UpdateContributionStatusInput) =>
       apiClient.put<{ id: string; status: ContributionStatusValue }>(`/api/v1/admin/contributions/${id}/status`, data).then((r) => r.data),
 

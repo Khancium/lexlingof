@@ -283,37 +283,40 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (language_id) conditions.push(eq(contributions.languageId, language_id));
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const rows = await db
-      .select({
-        contributionId: contributions.id,
-        moduleType: contributions.moduleType,
-        status: contributions.status,
-        submittedAt: contributions.submittedAt,
-        contributorId: users.id,
-        contributorDisplayName: users.displayName,
-        wordNativeWord: wordRecordings.nativeWord,
-        wordDurationMs: wordRecordings.durationMs,
-        audioTitle: audioUploads.title,
-        audioNativeText: transcriptions.nativeText,
-        translationNativeText: translations.nativeText,
-        translationEnglishText: sentences.englishText,
-        sceneTitle: scenes.title,
-      })
-      .from(contributions)
-      .innerJoin(users, eq(users.id, contributions.userId))
-      .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
-      .leftJoin(audioUploads, eq(audioUploads.id, contributions.audioUploadId))
-      .leftJoin(transcriptions, and(eq(transcriptions.audioUploadId, audioUploads.id), eq(transcriptions.isCurrent, true)))
-      .leftJoin(translations, eq(translations.id, contributions.translationId))
-      .leftJoin(sentences, eq(sentences.id, translations.sentenceId))
-      .leftJoin(sceneContributions, eq(sceneContributions.id, contributions.sceneContributionId))
-      .leftJoin(scenes, eq(scenes.id, sceneContributions.sceneId))
-      .where(whereClause)
-      .orderBy(desc(contributions.submittedAt))
-      .limit(limit)
-      .offset(offset);
+    const [rows, [totalRow]] = await Promise.all([
+      db
+        .select({
+          contributionId: contributions.id,
+          moduleType: contributions.moduleType,
+          status: contributions.status,
+          submittedAt: contributions.submittedAt,
+          contributorId: users.id,
+          contributorDisplayName: users.displayName,
+          wordNativeWord: wordRecordings.nativeWord,
+          wordDurationMs: wordRecordings.durationMs,
+          audioTitle: audioUploads.title,
+          audioNativeText: transcriptions.nativeText,
+          translationNativeText: translations.nativeText,
+          translationEnglishText: sentences.englishText,
+          sceneTitle: scenes.title,
+        })
+        .from(contributions)
+        .innerJoin(users, eq(users.id, contributions.userId))
+        .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
+        .leftJoin(audioUploads, eq(audioUploads.id, contributions.audioUploadId))
+        .leftJoin(transcriptions, and(eq(transcriptions.audioUploadId, audioUploads.id), eq(transcriptions.isCurrent, true)))
+        .leftJoin(translations, eq(translations.id, contributions.translationId))
+        .leftJoin(sentences, eq(sentences.id, translations.sentenceId))
+        .leftJoin(sceneContributions, eq(sceneContributions.id, contributions.sceneContributionId))
+        .leftJoin(scenes, eq(scenes.id, sceneContributions.sceneId))
+        .where(whereClause)
+        .orderBy(desc(contributions.submittedAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(contributions).where(whereClause),
+    ]);
 
-    return rows.map((row) => {
+    const items = rows.map((row) => {
       let detail: Record<string, unknown> = {};
       switch (row.moduleType) {
         case "WORD":
@@ -338,6 +341,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         detail,
       };
     });
+
+    return { items, limit, offset, total: totalRow?.value ?? 0 };
   });
 
   fastify.put("/admin/contributions/:id/status", { preHandler: requirePermission("contributions.manage") }, async (request) => {

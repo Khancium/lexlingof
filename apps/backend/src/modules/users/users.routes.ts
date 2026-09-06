@@ -5,6 +5,8 @@ import { z } from "zod";
 import { db } from "../../db/index.js";
 import {
   audioUploads,
+  conceptMedia,
+  concepts,
   contributionModule,
   contributions,
   contributorProfiles,
@@ -12,6 +14,7 @@ import {
   languages,
   scenes,
   sceneContributions,
+  sceneMedia,
   streaks,
   translations,
   userStats,
@@ -282,27 +285,48 @@ export default async function usersRoutes(fastify: FastifyInstance) {
               nativeWord: wordRecordings.nativeWord,
               romanization: wordRecordings.romanization,
               durationMs: wordRecordings.durationMs,
+              audioFileId: wordRecordings.audioFileId,
+              imageUrl: conceptMedia.publicUrl,
             })
             .from(wordRecordings)
+            .leftJoin(concepts, eq(concepts.id, wordRecordings.conceptId))
+            .leftJoin(conceptMedia, and(eq(conceptMedia.conceptId, concepts.id), eq(conceptMedia.isPrimary, true)))
             .where(inArray(wordRecordings.id, wordRecordingIds))
         : [],
       audioUploadIds.length
         ? db
-            .select({ id: audioUploads.id, title: audioUploads.title, recordingType: audioUploads.recordingType })
+            .select({
+              id: audioUploads.id,
+              title: audioUploads.title,
+              recordingType: audioUploads.recordingType,
+              audioFileId: audioUploads.audioFileId,
+            })
             .from(audioUploads)
             .where(inArray(audioUploads.id, audioUploadIds))
         : [],
       translationIds.length
         ? db
-            .select({ id: translations.id, nativeText: translations.nativeText, romanization: translations.romanization })
+            .select({
+              id: translations.id,
+              nativeText: translations.nativeText,
+              romanization: translations.romanization,
+              audioFileId: translations.audioFileId,
+            })
             .from(translations)
             .where(inArray(translations.id, translationIds))
         : [],
       sceneContributionIds.length
         ? db
-            .select({ id: sceneContributions.id, sceneId: sceneContributions.sceneId, sceneTitle: scenes.title })
+            .select({
+              id: sceneContributions.id,
+              sceneId: sceneContributions.sceneId,
+              sceneTitle: scenes.title,
+              audioFileId: sceneContributions.audioFileId,
+              imageUrl: sceneMedia.publicUrl,
+            })
             .from(sceneContributions)
             .leftJoin(scenes, eq(scenes.id, sceneContributions.sceneId))
+            .leftJoin(sceneMedia, and(eq(sceneMedia.sceneId, scenes.id), eq(sceneMedia.isPrimary, true)))
             .where(inArray(sceneContributions.id, sceneContributionIds))
         : [],
     ]);
