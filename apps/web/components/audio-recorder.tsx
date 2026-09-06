@@ -81,50 +81,23 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [maxDurationMs]);
 
-  const requestMic = useCallback(async () => {
-    setStatus("requesting");
-    setErrorMessage(null);
-    try {
-      // channelCount: 1 requests mono from the mic -- speech corpus
-      // recordings only need one channel, and defaulting to the device's
-      // native channel count would otherwise give stereo on many laptops.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
-      streamRef.current = stream;
-
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const source = audioContext.createMediaStreamSource(stream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-      analyserRef.current = analyser;
-      levelDataRef.current = new Uint8Array(analyser.frequencyBinCount);
-
-      setStatus("idle");
-      rafRef.current = requestAnimationFrame(loop);
-    } catch (err) {
-      setStatus("error");
-      const message = err instanceof Error ? err.message : "Microphone permission denied";
-      setErrorMessage(message);
-      onError?.(message);
-    }
-  }, [loop, onError]);
-
+  // Cleanup only -- getUserMedia is requested from requestMicAndRecord()
+  // below, called directly from the record button's onClick. Mobile
+  // browsers (iOS Safari in particular, increasingly Android Chrome too)
+  // require getUserMedia to be called synchronously within a user gesture;
+  // requesting it eagerly here on mount instead of on tap throws
+  // NotAllowedError ("not allowed by the user agent or the platform") on
+  // those browsers even when the user never denied anything.
   useEffect(() => {
-    requestMic();
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       streamRef.current?.getTracks().forEach((t) => t.stop());
       audioContextRef.current?.close().catch(() => {});
       if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function startRecording() {
-    const stream = streamRef.current;
-    if (!stream) return;
-
+  function beginRecording(stream: MediaStream) {
     const mimeType = pickRecorderMimeType();
     mimeTypeRef.current = mimeType;
     const recorder = new MediaRecorder(stream, { mimeType });
@@ -157,6 +130,35 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     pausedDurationRef.current = 0;
     setDurationMs(0);
     setStatus("recording");
+  }
+
+  async function requestMicAndRecord() {
+    setStatus("requesting");
+    setErrorMessage(null);
+    try {
+      // channelCount: 1 requests mono from the mic -- speech corpus
+      // recordings only need one channel, and defaulting to the device's
+      // native channel count would otherwise give stereo on many laptops.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+      streamRef.current = stream;
+
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+      levelDataRef.current = new Uint8Array(analyser.frequencyBinCount);
+      rafRef.current = requestAnimationFrame(loop);
+
+      beginRecording(stream);
+    } catch (err) {
+      setStatus("error");
+      const message = err instanceof Error ? err.message : "Microphone permission denied";
+      setErrorMessage(message);
+      onError?.(message);
+    }
   }
 
   function stopRecording() {
@@ -212,7 +214,10 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     return (
       <div className="flex flex-col items-center gap-3">
         <p className="text-sm text-red-600">{errorMessage}</p>
-        <button onClick={requestMic} className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark">
+        <button
+          onClick={requestMicAndRecord}
+          className="rounded-full bg-brand px-5 py-3 font-semibold text-ink-inverted hover:bg-brand-dark"
+        >
           Try Again
         </button>
       </div>
@@ -223,7 +228,7 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     return (
       <div className="flex flex-col items-center gap-3">
         <button
-          onClick={startRecording}
+          onClick={requestMicAndRecord}
           className="flex h-20 w-20 items-center justify-center rounded-full bg-brand text-ink-inverted shadow-sm transition hover:bg-brand-dark"
           aria-label="Start recording"
         >
@@ -232,7 +237,6 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         <p className="text-sm text-ink-muted">
           {maxDurationMs ? `Tap to record (max ${(maxDurationMs / 1000).toFixed(0)} seconds)` : "Tap to start recording"}
         </p>
-        {micMeter}
       </div>
     );
   }
