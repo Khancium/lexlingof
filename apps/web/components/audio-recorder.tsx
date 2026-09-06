@@ -85,7 +85,10 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     setStatus("requesting");
     setErrorMessage(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // channelCount: 1 requests mono from the mic -- speech corpus
+      // recordings only need one channel, and defaulting to the device's
+      // native channel count would otherwise give stereo on many laptops.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
       streamRef.current = stream;
 
       const audioContext = new AudioContext();

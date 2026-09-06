@@ -35,9 +35,13 @@ const COLORS = {
 // AudioSamplingRate/AVFormatIDKeyIOS are plain strings/numbers, not enums --
 // AVEncodingOption is a TS union type with no runtime members, so 'aac' is
 // used directly instead of a nonexistent AVEncodingOption.aac.
+// AudioChannels: 1 forces mono recording on Android (AVNumberOfChannelsKeyIOS
+// already does the same for iOS) -- speech corpus recordings only need one
+// channel, and a stereo mic would otherwise double file size for no benefit.
 const audioSet = {
   AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
   AudioSourceAndroid: AudioSourceAndroidType.MIC,
+  AudioChannels: 1,
   AVEncoderAudioQualityKeyIOS: AVEncoderAudioQualityIOSType.high,
   AVNumberOfChannelsKeyIOS: 1,
   AVFormatIDKeyIOS: 'aac' as const,
