@@ -11,10 +11,21 @@ const REFRESH_TOKEN_KEY = "lexlingo_refresh_token";
 // (the refresh token in sessionStorage is what re-establishes a session).
 let accessToken: string | null = null;
 
+type ZodIssueLike = { path?: (string | number)[]; message?: string };
+
 export function getErrorMessage(err: unknown, fallback: string): string {
   if (axios.isAxiosError(err)) {
-    const message = (err.response?.data as { message?: string } | undefined)?.message;
-    if (message) return message;
+    const data = err.response?.data as { message?: string; issues?: ZodIssueLike[] } | undefined;
+    // The backend's ZodError handler returns a flat "Validation failed"
+    // message with the field-level detail in `issues` -- surface the first
+    // issue instead, or the generic message is useless for diagnosing which
+    // field actually failed.
+    if (data?.issues?.length) {
+      const issue = data.issues[0];
+      const field = issue.path?.length ? `${issue.path.join(".")}: ` : "";
+      return `${field}${issue.message ?? data.message ?? fallback}`;
+    }
+    if (data?.message) return data.message;
   }
   return err instanceof Error ? err.message : fallback;
 }

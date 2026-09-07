@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type Language } from "@/lib/api";
+import { api, getErrorMessage, type Language } from "@/lib/api";
 import { uploadAudioBlob } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 
@@ -177,7 +177,7 @@ export default function AudioUploadPage() {
       setSegmentsOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to upload audio");
+      setSubmitError(getErrorMessage(err, "Failed to upload audio"));
     } finally {
       setIsSubmitting(false);
     }

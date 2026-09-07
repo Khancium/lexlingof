@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type RandomSentence } from "@/lib/api";
+import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
 import { uploadAudioBlob } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
@@ -54,7 +54,7 @@ export default function TranslatePage() {
           return updated;
         });
       } catch (err) {
-        setSentenceError(err instanceof Error ? err.message : "No sentences available");
+        setSentenceError(getErrorMessage(err, "No sentences available"));
       } finally {
         setLoadingSentence(false);
       }
@@ -118,7 +118,7 @@ export default function TranslatePage() {
       setHistoryIndex((i) => i - 1);
       fetchNewSentence(languageId);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to submit translation");
+      setSubmitError(getErrorMessage(err, "Failed to submit translation"));
     } finally {
       setIsSubmitting(false);
     }
