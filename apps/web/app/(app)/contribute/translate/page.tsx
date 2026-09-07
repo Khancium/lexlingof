@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
-import { uploadAudioBlob } from "@/lib/upload";
+import { reserveAndUploadAudio } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
 
@@ -90,7 +90,7 @@ export default function TranslatePage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const audioFileId = await uploadAudioBlob({
+      const { audioFileId, confirm } = await reserveAndUploadAudio({
         blob: draft.recording.file,
         filename: draft.recording.file.name,
         mimeType: draft.recording.file.type,
@@ -98,14 +98,21 @@ export default function TranslatePage() {
         module: "TRANSLATION",
       });
 
-      const result = await api.contributions.submitTranslation(sentence.id, {
-        nativeText: draft.translation.trim() || undefined,
-        romanization: draft.romanization.trim() || undefined,
-        ipa: draft.ipa.trim() || undefined,
-        audioFileId,
-        languageId,
-        dialectId: dialectId ?? undefined,
-      });
+      // Submitting doesn't depend on confirm's result (translations carry no
+      // duration cap), so run them concurrently instead of waiting on confirm
+      // first -- each is a full round trip through a backend that's itself a
+      // network hop from its database.
+      const [result] = await Promise.all([
+        api.contributions.submitTranslation(sentence.id, {
+          nativeText: draft.translation.trim() || undefined,
+          romanization: draft.romanization.trim() || undefined,
+          ipa: draft.ipa.trim() || undefined,
+          audioFileId,
+          languageId,
+          dialectId: dialectId ?? undefined,
+        }),
+        confirm(),
+      ]);
 
       setSuccessMessage(`Submitted! +${result.pointsAwarded} points`);
       setDrafts((prev) => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, getErrorMessage, type Language } from "@/lib/api";
-import { uploadAudioBlob } from "@/lib/upload";
+import { reserveAndUploadAudio } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 
 const RECORDING_TYPES = ["conversation", "story", "interview", "speech", "song", "other"] as const;
@@ -117,7 +117,7 @@ export default function AudioUploadPage() {
     try {
       const durationMs = await getAudioFileDurationMs(file);
 
-      const audioFileId = await uploadAudioBlob({
+      const { audioFileId, confirm } = await reserveAndUploadAudio({
         blob: file,
         filename: file.name,
         mimeType: file.type || "audio/mpeg",
@@ -125,42 +125,53 @@ export default function AudioUploadPage() {
         module: "TRANSCRIPTION",
       });
 
-      const result = await api.contributions.submitAudio({
-        audioFileId,
-        languageId,
-        dialectId: dialectId ?? undefined,
-        title: title.trim() || undefined,
-        description: description.trim() || undefined,
-        recordingType,
-        location: location.trim() || undefined,
-        recordedAt: recordedAt || undefined,
-      });
+      // submitAudio doesn't depend on confirm's result (no duration cap for
+      // this module) -- run them concurrently instead of waiting on confirm
+      // first, each of which is a full round trip through a backend that's
+      // itself a network hop from its database.
+      const [result] = await Promise.all([
+        api.contributions.submitAudio({
+          audioFileId,
+          languageId,
+          dialectId: dialectId ?? undefined,
+          title: title.trim() || undefined,
+          description: description.trim() || undefined,
+          recordingType,
+          location: location.trim() || undefined,
+          recordedAt: recordedAt || undefined,
+        }),
+        confirm(),
+      ]);
 
       let total = result.pointsAwarded;
 
-      if (nativeText.trim() || romanization.trim() || ipa.trim() || englishTranslation.trim()) {
-        const transcriptionResult = await api.contributions.addTranscription(result.audioUploadId, {
-          nativeText: nativeText.trim() || undefined,
-          romanization: romanization.trim() || undefined,
-          ipa: ipa.trim() || undefined,
-          englishTranslation: englishTranslation.trim() || undefined,
-        });
-        total += transcriptionResult.pointsAwarded ?? 0;
-      }
+      const validSegments = segments.filter((s) => s.startMs !== "" && s.endMs !== "");
+      const [transcriptionResult, segmentResults] = await Promise.all([
+        nativeText.trim() || romanization.trim() || ipa.trim() || englishTranslation.trim()
+          ? api.contributions.addTranscription(result.audioUploadId, {
+              nativeText: nativeText.trim() || undefined,
+              romanization: romanization.trim() || undefined,
+              ipa: ipa.trim() || undefined,
+              englishTranslation: englishTranslation.trim() || undefined,
+            })
+          : null,
+        Promise.all(
+          validSegments.map((segment) =>
+            api.contributions.addSegment(result.audioUploadId, {
+              segmentIndex: segment.segmentIndex,
+              startMs: Number(segment.startMs),
+              endMs: Number(segment.endMs),
+              nativeText: segment.nativeText.trim() || undefined,
+              romanization: segment.romanization.trim() || undefined,
+              ipa: segment.ipa.trim() || undefined,
+              speakerLabel: segment.speakerLabel.trim() || undefined,
+            }),
+          ),
+        ),
+      ]);
 
-      for (const segment of segments) {
-        if (segment.startMs === "" || segment.endMs === "") continue;
-        const segmentResult = await api.contributions.addSegment(result.audioUploadId, {
-          segmentIndex: segment.segmentIndex,
-          startMs: Number(segment.startMs),
-          endMs: Number(segment.endMs),
-          nativeText: segment.nativeText.trim() || undefined,
-          romanization: segment.romanization.trim() || undefined,
-          ipa: segment.ipa.trim() || undefined,
-          speakerLabel: segment.speakerLabel.trim() || undefined,
-        });
-        total += segmentResult.pointsAwarded ?? 0;
-      }
+      if (transcriptionResult) total += transcriptionResult.pointsAwarded ?? 0;
+      for (const segmentResult of segmentResults) total += segmentResult.pointsAwarded ?? 0;
 
       setDoneMessage(`Submitted! +${total} points`);
       setFile(null);
