@@ -31,6 +31,7 @@ const labelClass = "mb-1 block text-sm font-medium text-ink";
 
 export default function OnboardingPage() {
   const user = useAuthStore((state) => state.user);
+  const setUser = useAuthStore((state) => state.setUser);
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const [tribes, setTribes] = useState<NamedOption[]>([]);
@@ -119,6 +120,11 @@ export default function OnboardingPage() {
         quarter: values.quarter || undefined,
         dialect: values.dialect || undefined,
       });
+      // Demographics submission is what sets the user's primary language --
+      // refresh the store so it (and dialect) are available immediately to
+      // the contribute pages' useContributorLanguage instead of staying
+      // stale (null) until the next hard reload.
+      setUser(await api.users.getMe());
       router.push("/dashboard");
     } catch (err) {
       setServerError(getErrorMessage(err, "Failed to save your information"));

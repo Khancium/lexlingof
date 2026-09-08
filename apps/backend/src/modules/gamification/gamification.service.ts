@@ -35,12 +35,14 @@ export async function evaluateAndAwardBadges(userId: string): Promise<AwardedBad
     return [];
   }
 
-  const [streak] = await db.select({ currentStreak: streaks.currentStreak }).from(streaks).where(eq(streaks.userId, userId)).limit(1);
+  // Independent of each other -- fetched concurrently instead of as three
+  // sequential round trips.
+  const [[streak], activeBadges, earnedRows] = await Promise.all([
+    db.select({ currentStreak: streaks.currentStreak }).from(streaks).where(eq(streaks.userId, userId)).limit(1),
+    db.select().from(badges).where(eq(badges.isActive, true)),
+    db.select({ badgeId: userBadges.badgeId }).from(userBadges).where(eq(userBadges.userId, userId)),
+  ]);
   const currentStreak = streak?.currentStreak ?? 0;
-
-  const activeBadges = await db.select().from(badges).where(eq(badges.isActive, true));
-
-  const earnedRows = await db.select({ badgeId: userBadges.badgeId }).from(userBadges).where(eq(userBadges.userId, userId));
   const earnedBadgeIds = new Set(earnedRows.map((r) => r.badgeId));
 
   const modulesWithContributions = Object.values(MODULE_COUNT_FIELD).filter((field) => stats[field] > 0).length;

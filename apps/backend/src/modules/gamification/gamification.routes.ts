@@ -209,40 +209,39 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
       throw new HttpError(403, "FORBIDDEN", "You can only view your own badges");
     }
 
-    const earned = await db
-      .select({
-        id: badges.id,
-        slug: badges.slug,
-        name: badges.name,
-        description: badges.description,
-        icon: badges.icon,
-        category: badges.category,
-        earnedAt: userBadges.earnedAt,
-      })
-      .from(userBadges)
-      .innerJoin(badges, eq(badges.id, userBadges.badgeId))
-      .where(eq(userBadges.userId, userId));
+    // earned and allActive are independent (available is just "allActive
+    // minus earned", diffed in JS below) -- fetched concurrently instead of
+    // available's old query needing earned's ids as an input first.
+    const [earned, allActive] = await Promise.all([
+      db
+        .select({
+          id: badges.id,
+          slug: badges.slug,
+          name: badges.name,
+          description: badges.description,
+          icon: badges.icon,
+          category: badges.category,
+          earnedAt: userBadges.earnedAt,
+        })
+        .from(userBadges)
+        .innerJoin(badges, eq(badges.id, userBadges.badgeId))
+        .where(eq(userBadges.userId, userId)),
+      db
+        .select({
+          id: badges.id,
+          slug: badges.slug,
+          name: badges.name,
+          description: badges.description,
+          icon: badges.icon,
+          category: badges.category,
+        })
+        .from(badges)
+        .where(and(eq(badges.isActive, true), eq(badges.isHidden, false)))
+        .orderBy(badges.sortOrder),
+    ]);
 
-    const earnedBadgeIds = earned.map((b) => b.id);
-
-    const available = await db
-      .select({
-        id: badges.id,
-        slug: badges.slug,
-        name: badges.name,
-        description: badges.description,
-        icon: badges.icon,
-        category: badges.category,
-      })
-      .from(badges)
-      .where(
-        and(
-          eq(badges.isActive, true),
-          eq(badges.isHidden, false),
-          earnedBadgeIds.length > 0 ? sql`${badges.id} not in (${sql.join(earnedBadgeIds.map((id) => sql`${id}`), sql`, `)})` : sql`true`,
-        ),
-      )
-      .orderBy(badges.sortOrder);
+    const earnedBadgeIds = new Set(earned.map((b) => b.id));
+    const available = allActive.filter((b) => !earnedBadgeIds.has(b.id));
 
     return { earned, available };
   });

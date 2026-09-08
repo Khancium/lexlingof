@@ -1,32 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api } from "./api";
+import { useAuthStore } from "./store";
 
 // Every module submission requires a languageId (and optionally a
-// dialectId) -- set on the user's profile. Shared across all four
-// contribute pages rather than refetched by each independently.
+// dialectId) -- set on the user's profile. providers.tsx already blocks
+// rendering until useAuthStore's loadUser() resolves, so the profile
+// (language/dialect included) is guaranteed to be in the store by the time
+// any page using this hook mounts -- no need for this hook to issue its own
+// GET /users/me and re-fetch data the app already has.
 export function useContributorLanguage() {
-  const [languageId, setLanguageId] = useState<string | null>(null);
-  const [dialectId, setDialectId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const user = useAuthStore((state) => state.user);
+  const isLoading = useAuthStore((state) => state.isLoading);
 
-  useEffect(() => {
-    let cancelled = false;
-    api.users
-      .getMe()
-      .then((me) => {
-        if (cancelled) return;
-        setLanguageId(me.language?.id ?? null);
-        setDialectId(me.dialect?.id ?? null);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  return { languageId, dialectId, isLoading };
+  return {
+    languageId: user?.language?.id ?? null,
+    dialectId: user?.dialect?.id ?? null,
+    isLoading,
+  };
 }

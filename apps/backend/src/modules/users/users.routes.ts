@@ -245,26 +245,29 @@ export default async function usersRoutes(fastify: FastifyInstance) {
       ? and(eq(contributions.userId, userId), isNull(contributions.deletedAt), eq(contributions.moduleType, moduleType))
       : and(eq(contributions.userId, userId), isNull(contributions.deletedAt));
 
-    const rows = await db
-      .select({
-        id: contributions.id,
-        moduleType: contributions.moduleType,
-        status: contributions.status,
-        totalPoints: contributions.totalPoints,
-        submittedAt: contributions.submittedAt,
-        verifiedAt: contributions.verifiedAt,
-        wordRecordingId: contributions.wordRecordingId,
-        audioUploadId: contributions.audioUploadId,
-        translationId: contributions.translationId,
-        sceneContributionId: contributions.sceneContributionId,
-      })
-      .from(contributions)
-      .where(whereClause)
-      .orderBy(desc(contributions.submittedAt))
-      .limit(limit)
-      .offset(offset);
-
-    const [totalRow] = await db.select({ value: count() }).from(contributions).where(whereClause);
+    // The page of rows and the total count are independent -- fetched
+    // concurrently instead of sequentially.
+    const [rows, [totalRow]] = await Promise.all([
+      db
+        .select({
+          id: contributions.id,
+          moduleType: contributions.moduleType,
+          status: contributions.status,
+          totalPoints: contributions.totalPoints,
+          submittedAt: contributions.submittedAt,
+          verifiedAt: contributions.verifiedAt,
+          wordRecordingId: contributions.wordRecordingId,
+          audioUploadId: contributions.audioUploadId,
+          translationId: contributions.translationId,
+          sceneContributionId: contributions.sceneContributionId,
+        })
+        .from(contributions)
+        .where(whereClause)
+        .orderBy(desc(contributions.submittedAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: count() }).from(contributions).where(whereClause),
+    ]);
 
     // Batched by module type (one query per type, not per row) -- with up
     // to `limit` rows per page potentially spanning all four module types,

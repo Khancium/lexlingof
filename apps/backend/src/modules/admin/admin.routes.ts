@@ -32,7 +32,7 @@ import {
   userStats,
   wordRecordings,
 } from "../../db/schema.js";
-import { requirePermission, verifyToken } from "../../middleware/auth.js";
+import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -41,11 +41,6 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
 /* -------------------------------------------------------------------------- */
-
-async function getActorRole(userId: string) {
-  const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-  return row?.role ?? null;
-}
 
 async function writeAuditLog(params: {
   actorId: string;
@@ -361,7 +356,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await db.update(contributions).set(updates).where(eq(contributions.id, id));
 
-    const actorRole = await getActorRole(request.user!.id);
+    const actorRole = request.user!.role;
     await writeAuditLog({
       actorId: request.user!.id,
       actorRole,
@@ -417,8 +412,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .update(users)
       .set({ isSuspended: true, suspendedAt: new Date(), suspendedReason: body.reason, updatedAt: new Date() })
       .where(eq(users.id, id));
+    invalidateUserCache(id);
 
-    const actorRole = await getActorRole(request.user!.id);
+    const actorRole = request.user!.role;
     await writeAuditLog({
       actorId: request.user!.id,
       actorRole,
@@ -529,7 +525,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_concept_bulk_delete",
       resourceType: "concept",
       afterState: { ids },
@@ -545,7 +541,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_concept_bulk_edit",
       resourceType: "concept",
       afterState: { ids, ...fields },
@@ -566,7 +562,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_concept_delete",
       resourceType: "concept",
       resourceId: id,
@@ -694,7 +690,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_scene_bulk_delete",
       resourceType: "scene",
       afterState: { ids },
@@ -710,7 +706,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_scene_bulk_edit",
       resourceType: "scene",
       afterState: { ids, ...fields },
@@ -731,7 +727,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_scene_delete",
       resourceType: "scene",
       resourceId: id,
@@ -891,7 +887,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_sentence_bulk_delete",
       resourceType: "sentence",
       afterState: { ids },
@@ -907,7 +903,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_sentence_bulk_edit",
       resourceType: "sentence",
       afterState: { ids, ...fields },
@@ -928,7 +924,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await writeAuditLog({
       actorId: request.user!.id,
-      actorRole: await getActorRole(request.user!.id),
+      actorRole: request.user!.role,
       action: "admin_sentence_delete",
       resourceType: "sentence",
       resourceId: id,
@@ -942,58 +938,58 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.get("/admin/analytics", { preHandler: requirePermission("analytics.read") }, async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-    const perDay = await db
-      .select({ day: sql<string>`date(${contributions.submittedAt})`, count: sql<number>`count(*)`.mapWith(Number) })
-      .from(contributions)
-      .where(gte(contributions.submittedAt, thirtyDaysAgo))
-      .groupBy(sql`date(${contributions.submittedAt})`)
-      .orderBy(sql`date(${contributions.submittedAt})`);
-
-    const topContributors = await db
-      .select({
-        userId: users.id,
-        displayName: users.displayName,
-        verifiedContributions: userStats.verifiedContributions,
-        totalPoints: userStats.totalPoints,
-      })
-      .from(userStats)
-      .innerJoin(users, eq(users.id, userStats.userId))
-      .orderBy(desc(userStats.verifiedContributions))
-      .limit(10);
-
-    const [pendingRow] = await db
-      .select({ value: sql<number>`count(*)`.mapWith(Number) })
-      .from(contributions)
-      .where(eq(contributions.status, "pending"));
-
-    const [storageRow] = await db
-      .select({
-        totalBytes: sql<number>`coalesce(sum(${audioFiles.fileSizeBytes}), 0)`.mapWith(Number),
-        totalDurationMs: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number),
-        fileCount: sql<number>`count(*)`.mapWith(Number),
-      })
-      .from(audioFiles);
-
     // Added for the admin dashboard's overview cards -- nothing above
     // already exposes a total user count or "as of today" breakdowns
     // (contributionsPerDay groups by submission date, not verification date).
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const [totalUsersRow] = await db
-      .select({ value: sql<number>`count(*)`.mapWith(Number) })
-      .from(users)
-      .where(isNull(users.deletedAt));
-
-    const [contributionsTodayRow] = await db
-      .select({ value: sql<number>`count(*)`.mapWith(Number) })
-      .from(contributions)
-      .where(gte(contributions.submittedAt, todayStart));
-
-    const [verifiedTodayRow] = await db
-      .select({ value: sql<number>`count(*)`.mapWith(Number) })
-      .from(contributions)
-      .where(and(eq(contributions.status, "verified"), gte(contributions.verifiedAt, todayStart)));
+    // None of these 7 reads depend on each other -- fetched concurrently
+    // instead of as 7 sequential round trips, which matters because the DB
+    // is in a different region from this backend.
+    const [perDay, topContributors, [pendingRow], [storageRow], [totalUsersRow], [contributionsTodayRow], [verifiedTodayRow]] =
+      await Promise.all([
+        db
+          .select({ day: sql<string>`date(${contributions.submittedAt})`, count: sql<number>`count(*)`.mapWith(Number) })
+          .from(contributions)
+          .where(gte(contributions.submittedAt, thirtyDaysAgo))
+          .groupBy(sql`date(${contributions.submittedAt})`)
+          .orderBy(sql`date(${contributions.submittedAt})`),
+        db
+          .select({
+            userId: users.id,
+            displayName: users.displayName,
+            verifiedContributions: userStats.verifiedContributions,
+            totalPoints: userStats.totalPoints,
+          })
+          .from(userStats)
+          .innerJoin(users, eq(users.id, userStats.userId))
+          .orderBy(desc(userStats.verifiedContributions))
+          .limit(10),
+        db
+          .select({ value: sql<number>`count(*)`.mapWith(Number) })
+          .from(contributions)
+          .where(eq(contributions.status, "pending")),
+        db
+          .select({
+            totalBytes: sql<number>`coalesce(sum(${audioFiles.fileSizeBytes}), 0)`.mapWith(Number),
+            totalDurationMs: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number),
+            fileCount: sql<number>`count(*)`.mapWith(Number),
+          })
+          .from(audioFiles),
+        db
+          .select({ value: sql<number>`count(*)`.mapWith(Number) })
+          .from(users)
+          .where(isNull(users.deletedAt)),
+        db
+          .select({ value: sql<number>`count(*)`.mapWith(Number) })
+          .from(contributions)
+          .where(gte(contributions.submittedAt, todayStart)),
+        db
+          .select({ value: sql<number>`count(*)`.mapWith(Number) })
+          .from(contributions)
+          .where(and(eq(contributions.status, "verified"), gte(contributions.verifiedAt, todayStart))),
+      ]);
 
     return {
       contributionsPerDay: perDay,
@@ -1035,7 +1031,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .where(eq(gamificationConfig.configKey, key))
       .returning();
 
-    const actorRole = await getActorRole(request.user!.id);
+    const actorRole = request.user!.role;
     await writeAuditLog({
       actorId: request.user!.id,
       actorRole,
@@ -1086,7 +1082,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .where(eq(featureFlags.flagKey, key))
       .returning();
 
-    const actorRole = await getActorRole(request.user!.id);
+    const actorRole = request.user!.role;
     await writeAuditLog({
       actorId: request.user!.id,
       actorRole,
@@ -1117,6 +1113,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     await db.update(users).set({ role: "admin", updatedAt: new Date() }).where(eq(users.id, body.userId));
+    invalidateUserCache(body.userId);
 
     await writeAuditLog({
       actorId: request.user!.id,

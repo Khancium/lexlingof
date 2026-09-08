@@ -9,7 +9,7 @@ type Role = (typeof userRole.enumValues)[number];
 
 declare module "fastify" {
   interface FastifyRequest {
-    user?: { id: string; email: string; role: string };
+    user?: { id: string; email: string; role: Role };
     requireOwnershipCheck?: boolean;
   }
 }
@@ -40,6 +40,53 @@ async function getRolePermissionCodes(role: Role): Promise<Set<string>> {
 }
 
 /* -------------------------------------------------------------------------- */
+/*                       verifyToken user cache (30 sec)                      */
+/* -------------------------------------------------------------------------- */
+
+// verifyToken runs on nearly every request, so this DB round trip is the
+// single biggest multiplier on perceived latency across the whole app (the
+// backend and its DB are in different regions -- every round trip costs
+// real wall-clock time). A short cache accepts up to 30s of staleness on
+// suspend/deactivate in exchange for skipping that round trip on every
+// other request for the same user -- the same tradeoff already made for
+// role permissions below, just with a much shorter TTL since account
+// status needs to propagate faster than permission changes do.
+const USER_CACHE_TTL_MS = 30 * 1000;
+
+type CachedUserRow = { id: string; email: string; role: Role; isActive: boolean; isSuspended: boolean };
+
+const userCache = new Map<string, { row: CachedUserRow; expiresAt: number }>();
+
+async function getUserForToken(userId: string): Promise<CachedUserRow | null> {
+  const cached = userCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.row;
+  }
+
+  const [row] = await db
+    .select({
+      id: users.id,
+      email: users.email,
+      role: users.role,
+      isActive: users.isActive,
+      isSuspended: users.isSuspended,
+    })
+    .from(users)
+    .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+    .limit(1);
+
+  if (!row) return null;
+
+  userCache.set(userId, { row, expiresAt: Date.now() + USER_CACHE_TTL_MS });
+  return row;
+}
+
+/** Called wherever a user's role/status changes so the cache can't serve a stale row past that point. */
+export function invalidateUserCache(userId: string): void {
+  userCache.delete(userId);
+}
+
+/* -------------------------------------------------------------------------- */
 /*                                verifyToken                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -66,17 +113,7 @@ export async function verifyToken(request: FastifyRequest, reply: FastifyReply):
     return;
   }
 
-  const [row] = await db
-    .select({
-      id: users.id,
-      email: users.email,
-      role: users.role,
-      isActive: users.isActive,
-      isSuspended: users.isSuspended,
-    })
-    .from(users)
-    .where(and(eq(users.id, userId), isNull(users.deletedAt)))
-    .limit(1);
+  const row = await getUserForToken(userId);
 
   if (!row || !row.isActive || row.isSuspended) {
     reply.code(401).send({ code: "UNAUTHORIZED", message: "Invalid or missing token" });

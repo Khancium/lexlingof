@@ -48,16 +48,20 @@ export default async function categoriesRoutes(fastify: FastifyInstance) {
   fastify.get("/categories/:id", async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [category] = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
+    // category and conceptRows are both keyed only on the route param -- fetched
+    // concurrently instead of gating conceptRows on category's existence check.
+    const [[category], conceptRows] = await Promise.all([
+      db.select().from(categories).where(eq(categories.id, id)).limit(1),
+      db
+        .select()
+        .from(concepts)
+        .where(and(eq(concepts.categoryId, id), eq(concepts.isActive, true), isNull(concepts.deletedAt)))
+        .orderBy(asc(concepts.sortOrder)),
+    ]);
+
     if (!category) {
       throw new HttpError(404, "NOT_FOUND", "Category not found");
     }
-
-    const conceptRows = await db
-      .select()
-      .from(concepts)
-      .where(and(eq(concepts.categoryId, id), eq(concepts.isActive, true), isNull(concepts.deletedAt)))
-      .orderBy(asc(concepts.sortOrder));
 
     const conceptIds = conceptRows.map((c) => c.id);
 

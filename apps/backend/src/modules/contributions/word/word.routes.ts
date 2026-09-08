@@ -38,30 +38,33 @@ export default async function wordRoutes(fastify: FastifyInstance) {
       conceptConditions.push(eq(concepts.categoryId, categoryId));
     }
 
-    const conceptRows = await db
-      .select({
-        id: concepts.id,
-        slug: concepts.slug,
-        labelEnglish: concepts.labelEnglish,
-        description: concepts.description,
-        categoryId: categories.id,
-        categoryName: categories.nameEnglish,
-        categorySlug: categories.slug,
-      })
-      .from(concepts)
-      .innerJoin(categories, eq(categories.id, concepts.categoryId))
-      .where(and(...conceptConditions))
-      .orderBy(concepts.sortOrder);
+    // conceptRows and recordingCounts are independent (both needed before
+    // "next concept" can be picked) -- fetched concurrently.
+    const [conceptRows, recordingCounts] = await Promise.all([
+      db
+        .select({
+          id: concepts.id,
+          slug: concepts.slug,
+          labelEnglish: concepts.labelEnglish,
+          description: concepts.description,
+          categoryId: categories.id,
+          categoryName: categories.nameEnglish,
+          categorySlug: categories.slug,
+        })
+        .from(concepts)
+        .innerJoin(categories, eq(categories.id, concepts.categoryId))
+        .where(and(...conceptConditions))
+        .orderBy(concepts.sortOrder),
+      db
+        .select({ conceptId: wordRecordings.conceptId, total: sql<number>`count(*)`.mapWith(Number) })
+        .from(wordRecordings)
+        .where(and(eq(wordRecordings.userId, userId), isNull(wordRecordings.deletedAt)))
+        .groupBy(wordRecordings.conceptId),
+    ]);
 
     if (conceptRows.length === 0) {
       throw new HttpError(404, "NO_CONCEPTS_AVAILABLE", "No concepts match the given filters");
     }
-
-    const recordingCounts = await db
-      .select({ conceptId: wordRecordings.conceptId, total: sql<number>`count(*)`.mapWith(Number) })
-      .from(wordRecordings)
-      .where(and(eq(wordRecordings.userId, userId), isNull(wordRecordings.deletedAt)))
-      .groupBy(wordRecordings.conceptId);
 
     const countByConcept = new Map(recordingCounts.map((r) => [r.conceptId, r.total]));
 
@@ -70,13 +73,15 @@ export default async function wordRoutes(fastify: FastifyInstance) {
       throw new HttpError(404, "NO_CONCEPTS_AVAILABLE", "You have completed every available concept");
     }
 
-    const [media] = await db
-      .select({ publicUrl: conceptMedia.publicUrl })
-      .from(conceptMedia)
-      .where(and(eq(conceptMedia.conceptId, nextConcept.id), eq(conceptMedia.isPrimary, true)))
-      .limit(1);
-
-    const recordedSynonyms = await getRecordedSynonyms(userId, nextConcept.id);
+    // media and recordedSynonyms are independent of each other -- fetched concurrently.
+    const [[media], recordedSynonyms] = await Promise.all([
+      db
+        .select({ publicUrl: conceptMedia.publicUrl })
+        .from(conceptMedia)
+        .where(and(eq(conceptMedia.conceptId, nextConcept.id), eq(conceptMedia.isPrimary, true)))
+        .limit(1),
+      getRecordedSynonyms(userId, nextConcept.id),
+    ]);
 
     return {
       concept: {

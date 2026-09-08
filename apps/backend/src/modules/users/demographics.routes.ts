@@ -243,10 +243,20 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
     const body = submitDemographicsSchema.parse(request.body);
     const userId = request.user!.id;
 
-    const tribeId = await getOrCreateTribe(body.tribe);
-    const subTribeId = body.subTribe ? await getOrCreateSubTribe(tribeId, body.subTribe) : null;
-    const villageId = await getOrCreateVillage(body.country, body.city, body.village);
-    const quarterId = body.quarter ? await getOrCreateQuarter(villageId, body.quarter) : null;
+    // tribe->subTribe and village->quarter are the only real dependency
+    // chains here (subTribe needs tribeId, quarter needs villageId) -- tribe,
+    // village, and language are otherwise independent of each other, so the
+    // whole get-or-create graph runs as two parallel batches instead of up
+    // to 5 sequential top-level awaits (each itself 1-3 round trips).
+    const [tribeId, villageId, languageId] = await Promise.all([
+      getOrCreateTribe(body.tribe),
+      getOrCreateVillage(body.country, body.city, body.village),
+      getOrCreateLanguageByName(body.motherTongue),
+    ]);
+    const [subTribeId, quarterId] = await Promise.all([
+      body.subTribe ? getOrCreateSubTribe(tribeId, body.subTribe) : Promise.resolve(null),
+      body.quarter ? getOrCreateQuarter(villageId, body.quarter) : Promise.resolve(null),
+    ]);
 
     const values = {
       userId,
@@ -264,33 +274,32 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       updatedAt: new Date(),
     };
 
-    await db
-      .insert(contributorDemographics)
-      .values(values)
-      .onConflictDoUpdate({ target: contributorDemographics.userId, set: values });
+    // The demographics upsert, the display-name update, and the
+    // contributor-profile upsert (the language picked here becomes the
+    // contributor's primary contribution language -- every module
+    // submission requires one, and asking for it again separately on a
+    // profile screen would be redundant with what was just chosen on this
+    // form) are independent of each other -- run concurrently instead of as
+    // three sequential round trips. .returning() on the demographics upsert
+    // also avoids a trailing SELECT of the row just written.
+    const [[demographicsRow]] = await Promise.all([
+      db
+        .insert(contributorDemographics)
+        .values(values)
+        .onConflictDoUpdate({ target: contributorDemographics.userId, set: values })
+        .returning(),
+      // The signup form no longer collects a name -- this is the first real
+      // name the user provides, so it becomes their display name too.
+      db.update(users).set({ displayName: body.fullName, updatedAt: new Date() }).where(eq(users.id, userId)),
+      db
+        .insert(contributorProfiles)
+        .values({ userId, primaryLanguageId: languageId })
+        .onConflictDoUpdate({
+          target: contributorProfiles.userId,
+          set: { primaryLanguageId: languageId, updatedAt: new Date() },
+        }),
+    ]);
 
-    // The signup form no longer collects a name -- this is the first real
-    // name the user provides, so it becomes their display name too.
-    await db.update(users).set({ displayName: body.fullName, updatedAt: new Date() }).where(eq(users.id, userId));
-
-    // The language picked here becomes the contributor's primary
-    // contribution language -- every module submission requires one, and
-    // asking for it again separately on a profile screen would be
-    // redundant with what was just chosen on this form.
-    const languageId = await getOrCreateLanguageByName(body.motherTongue);
-    await db
-      .insert(contributorProfiles)
-      .values({ userId, primaryLanguageId: languageId })
-      .onConflictDoUpdate({
-        target: contributorProfiles.userId,
-        set: { primaryLanguageId: languageId, updatedAt: new Date() },
-      });
-
-    const [row] = await db
-      .select()
-      .from(contributorDemographics)
-      .where(eq(contributorDemographics.userId, userId))
-      .limit(1);
-    return row;
+    return demographicsRow;
   });
 }
