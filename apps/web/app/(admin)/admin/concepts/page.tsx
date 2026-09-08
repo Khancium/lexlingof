@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type Category, type ConceptListItem } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
+import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
 
@@ -11,6 +12,9 @@ const PAGE_SIZE = 50;
 export default function AdminConceptsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
+  // Unpaginated, used only to resolve labels typed into the bulk-by-URL
+  // textarea -- the table above only ever holds one page at a time.
+  const [allConcepts, setAllConcepts] = useState<ConceptListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -29,6 +33,8 @@ export default function AdminConceptsPage() {
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+  const [urlEntryId, setUrlEntryId] = useState<string | null>(null);
+  const [urlEntryValue, setUrlEntryValue] = useState("");
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -38,10 +44,15 @@ export default function AdminConceptsPage() {
 
   async function load() {
     setLoading(true);
-    const [cats, res] = await Promise.all([api.categories.getAll(), api.concepts.getAll({ limit: PAGE_SIZE, offset })]);
+    const [cats, res, allRes] = await Promise.all([
+      api.categories.getAll(),
+      api.concepts.getAll({ limit: PAGE_SIZE, offset }),
+      api.concepts.getAll({ limit: 1000 }),
+    ]);
     setCategories(cats);
     setConcepts(res.items);
     setTotal(res.total);
+    setAllConcepts(allRes.items);
     setLoading(false);
   }
 
@@ -79,6 +90,28 @@ export default function AdminConceptsPage() {
       setUploadMessage({ id: conceptId, text: "Image uploaded" });
     } catch (err) {
       setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Upload failed", error: true });
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
+  function startUrlEntry(conceptId: string) {
+    setUrlEntryId(conceptId);
+    setUrlEntryValue("");
+    setUploadMessage(null);
+  }
+
+  async function handleAddImageUrl(conceptId: string) {
+    const imageUrl = urlEntryValue.trim();
+    if (!imageUrl) return;
+    setUploadingId(conceptId);
+    setUploadMessage(null);
+    try {
+      await api.admin.addConceptMediaUrl(conceptId, imageUrl);
+      setUploadMessage({ id: conceptId, text: "Image added" });
+      setUrlEntryId(null);
+    } catch (err) {
+      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
     } finally {
       setUploadingId(null);
     }
@@ -197,6 +230,14 @@ export default function AdminConceptsPage() {
         onDone={load}
       />
 
+      <AdminBulkImageUrlUpload
+        label="Bulk Add Concept Images by URL"
+        matchItems={allConcepts}
+        matchLabel={(c) => c.labelEnglish}
+        onSubmit={(pairs) => api.admin.bulkAddConceptMediaUrl(pairs.map((p) => ({ conceptId: p.id, imageUrl: p.imageUrl })))}
+        onDone={load}
+      />
+
       <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
         <select
           value={bulkCategoryId}
@@ -300,16 +341,53 @@ export default function AdminConceptsPage() {
                     <td className="px-4 py-3 text-ink-muted">{concept.categoryName}</td>
                     <td className="px-4 py-3 text-ink-muted">{concept.description ?? "--"}</td>
                     <td className="px-4 py-3">
-                      <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
-                        {uploadingId === concept.id ? "Uploading..." : "Upload Image"}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          disabled={uploadingId === concept.id}
-                          onChange={(e) => handleUploadImage(concept.id, e.target.files?.[0])}
-                        />
-                      </label>
+                      {urlEntryId === concept.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            value={urlEntryValue}
+                            onChange={(e) => setUrlEntryValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                handleAddImageUrl(concept.id);
+                              }
+                            }}
+                            placeholder="Image URL"
+                            autoFocus
+                            className="w-40 rounded bg-surface-card px-2 py-1 text-xs text-ink placeholder:text-gray-400 ring-1 ring-border"
+                          />
+                          <button
+                            onClick={() => handleAddImageUrl(concept.id)}
+                            disabled={uploadingId === concept.id || urlEntryValue.trim().length === 0}
+                            className="text-xs font-semibold text-brand hover:underline disabled:opacity-50"
+                          >
+                            {uploadingId === concept.id ? "Adding..." : "Add"}
+                          </button>
+                          <button onClick={() => setUrlEntryId(null)} className="text-xs text-ink-muted hover:underline">
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
+                            {uploadingId === concept.id ? "Uploading..." : "Upload"}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploadingId === concept.id}
+                              onChange={(e) => handleUploadImage(concept.id, e.target.files?.[0])}
+                            />
+                          </label>
+                          <span className="text-ink-muted">·</span>
+                          <button
+                            onClick={() => startUrlEntry(concept.id)}
+                            className="text-xs font-semibold text-brand hover:underline"
+                          >
+                            From URL
+                          </button>
+                        </div>
+                      )}
                       {uploadMessage?.id === concept.id ? (
                         <p className={`mt-1 text-xs ${uploadMessage.error ? "text-red-600" : "text-emerald-600"}`}>
                           {uploadMessage.text}

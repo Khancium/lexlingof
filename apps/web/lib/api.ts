@@ -898,6 +898,12 @@ export const api = {
         .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media`, form)
         .then((r) => r.data);
     },
+    addConceptMediaUrl: (id: string, imageUrl: string) =>
+      apiClient
+        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media/url`, { imageUrl })
+        .then((r) => r.data),
+    bulkAddConceptMediaUrl: (items: { conceptId: string; imageUrl: string }[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/bulk-url", { items }).then((r) => r.data),
     bulkUploadConcepts: (file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -919,6 +925,12 @@ export const api = {
         .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media`, form)
         .then((r) => r.data);
     },
+    addSceneMediaUrl: (id: string, imageUrl: string) =>
+      apiClient
+        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media/url`, { imageUrl })
+        .then((r) => r.data),
+    bulkAddSceneMediaUrl: (items: { sceneId: string; imageUrl: string }[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/bulk-url", { items }).then((r) => r.data),
     bulkUploadScenes: (file: File) => {
       const form = new FormData();
       form.append("file", file);

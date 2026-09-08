@@ -9,8 +9,12 @@ import { createClient } from "@supabase/supabase-js";
 import sharp from "sharp";
 
 import type { contributionModule } from "../db/schema.js";
+import { HttpError } from "../utils/http-error.js";
 
 type ContributionModule = (typeof contributionModule.enumValues)[number];
+
+const MAX_FETCHED_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+const FETCH_IMAGE_TIMEOUT_MS = 15_000;
 
 const r2 = new S3Client({
   endpoint: process.env.R2_ENDPOINT,
@@ -145,6 +149,57 @@ class StorageService {
     const publicUrl = this.getImagePublicUrl(data.path);
 
     return { path: data.path, publicUrl, mimeType: "image/jpeg", fileSizeBytes: resized.byteLength };
+  }
+
+  /**
+   * Downloads a third-party image (admin-supplied URL) so it can be re-hosted
+   * through the same uploadSceneImage() path as a direct file upload -- this
+   * keeps concept/scene images on our own CDN instead of hotlinking, and
+   * means a source link going dead later doesn't break the app.
+   */
+  async fetchImageFromUrl(url: string): Promise<{ buffer: Buffer; filename: string }> {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new HttpError(400, "INVALID_URL", "Not a valid URL");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new HttpError(400, "INVALID_URL", "Only http:// and https:// URLs are supported");
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FETCH_IMAGE_TIMEOUT_MS);
+    let response: Response;
+    try {
+      response = await fetch(parsed, { signal: controller.signal });
+    } catch {
+      throw new HttpError(400, "FETCH_FAILED", "Could not reach that URL");
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    if (!response.ok) {
+      throw new HttpError(400, "FETCH_FAILED", `URL returned HTTP ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.startsWith("image/")) {
+      throw new HttpError(400, "INVALID_FILE_TYPE", "That URL did not return an image");
+    }
+
+    const contentLength = Number(response.headers.get("content-length") ?? 0);
+    if (contentLength > MAX_FETCHED_IMAGE_BYTES) {
+      throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_FETCHED_IMAGE_BYTES} byte limit`);
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    if (buffer.byteLength > MAX_FETCHED_IMAGE_BYTES) {
+      throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_FETCHED_IMAGE_BYTES} byte limit`);
+    }
+
+    const filename = decodeURIComponent(parsed.pathname.split("/").pop() || "image") || "image";
+    return { buffer, filename };
   }
 
   private static readonly AVATAR_MAX_DIMENSION = 512;

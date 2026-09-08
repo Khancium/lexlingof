@@ -80,6 +80,60 @@ async function readImageFile(request: FastifyRequest) {
   return { buffer, filename: file.filename, mimetype: file.mimetype };
 }
 
+async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: string) {
+  const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+  const storageFilename = `concepts/${conceptId}/${randomUUID()}.${ext}`;
+  const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadSceneImage(buffer, storageFilename);
+
+  const [existingCount] = await db
+    .select({ value: sql<number>`count(*)`.mapWith(Number) })
+    .from(conceptMedia)
+    .where(eq(conceptMedia.conceptId, conceptId));
+  const isPrimary = (existingCount?.value ?? 0) === 0;
+
+  const [media] = await db
+    .insert(conceptMedia)
+    .values({ conceptId, storageKey: path, publicUrl, mimeType, fileSizeBytes, isPrimary })
+    .returning();
+  return media;
+}
+
+async function addConceptImageFromUrl(conceptId: string, imageUrl: string) {
+  const [concept] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, conceptId)).limit(1);
+  if (!concept) {
+    throw new HttpError(404, "NOT_FOUND", "Concept not found");
+  }
+  const { buffer, filename } = await storageService.fetchImageFromUrl(imageUrl);
+  return insertConceptMedia(conceptId, buffer, filename);
+}
+
+async function insertSceneMedia(sceneId: string, buffer: Buffer, filename: string) {
+  const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+  const storageFilename = `scenes/${sceneId}/${randomUUID()}.${ext}`;
+  const { path, publicUrl, mimeType } = await storageService.uploadSceneImage(buffer, storageFilename);
+
+  const [existingCount] = await db
+    .select({ value: sql<number>`count(*)`.mapWith(Number) })
+    .from(sceneMedia)
+    .where(eq(sceneMedia.sceneId, sceneId));
+  const isPrimary = (existingCount?.value ?? 0) === 0;
+
+  const [media] = await db
+    .insert(sceneMedia)
+    .values({ sceneId, storageKey: path, publicUrl, mimeType, isPrimary })
+    .returning();
+  return media;
+}
+
+async function addSceneImageFromUrl(sceneId: string, imageUrl: string) {
+  const [scene] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, sceneId)).limit(1);
+  if (!scene) {
+    throw new HttpError(404, "NOT_FOUND", "Scene not found");
+  }
+  const { buffer, filename } = await storageService.fetchImageFromUrl(imageUrl);
+  return insertSceneMedia(sceneId, buffer, filename);
+}
+
 function slugify(value: string): string {
   return value
     .toLowerCase()
@@ -177,6 +231,20 @@ const updateConceptSchema = z
     sortOrder: z.number().int().optional(),
   })
   .refine((data) => Object.keys(data).length > 0, { message: "At least one field is required" });
+
+const imageUrlSchema = z.object({ imageUrl: z.string().url() });
+
+// imageUrl is deliberately just a non-empty string here (not `.url()`) --
+// fetchImageFromUrl() does its own URL parsing per item, so one malformed
+// URL in a bulk batch surfaces as that item's own error instead of a
+// whole-request 400 that would block every valid row alongside it.
+const bulkConceptImageUrlSchema = z.object({
+  items: z.array(z.object({ conceptId: z.string().uuid(), imageUrl: z.string().min(1) })).min(1).max(200),
+});
+
+const bulkSceneImageUrlSchema = z.object({
+  items: z.array(z.object({ sceneId: z.string().uuid(), imageUrl: z.string().min(1) })).min(1).max(200),
+});
 
 const bulkIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
 
@@ -585,20 +653,36 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     const { buffer, filename } = await readImageFile(request);
-    const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
-    const storageFilename = `concepts/${id}/${randomUUID()}.${ext}`;
-
-    const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadSceneImage(buffer, storageFilename);
-
-    const [existingCount] = await db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(conceptMedia).where(eq(conceptMedia.conceptId, id));
-    const isPrimary = (existingCount?.value ?? 0) === 0;
-
-    const [media] = await db
-      .insert(conceptMedia)
-      .values({ conceptId: id, storageKey: path, publicUrl, mimeType, fileSizeBytes, isPrimary })
-      .returning();
+    const media = await insertConceptMedia(id, buffer, filename);
 
     reply.code(201).send(media);
+  });
+
+  // Same as above but the image is fetched server-side from a third-party
+  // URL instead of uploaded as multipart -- still re-encoded and re-hosted
+  // through uploadSceneImage() so it ends up on our own CDN either way.
+  fastify.post("/admin/concepts/:id/media/url", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { imageUrl } = imageUrlSchema.parse(request.body);
+
+    const media = await addConceptImageFromUrl(id, imageUrl);
+    reply.code(201).send(media);
+  });
+
+  // Bulk variant: a JSON array of {conceptId, imageUrl} pairs, one row per
+  // concept. Unlike the CSV/JSON bulk-create endpoint, a URL fits inline in a
+  // row so images can be assigned in bulk without touching each concept
+  // individually. Each item is independent -- one bad URL doesn't block the
+  // rest.
+  fastify.post("/admin/concepts/media/bulk-url", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { items } = bulkConceptImageUrlSchema.parse(request.body);
+
+    const results = await Promise.allSettled(items.map((item) => addConceptImageFromUrl(item.conceptId, item.imageUrl)));
+    const errors = results.flatMap((r, i) =>
+      r.status === "rejected" ? [{ row: i + 1, message: r.reason instanceof Error ? r.reason.message : "Failed" }] : [],
+    );
+
+    return { created: results.length - errors.length, errors };
   });
 
   /* --------------------------------- Scenes --------------------------------- */
@@ -750,20 +834,30 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     const { buffer, filename } = await readImageFile(request);
-    const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
-    const storageFilename = `scenes/${id}/${randomUUID()}.${ext}`;
-
-    const { path, publicUrl, mimeType } = await storageService.uploadSceneImage(buffer, storageFilename);
-
-    const [existingCount] = await db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sceneMedia).where(eq(sceneMedia.sceneId, id));
-    const isPrimary = (existingCount?.value ?? 0) === 0;
-
-    const [media] = await db
-      .insert(sceneMedia)
-      .values({ sceneId: id, storageKey: path, publicUrl, mimeType, isPrimary })
-      .returning();
+    const media = await insertSceneMedia(id, buffer, filename);
 
     reply.code(201).send(media);
+  });
+
+  fastify.post("/admin/scenes/:id/media/url", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { imageUrl } = imageUrlSchema.parse(request.body);
+
+    const media = await addSceneImageFromUrl(id, imageUrl);
+    reply.code(201).send(media);
+  });
+
+  // Bulk variant: a JSON array of {sceneId, imageUrl} pairs. Each item is
+  // independent -- one bad URL doesn't block the rest.
+  fastify.post("/admin/scenes/media/bulk-url", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { items } = bulkSceneImageUrlSchema.parse(request.body);
+
+    const results = await Promise.allSettled(items.map((item) => addSceneImageFromUrl(item.sceneId, item.imageUrl)));
+    const errors = results.flatMap((r, i) =>
+      r.status === "rejected" ? [{ row: i + 1, message: r.reason instanceof Error ? r.reason.message : "Failed" }] : [],
+    );
+
+    return { created: results.length - errors.length, errors };
   });
 
   /* --------------------------- Scene image keywords -------------------------- */

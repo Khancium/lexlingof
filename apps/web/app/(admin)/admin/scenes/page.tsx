@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, type ConceptListItem, type Scene, type SceneDifficulty, type SceneImageKeyword } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
+import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
 
@@ -66,6 +67,8 @@ function ConceptMultiSelect({
 export default function AdminScenesPage() {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
+  // Unpaginated, used only to resolve titles typed into the bulk-by-URL textarea.
+  const [allScenes, setAllScenes] = useState<Scene[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -76,6 +79,7 @@ export default function AdminScenesPage() {
   const [difficulty, setDifficulty] = useState<SceneDifficulty>("medium");
   const [estimatedSeconds, setEstimatedSeconds] = useState("");
   const [newImageFile, setNewImageFile] = useState<File | null>(null);
+  const [newImageUrl, setNewImageUrl] = useState("");
   const [newKeywordsText, setNewKeywordsText] = useState("");
   const [newConceptIds, setNewConceptIds] = useState<Set<string>>(new Set());
   const [newConceptFilter, setNewConceptFilter] = useState("");
@@ -100,6 +104,8 @@ export default function AdminScenesPage() {
   // A file the admin has chosen but not yet confirmed -- lets them type
   // keywords for it before the actual upload+tag round trips fire.
   const [pendingUploads, setPendingUploads] = useState<Record<string, { file: File; keywordsText: string }>>({});
+  // Same idea, but for a pasted third-party URL instead of a chosen file.
+  const [pendingUrlUploads, setPendingUrlUploads] = useState<Record<string, { url: string; keywordsText: string }>>({});
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -109,13 +115,15 @@ export default function AdminScenesPage() {
 
   async function load() {
     setLoading(true);
-    const [sceneRes, conceptRes] = await Promise.all([
+    const [sceneRes, conceptRes, allSceneRes] = await Promise.all([
       api.scenes.getAll({ limit: PAGE_SIZE, offset }),
       api.concepts.getAll({ limit: 200 }),
+      api.scenes.getAll({ limit: 1000 }),
     ]);
     setScenes(sceneRes.items);
     setTotal(sceneRes.total);
     setConcepts(conceptRes.items);
+    setAllScenes(allSceneRes.items);
     setLoading(false);
   }
 
@@ -144,9 +152,14 @@ export default function AdminScenesPage() {
       // doesn't block the others.
       const tasks: Promise<unknown>[] = [];
 
-      if (newImageFile) {
+      const imageUpload = newImageFile
+        ? api.admin.uploadSceneMedia(scene.id, newImageFile)
+        : newImageUrl.trim()
+          ? api.admin.addSceneMediaUrl(scene.id, newImageUrl.trim())
+          : null;
+      if (imageUpload) {
         tasks.push(
-          api.admin.uploadSceneMedia(scene.id, newImageFile).then((media) => {
+          imageUpload.then((media) => {
             const keywordList = newKeywordsText
               .split(",")
               .map((k) => k.trim())
@@ -169,6 +182,7 @@ export default function AdminScenesPage() {
       setDescription("");
       setEstimatedSeconds("");
       setNewImageFile(null);
+      setNewImageUrl("");
       setNewKeywordsText("");
       setNewConceptIds(new Set());
       setNewConceptFilter("");
@@ -183,7 +197,68 @@ export default function AdminScenesPage() {
   function selectFileForUpload(sceneId: string, file: File | undefined) {
     if (!file) return;
     setUploadMessage(null);
+    setPendingUrlUploads((prev) => {
+      const next = { ...prev };
+      delete next[sceneId];
+      return next;
+    });
     setPendingUploads((prev) => ({ ...prev, [sceneId]: { file, keywordsText: "" } }));
+  }
+
+  function startUrlUpload(sceneId: string) {
+    setUploadMessage(null);
+    setPendingUploads((prev) => {
+      const next = { ...prev };
+      delete next[sceneId];
+      return next;
+    });
+    setPendingUrlUploads((prev) => ({ ...prev, [sceneId]: { url: "", keywordsText: "" } }));
+  }
+
+  function updatePendingUrl(sceneId: string, url: string) {
+    setPendingUrlUploads((prev) => (prev[sceneId] ? { ...prev, [sceneId]: { ...prev[sceneId], url } } : prev));
+  }
+
+  function updatePendingUrlKeywords(sceneId: string, keywordsText: string) {
+    setPendingUrlUploads((prev) => (prev[sceneId] ? { ...prev, [sceneId]: { ...prev[sceneId], keywordsText } } : prev));
+  }
+
+  function cancelPendingUrlUpload(sceneId: string) {
+    setPendingUrlUploads((prev) => {
+      const next = { ...prev };
+      delete next[sceneId];
+      return next;
+    });
+  }
+
+  async function confirmUrlUpload(sceneId: string) {
+    const pending = pendingUrlUploads[sceneId];
+    if (!pending || pending.url.trim().length === 0) return;
+    setUploadingId(sceneId);
+    setUploadMessage(null);
+    try {
+      const media = await api.admin.addSceneMediaUrl(sceneId, pending.url.trim());
+
+      const keywordList = pending.keywordsText
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+      const results = await Promise.allSettled(keywordList.map((k) => api.admin.addSceneMediaKeyword(media.id, k)));
+      const addedCount = results.filter((r) => r.status === "fulfilled").length;
+
+      setUploadMessage({
+        id: sceneId,
+        text: addedCount > 0 ? `Image added with ${addedCount} keyword${addedCount === 1 ? "" : "s"}` : "Image added",
+      });
+      cancelPendingUrlUpload(sceneId);
+      if (keywordsSceneId === sceneId) {
+        setKeywords(await api.admin.getSceneKeywords(sceneId));
+      }
+    } catch (err) {
+      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+    } finally {
+      setUploadingId(null);
+    }
   }
 
   function updatePendingKeywords(sceneId: string, keywordsText: string) {
@@ -386,19 +461,33 @@ export default function AdminScenesPage() {
         </div>
 
         <div className="space-y-2 border-t border-border pt-3">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <label className="cursor-pointer rounded-lg bg-surface-card px-3 py-2 text-sm font-semibold text-ink ring-1 ring-border hover:bg-border">
               {newImageFile ? "Change Image" : "Choose Image (optional)"}
               <input
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => setNewImageFile(e.target.files?.[0] ?? null)}
+                onChange={(e) => {
+                  setNewImageFile(e.target.files?.[0] ?? null);
+                  if (e.target.files?.[0]) setNewImageUrl("");
+                }}
               />
             </label>
             {newImageFile ? <span className="text-xs text-ink-muted">{newImageFile.name}</span> : null}
+            {!newImageFile ? (
+              <>
+                <span className="text-xs text-ink-muted">or</span>
+                <input
+                  value={newImageUrl}
+                  onChange={(e) => setNewImageUrl(e.target.value)}
+                  placeholder="Image URL"
+                  className="min-w-64 flex-1 rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border"
+                />
+              </>
+            ) : null}
           </div>
-          {newImageFile ? (
+          {newImageFile || newImageUrl.trim() ? (
             <input
               value={newKeywordsText}
               onChange={(e) => setNewKeywordsText(e.target.value)}
@@ -432,6 +521,14 @@ export default function AdminScenesPage() {
       </div>
 
       <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
+
+      <AdminBulkImageUrlUpload
+        label="Bulk Add Scene Images by URL"
+        matchItems={allScenes}
+        matchLabel={(s) => s.title}
+        onSubmit={(pairs) => api.admin.bulkAddSceneMediaUrl(pairs.map((p) => ({ sceneId: p.id, imageUrl: p.imageUrl })))}
+        onDone={load}
+      />
 
       <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
         <select
@@ -489,6 +586,12 @@ export default function AdminScenesPage() {
                     />
                   </label>
                   <button
+                    onClick={() => startUrlUpload(scene.id)}
+                    className="text-xs font-semibold text-brand hover:underline"
+                  >
+                    From URL
+                  </button>
+                  <button
                     onClick={() => {
                       setCoverageSceneId(coverageSceneId === scene.id ? null : scene.id);
                       setCoverageConceptIds(new Set());
@@ -541,6 +644,46 @@ export default function AdminScenesPage() {
                     </button>
                     <button
                       onClick={() => cancelPendingUpload(scene.id)}
+                      disabled={uploadingId === scene.id}
+                      className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+
+              {pendingUrlUploads[scene.id] ? (
+                <div className="mt-4 space-y-2 border-t border-border pt-4">
+                  <input
+                    value={pendingUrlUploads[scene.id].url}
+                    onChange={(e) => updatePendingUrl(scene.id, e.target.value)}
+                    placeholder="Image URL"
+                    autoFocus
+                    className="w-full rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
+                  />
+                  <div className="flex gap-3">
+                    <input
+                      value={pendingUrlUploads[scene.id].keywordsText}
+                      onChange={(e) => updatePendingUrlKeywords(scene.id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          confirmUrlUpload(scene.id);
+                        }
+                      }}
+                      placeholder="Keywords for this image, comma-separated (optional)"
+                      className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
+                    />
+                    <button
+                      onClick={() => confirmUrlUpload(scene.id)}
+                      disabled={uploadingId === scene.id || pendingUrlUploads[scene.id].url.trim().length === 0}
+                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                    >
+                      {uploadingId === scene.id ? "Adding..." : "Add"}
+                    </button>
+                    <button
+                      onClick={() => cancelPendingUrlUpload(scene.id)}
                       disabled={uploadingId === scene.id}
                       className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
                     >
