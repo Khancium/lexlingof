@@ -885,7 +885,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         categoryId: body.categoryId,
         importance: body.importance ?? 1,
       })
+      .onConflictDoNothing({ target: [sceneConcepts.sceneId, sceneConcepts.conceptId] })
       .returning();
+
+    if (!sceneConcept) {
+      throw new HttpError(409, "DUPLICATE_COVERAGE", "That concept is already in this scene's coverage map");
+    }
 
     reply.code(201).send(sceneConcept);
   });

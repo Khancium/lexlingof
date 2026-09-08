@@ -9,6 +9,60 @@ import { Pagination } from "@/components/admin-pagination";
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
 const PAGE_SIZE = 20;
 
+function toggleInSet(set: Set<string>, id: string): Set<string> {
+  const next = new Set(set);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
+}
+
+/** Checkbox list + filter for picking any number of concepts at once -- shared by the creation form and the per-scene coverage panel. */
+function ConceptMultiSelect({
+  concepts,
+  selectedIds,
+  onToggle,
+  filter,
+  onFilterChange,
+}: {
+  concepts: ConceptListItem[];
+  selectedIds: Set<string>;
+  onToggle: (id: string) => void;
+  filter: string;
+  onFilterChange: (value: string) => void;
+}) {
+  const needle = filter.trim().toLowerCase();
+  const filtered = needle
+    ? concepts.filter((c) => c.labelEnglish.toLowerCase().includes(needle) || c.categoryName.toLowerCase().includes(needle))
+    : concepts;
+
+  return (
+    <div className="space-y-2">
+      <input
+        value={filter}
+        onChange={(e) => onFilterChange(e.target.value)}
+        placeholder="Filter concepts..."
+        className="w-full rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border"
+      />
+      <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg p-2 ring-1 ring-border">
+        {filtered.length === 0 ? (
+          <p className="px-1 py-1 text-sm text-ink-muted">No matching concepts.</p>
+        ) : (
+          filtered.map((c) => (
+            <label
+              key={c.id}
+              className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm text-ink hover:bg-surface-card"
+            >
+              <input type="checkbox" checked={selectedIds.has(c.id)} onChange={() => onToggle(c.id)} />
+              {c.labelEnglish} <span className="text-xs text-ink-muted">({c.categoryName})</span>
+            </label>
+          ))
+        )}
+      </div>
+      {selectedIds.size > 0 ? <p className="text-xs text-ink-muted">{selectedIds.size} selected</p> : null}
+    </div>
+  );
+}
+
 export default function AdminScenesPage() {
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
@@ -21,12 +75,16 @@ export default function AdminScenesPage() {
   const [description, setDescription] = useState("");
   const [difficulty, setDifficulty] = useState<SceneDifficulty>("medium");
   const [estimatedSeconds, setEstimatedSeconds] = useState("");
+  const [newImageFile, setNewImageFile] = useState<File | null>(null);
+  const [newKeywordsText, setNewKeywordsText] = useState("");
+  const [newConceptIds, setNewConceptIds] = useState<Set<string>>(new Set());
+  const [newConceptFilter, setNewConceptFilter] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const [coverageSceneId, setCoverageSceneId] = useState<string | null>(null);
-  const [coverageConceptId, setCoverageConceptId] = useState("");
-  const [coverageImportance, setCoverageImportance] = useState(1);
+  const [coverageConceptIds, setCoverageConceptIds] = useState<Set<string>>(new Set());
+  const [coverageFilter, setCoverageFilter] = useState("");
   const [coverageMessage, setCoverageMessage] = useState<string | null>(null);
   const [isAddingCoverage, setIsAddingCoverage] = useState(false);
 
@@ -78,11 +136,42 @@ export default function AdminScenesPage() {
         difficulty,
         estimatedDurationSeconds: estimatedSeconds ? Number(estimatedSeconds) : undefined,
       });
+
+      // Image upload (plus its keywords, which need the resulting media id)
+      // and concept coverage rows are all independent of each other once the
+      // scene exists -- fired concurrently instead of as sequential round
+      // trips, and one failing (e.g. a keyword that's already covered)
+      // doesn't block the others.
+      const tasks: Promise<unknown>[] = [];
+
+      if (newImageFile) {
+        tasks.push(
+          api.admin.uploadSceneMedia(scene.id, newImageFile).then((media) => {
+            const keywordList = newKeywordsText
+              .split(",")
+              .map((k) => k.trim())
+              .filter(Boolean);
+            return Promise.allSettled(keywordList.map((k) => api.admin.addSceneMediaKeyword(media.id, k)));
+          }),
+        );
+      }
+
+      for (const conceptId of newConceptIds) {
+        const concept = concepts.find((c) => c.id === conceptId);
+        if (!concept) continue;
+        tasks.push(api.admin.createSceneConcept({ sceneId: scene.id, conceptId, categoryId: concept.categoryId }));
+      }
+
+      await Promise.allSettled(tasks);
+
       setSlug("");
       setTitle("");
       setDescription("");
       setEstimatedSeconds("");
-      setCoverageSceneId(scene.id);
+      setNewImageFile(null);
+      setNewKeywordsText("");
+      setNewConceptIds(new Set());
+      setNewConceptFilter("");
       await load();
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create scene");
@@ -156,12 +245,7 @@ export default function AdminScenesPage() {
   }
 
   function toggleSelected(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelected((prev) => toggleInSet(prev, id));
   }
 
   function toggleSelectAll() {
@@ -188,22 +272,25 @@ export default function AdminScenesPage() {
   }
 
   async function handleAddCoverage() {
-    if (!coverageSceneId || !coverageConceptId) return;
-    const concept = concepts.find((c) => c.id === coverageConceptId);
-    if (!concept) return;
+    if (!coverageSceneId || coverageConceptIds.size === 0) return;
     setIsAddingCoverage(true);
     setCoverageMessage(null);
     try {
-      await api.admin.createSceneConcept({
-        sceneId: coverageSceneId,
-        conceptId: coverageConceptId,
-        categoryId: concept.categoryId,
-        importance: coverageImportance,
-      });
-      setCoverageMessage(`Added "${concept.labelEnglish}" to the coverage map.`);
-      setCoverageConceptId("");
-    } catch (err) {
-      setCoverageMessage(err instanceof Error ? err.message : "Failed to add concept coverage");
+      const ids = [...coverageConceptIds];
+      const results = await Promise.allSettled(
+        ids.map((conceptId) => {
+          const concept = concepts.find((c) => c.id === conceptId);
+          if (!concept) return Promise.reject(new Error("Unknown concept"));
+          return api.admin.createSceneConcept({ sceneId: coverageSceneId, conceptId, categoryId: concept.categoryId });
+        }),
+      );
+      const succeeded = results.filter((r) => r.status === "fulfilled").length;
+      setCoverageMessage(
+        succeeded === ids.length
+          ? `Added ${succeeded} concept${succeeded === 1 ? "" : "s"} to the coverage map.`
+          : `Added ${succeeded} of ${ids.length} -- the rest may already be covered.`,
+      );
+      setCoverageConceptIds(new Set());
     } finally {
       setIsAddingCoverage(false);
     }
@@ -296,14 +383,51 @@ export default function AdminScenesPage() {
             placeholder="Description"
             className="w-full rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
           />
-          <button
-            onClick={handleCreate}
-            disabled={isCreating}
-            className="btn-duo bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
-          >
-            {isCreating ? "Adding..." : "Add Scene"}
-          </button>
         </div>
+
+        <div className="space-y-2 border-t border-border pt-3">
+          <div className="flex items-center gap-3">
+            <label className="cursor-pointer rounded-lg bg-surface-card px-3 py-2 text-sm font-semibold text-ink ring-1 ring-border hover:bg-border">
+              {newImageFile ? "Change Image" : "Choose Image (optional)"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => setNewImageFile(e.target.files?.[0] ?? null)}
+              />
+            </label>
+            {newImageFile ? <span className="text-xs text-ink-muted">{newImageFile.name}</span> : null}
+          </div>
+          {newImageFile ? (
+            <input
+              value={newKeywordsText}
+              onChange={(e) => setNewKeywordsText(e.target.value)}
+              placeholder="Keywords for this image, comma-separated (optional)"
+              className="w-full rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
+            />
+          ) : null}
+        </div>
+
+        <div className="space-y-1 border-t border-border pt-3">
+          <p className="text-xs font-medium text-ink-muted">
+            Concept coverage (optional) -- admin-only annotation data, never shown to contributors.
+          </p>
+          <ConceptMultiSelect
+            concepts={concepts}
+            selectedIds={newConceptIds}
+            onToggle={(id) => setNewConceptIds((prev) => toggleInSet(prev, id))}
+            filter={newConceptFilter}
+            onFilterChange={setNewConceptFilter}
+          />
+        </div>
+
+        <button
+          onClick={handleCreate}
+          disabled={isCreating}
+          className="btn-duo bg-brand px-5 py-2 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+        >
+          {isCreating ? "Adding..." : "Add Scene"}
+        </button>
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
 
@@ -367,14 +491,16 @@ export default function AdminScenesPage() {
                   <button
                     onClick={() => {
                       setCoverageSceneId(coverageSceneId === scene.id ? null : scene.id);
+                      setCoverageConceptIds(new Set());
+                      setCoverageFilter("");
                       setCoverageMessage(null);
                     }}
                     className="text-xs font-semibold text-brand hover:underline"
                   >
-                    {coverageSceneId === scene.id ? "Close" : "Add Concept Coverage"}
+                    {coverageSceneId === scene.id ? "Close Coverage" : "Add Concept Coverage"}
                   </button>
                   <button onClick={() => toggleKeywords(scene.id)} className="text-xs font-semibold text-brand hover:underline">
-                    {keywordsSceneId === scene.id ? "Close" : "Keywords"}
+                    {keywordsSceneId === scene.id ? "Close Keywords" : "Keywords"}
                   </button>
                   <button
                     onClick={() => handleDelete(scene)}
@@ -429,38 +555,22 @@ export default function AdminScenesPage() {
                   <p className="text-xs text-ink-muted">
                     Concept coverage map -- admin-only annotation data, never shown to contributors.
                   </p>
-                  <div className="flex flex-wrap gap-3">
-                    <select
-                      value={coverageConceptId}
-                      onChange={(e) => setCoverageConceptId(e.target.value)}
-                      className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
-                    >
-                      <option value="">Select a concept</option>
-                      {concepts.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.labelEnglish} ({c.categoryName})
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={coverageImportance}
-                      onChange={(e) => setCoverageImportance(Number(e.target.value))}
-                      className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
-                    >
-                      {[1, 2, 3, 4, 5].map((n) => (
-                        <option key={n} value={n}>
-                          Importance {n}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={handleAddCoverage}
-                      disabled={isAddingCoverage || !coverageConceptId}
-                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
-                    >
-                      Add
-                    </button>
-                  </div>
+                  <ConceptMultiSelect
+                    concepts={concepts}
+                    selectedIds={coverageConceptIds}
+                    onToggle={(id) => setCoverageConceptIds((prev) => toggleInSet(prev, id))}
+                    filter={coverageFilter}
+                    onFilterChange={setCoverageFilter}
+                  />
+                  <button
+                    onClick={handleAddCoverage}
+                    disabled={isAddingCoverage || coverageConceptIds.size === 0}
+                    className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                  >
+                    {isAddingCoverage
+                      ? "Adding..."
+                      : `Add${coverageConceptIds.size > 0 ? ` ${coverageConceptIds.size}` : ""} Concept${coverageConceptIds.size === 1 ? "" : "s"}`}
+                  </button>
                   {coverageMessage ? <p className="text-sm text-emerald-600">{coverageMessage}</p> : null}
                 </div>
               ) : null}
