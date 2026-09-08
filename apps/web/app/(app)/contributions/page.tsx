@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { api, type ContributionListItem, type ModuleType, type PendingSubmissionItem } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
@@ -46,9 +46,17 @@ export default function ContributionsPage() {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // A single shared, hidden <audio> element -- only one item can play at a
+  // time anyway, and reusing one element (instead of mounting/unmounting a
+  // fresh <audio> per click) is what makes play/pause instant: play() and
+  // pause() are called directly on it, with play URLs cached per
+  // contribution so replaying something already fetched doesn't re-hit the
+  // network either.
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [playUrl, setPlayUrl] = useState<string | null>(null);
-  const [playError, setPlayError] = useState<string | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [playUrlCache, setPlayUrlCache] = useState<Record<string, string>>({});
+  const [playError, setPlayError] = useState<{ id: string; message: string } | null>(null);
 
   const [pending, setPending] = useState<PendingSubmissionItem[]>([]);
 
@@ -90,30 +98,55 @@ export default function ContributionsPage() {
   function changeFilter(value: ModuleType | undefined) {
     setFilter(value);
     setOffset(0);
+    audioRef.current?.pause();
     setPlayingId(null);
   }
 
   async function togglePlay(item: ContributionListItem) {
+    const audioEl = audioRef.current;
+    if (!audioEl) return;
+
     if (playingId === item.id) {
+      audioEl.pause();
       setPlayingId(null);
-      setPlayUrl(null);
       return;
     }
+
     const audioFileId = item.detail?.audioFileId;
     if (!audioFileId) return;
-    setPlayingId(item.id);
-    setPlayUrl(null);
     setPlayError(null);
+
+    const cachedUrl = playUrlCache[item.id];
+    if (cachedUrl) {
+      audioEl.src = cachedUrl;
+      setPlayingId(item.id);
+      audioEl.play().catch(() => {});
+      return;
+    }
+
+    setLoadingId(item.id);
     try {
       const { url } = await api.audio.getPlayUrl(audioFileId);
-      setPlayUrl(url);
+      setPlayUrlCache((prev) => ({ ...prev, [item.id]: url }));
+      audioEl.src = url;
+      setPlayingId(item.id);
+      await audioEl.play();
     } catch (err) {
-      setPlayError(err instanceof Error ? err.message : "Failed to load audio");
+      setPlayError({ id: item.id, message: err instanceof Error ? err.message : "Failed to load audio" });
+    } finally {
+      setLoadingId(null);
     }
   }
 
   return (
     <div className="space-y-6">
+      {/* Hidden -- playback is driven entirely by the Play/Stop buttons below,
+         never the browser's native controls. onPause is deliberately not
+         wired to clear playingId: swapping .src on this same element to
+         switch tracks fires a pause event first, which would otherwise
+         race the very setPlayingId(item.id) that follows it. */}
+      <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
+
       <h1 className="text-2xl font-bold text-ink">My Contributions</h1>
 
       {pending.length > 0 && (
@@ -174,26 +207,17 @@ export default function ContributionsPage() {
                 <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{MODULE_LABEL[item.moduleType]}</p>
                 <p className="truncate font-medium text-ink">{contributionTitle(item)}</p>
                 <p className="text-xs text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</p>
-                {playingId === item.id && (
-                  <div className="mt-2">
-                    {playUrl ? (
-                      <audio src={playUrl} controls autoPlay className="h-9 max-w-full" />
-                    ) : playError ? (
-                      <p className="text-xs text-red-600">{playError}</p>
-                    ) : (
-                      <p className="text-xs text-ink-muted">Loading audio...</p>
-                    )}
-                  </div>
-                )}
+                {playError?.id === item.id ? <p className="mt-1 text-xs text-red-600">{playError.message}</p> : null}
               </div>
 
               <div className="flex flex-shrink-0 items-center gap-4">
                 {item.detail?.audioFileId ? (
                   <button
                     onClick={() => togglePlay(item)}
-                    className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark"
+                    disabled={loadingId === item.id}
+                    className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
                   >
-                    {playingId === item.id ? "Stop" : "▶ Play"}
+                    {loadingId === item.id ? "Loading..." : playingId === item.id ? "■ Stop" : "▶ Play"}
                   </button>
                 ) : null}
                 <span className="text-sm font-semibold text-emerald-600">
