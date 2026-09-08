@@ -26,6 +26,7 @@ export type SubmitTranslationInput = {
   deviceId?: string | null;
   appVersion?: string | null;
   clientType?: string | null;
+  sourceBufferId?: string | null;
 };
 
 async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], configKey: string): Promise<number> {
@@ -121,6 +122,7 @@ export async function submitTranslation(userId: string, sentenceId: string, data
         deviceId: data.deviceId ?? null,
         appVersion: data.appVersion ?? null,
         clientType: data.clientType ?? null,
+        sourceBufferId: data.sourceBufferId ?? null,
       })
       .returning({ id: contributions.id });
 

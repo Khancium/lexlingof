@@ -63,6 +63,18 @@ class StorageService {
     return { uploadUrl, expiresAt };
   }
 
+  /** Used by the submission-buffer worker, which already holds the bytes server-side and skips the presigned-URL round trip entirely. */
+  async uploadAudioBuffer(storageKey: string, buffer: Buffer, mimeType: string): Promise<void> {
+    await r2.send(
+      new PutObjectCommand({
+        Bucket: AUDIO_BUCKET,
+        Key: storageKey,
+        Body: buffer,
+        ContentType: mimeType,
+      }),
+    );
+  }
+
   async generateAudioPlayUrl(storageKey: string): Promise<string> {
     const command = new GetObjectCommand({
       Bucket: AUDIO_BUCKET,

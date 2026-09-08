@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import { api, type Scene } from "@/lib/api";
-import { uploadAudioBlob } from "@/lib/upload";
+import { api, getErrorMessage, type Scene } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
 
@@ -51,24 +50,22 @@ export default function ScenePage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const audioFileId = await uploadAudioBlob({
-        blob: recording.file,
-        filename: recording.file.name,
-        mimeType: recording.file.type,
-        durationMs: recording.durationMs,
-        module: "SCENE",
-      });
+      // A single request hands the audio + fields to the backend's buffer,
+      // which acks immediately and finishes the R2 upload + DB write in the
+      // background -- no waiting on either network hop here.
+      await api.buffer.submitScene(
+        {
+          sceneId: scene.id,
+          durationMs: Math.round(recording.durationMs),
+          languageId,
+          dialectId: dialectId ?? undefined,
+        },
+        recording.file,
+      );
 
-      const result = await api.scenes.submitContribution(scene.id, {
-        audioFileId,
-        durationMs: Math.round(recording.durationMs),
-        languageId,
-        dialectId: dialectId ?? undefined,
-      });
-
-      setSuccessMessage(`Submitted! +${result.pointsAwarded} points`);
+      setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to submit scene description");
+      setSubmitError(getErrorMessage(err, "Failed to submit scene description"));
     } finally {
       setIsSubmitting(false);
     }

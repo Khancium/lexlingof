@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
-import { api, type ContributionListItem, type ModuleType } from "@/lib/api";
+import { api, type ContributionListItem, type ModuleType, type PendingSubmissionItem } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
 const MODULE_LABEL: Record<ModuleType, string> = {
@@ -50,6 +50,8 @@ export default function ContributionsPage() {
   const [playUrl, setPlayUrl] = useState<string | null>(null);
   const [playError, setPlayError] = useState<string | null>(null);
 
+  const [pending, setPending] = useState<PendingSubmissionItem[]>([]);
+
   const load = useCallback(() => {
     setLoading(true);
     api.users
@@ -61,9 +63,29 @@ export default function ContributionsPage() {
       .finally(() => setLoading(false));
   }, [filter, offset]);
 
+  const loadPending = useCallback(() => {
+    api.buffer.getMine().then(setPending).catch(() => {});
+  }, []);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadPending();
+  }, [loadPending]);
+
+  // While a buffered submission is still pending/processing, poll for it to
+  // resolve into a real contribution -- then refresh both lists so it moves
+  // from "Processing" here into the normal list below with its points.
+  useEffect(() => {
+    if (!pending.some((p) => p.status === "pending" || p.status === "processing")) return;
+    const interval = setInterval(() => {
+      loadPending();
+      load();
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [pending, loadPending, load]);
 
   function changeFilter(value: ModuleType | undefined) {
     setFilter(value);
@@ -93,6 +115,24 @@ export default function ContributionsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-ink">My Contributions</h1>
+
+      {pending.length > 0 && (
+        <div className="space-y-2">
+          {pending.map((p) => (
+            <div key={p.id} className="card-duo flex items-center gap-3 rounded-2xl bg-surface-card p-3 text-sm">
+              <span
+                className={`h-2 w-2 flex-shrink-0 rounded-full ${
+                  p.status === "failed" ? "bg-danger" : "animate-pulse bg-secondary"
+                }`}
+              />
+              <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
+              <span className={p.status === "failed" ? "text-danger" : "text-ink-muted"}>
+                {p.status === "failed" ? `Failed -- ${p.errorMessage ?? "unknown error"}` : "Submitted, processing..."}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="flex gap-2">
         {FILTERS.map((f) => (

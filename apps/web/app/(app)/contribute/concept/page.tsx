@@ -4,12 +4,12 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import {
   api,
+  getErrorMessage,
   type Category,
   type ConceptDetail,
   type ConceptListItem,
   type WordLimits,
 } from "@/lib/api";
-import { uploadAudioBlob } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
@@ -88,10 +88,6 @@ export default function ConceptPage() {
     }
   }, []);
 
-  const refreshLimits = useCallback(async (conceptId: string) => {
-    setLimits(await api.contributions.getWordLimits(conceptId));
-  }, []);
-
   const takesForSelectedSynonym = limits?.takesPerSynonym[String(synonymIndex) as "1" | "2" | "3"] ?? 0;
   const takeIndex = Math.min(3, takesForSelectedSynonym + 1) as 1 | 2 | 3;
   const synonymFull = takesForSelectedSynonym >= 3;
@@ -102,35 +98,47 @@ export default function ConceptPage() {
     setSubmitError(null);
     setSuccessMessage(null);
     try {
-      const audioFileId = await uploadAudioBlob({
-        blob: recording.file,
-        filename: recording.file.name,
-        mimeType: recording.file.type,
-        durationMs: recording.durationMs,
-        module: "WORD",
-      });
+      // A single request hands the audio + fields to the backend's buffer,
+      // which acks immediately and finishes the R2 upload + DB write in the
+      // background -- no waiting on either network hop here.
+      await api.buffer.submitWord(
+        {
+          conceptId: concept.id,
+          languageId,
+          dialectId: dialectId ?? undefined,
+          nativeWord: nativeWord.trim() || undefined,
+          romanization: romanization.trim() || undefined,
+          ipa: ipa.trim() || undefined,
+          synonymIndex,
+          takeIndex,
+          durationMs: Math.round(recording.durationMs),
+        },
+        recording.file,
+      );
 
-      const result = await api.contributions.submitWord({
-        audioFileId,
-        conceptId: concept.id,
-        languageId,
-        dialectId: dialectId ?? undefined,
-        nativeWord: nativeWord.trim() || undefined,
-        romanization: romanization.trim() || undefined,
-        ipa: ipa.trim() || undefined,
-        synonymIndex,
-        takeIndex,
-        durationMs: Math.round(recording.durationMs),
-      });
-
-      setSuccessMessage(`Submitted! +${result.pointsAwarded} points`);
+      setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setRecording(null);
       setNativeWord("");
       setRomanization("");
       setIpa("");
-      refreshLimits(concept.id);
+      // The take/synonym quota check (limits) can't be refreshed from the
+      // server yet -- the buffered submission hasn't been written to
+      // word_recordings until the background worker finishes -- so this
+      // take is credited optimistically to keep the 3-per-synonym gating
+      // correct without racing the worker.
+      setLimits((prev) =>
+        prev
+          ? {
+              ...prev,
+              takesPerSynonym: {
+                ...prev.takesPerSynonym,
+                [synonymIndex]: (prev.takesPerSynonym[synonymIndex] ?? 0) + 1,
+              },
+            }
+          : prev,
+      );
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Failed to submit recording");
+      setSubmitError(getErrorMessage(err, "Failed to submit recording"));
     } finally {
       setIsSubmitting(false);
     }

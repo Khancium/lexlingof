@@ -32,6 +32,7 @@ export type SubmitAudioUploadInput = {
   deviceId?: string | null;
   appVersion?: string | null;
   clientType?: string | null;
+  sourceBufferId?: string | null;
 };
 
 export type AddTranscriptionInput = {
@@ -121,6 +122,7 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
         deviceId: data.deviceId ?? null,
         appVersion: data.appVersion ?? null,
         clientType: data.clientType ?? null,
+        sourceBufferId: data.sourceBufferId ?? null,
       })
       .returning({ id: contributions.id });
 

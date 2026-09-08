@@ -5,38 +5,16 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { audioFiles, audioFormat, contributionModule } from "../../db/schema.js";
+import { audioFiles, contributionModule } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { storageService } from "../../services/storage.service.js";
+import {
+  ALLOWED_MIME_TYPES,
+  DEFAULT_MAX_FILE_SIZE_BYTES,
+  MIME_TYPE_TO_FORMAT,
+  WORD_MAX_FILE_SIZE_BYTES,
+} from "../../services/audio-file.service.js";
 import { HttpError } from "../../utils/http-error.js";
-
-const ALLOWED_MIME_TYPES = [
-  "audio/wav",
-  "audio/mpeg",
-  "audio/mp4",
-  "audio/aac",
-  "audio/ogg",
-  "audio/webm",
-  "audio/flac",
-  "audio/x-m4a",
-] as const;
-
-const MIME_TYPE_TO_FORMAT: Record<(typeof ALLOWED_MIME_TYPES)[number], (typeof audioFormat.enumValues)[number]> = {
-  "audio/wav": "wav",
-  "audio/mpeg": "mp3",
-  "audio/mp4": "m4a",
-  "audio/aac": "aac",
-  "audio/ogg": "ogg",
-  "audio/webm": "webm",
-  "audio/flac": "flac",
-  "audio/x-m4a": "m4a",
-};
-
-// Module 1 (WORD) clips are capped at 3 seconds, so 500KB comfortably covers
-// any codec at a reasonable bitrate. Every other module uses the 100MB limit
-// from gamification_config's modules.audio.max_file_bytes.
-const WORD_MAX_FILE_SIZE_BYTES = 500_000;
-const DEFAULT_MAX_FILE_SIZE_BYTES = 104_857_600;
 
 // Kept in sync with PLAY_URL_EXPIRY_SECONDS in storage.service.ts, which
 // signs the URL but only returns the string itself.

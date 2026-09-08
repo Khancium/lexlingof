@@ -28,6 +28,7 @@ export type SubmitSceneContributionInput = {
   deviceId?: string | null;
   appVersion?: string | null;
   clientType?: string | null;
+  sourceBufferId?: string | null;
 };
 
 const LONG_DESCRIPTION_THRESHOLD_MS = 60_000;
@@ -169,6 +170,7 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
         deviceId: data.deviceId ?? null,
         appVersion: data.appVersion ?? null,
         clientType: data.clientType ?? null,
+        sourceBufferId: data.sourceBufferId ?? null,
       })
       .returning({ id: contributions.id });
 

@@ -1,0 +1,3 @@
+ALTER TABLE "contributions" ADD COLUMN "source_buffer_id" uuid;--> statement-breakpoint
+ALTER TABLE "contributions" ADD CONSTRAINT "contributions_source_buffer_id_pending_submissions_id_fk" FOREIGN KEY ("source_buffer_id") REFERENCES "public"."pending_submissions"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_contributions_source_buffer_id" ON "contributions" USING btree ("source_buffer_id");

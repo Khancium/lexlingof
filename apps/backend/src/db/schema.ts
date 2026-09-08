@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -18,6 +19,13 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+
+/** Raw binary storage for buffered audio (see pendingSubmissions below). */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 /* -------------------------------------------------------------------------- */
 /*                                    Enums                                   */
@@ -446,6 +454,50 @@ export const audioFiles = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/*                          Submission buffer / queue                         */
+/* -------------------------------------------------------------------------- */
+
+export const submissionStatus = pgEnum("submission_status", ["pending", "processing", "done", "failed"]);
+
+/**
+ * A durable client-facing buffer: the contribute pages hand off audio bytes
+ * and form fields here in a single fast request and get an immediate ack,
+ * instead of waiting on the R2 upload plus the module's full DB transaction.
+ * A background worker (submission-buffer.service.ts) drains this table --
+ * uploading audioData to R2, then running the same submit logic the old
+ * synchronous routes used -- and records the resulting contribution here.
+ * Using a real table (not an in-memory queue) means a buffered submission
+ * survives a Railway redeploy/restart instead of being silently dropped.
+ */
+export const pendingSubmissions = pgTable(
+  "pending_submissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    moduleType: contributionModule("module_type").notNull(),
+    /** Module-specific fields the eventual submit call needs (everything but the audio itself). */
+    payload: jsonb("payload").notNull(),
+    /** Raw audio bytes, cleared once successfully uploaded to R2 (kept null for text-only translations). */
+    audioData: bytea("audio_data"),
+    audioMimeType: text("audio_mime_type"),
+    audioFilename: text("audio_filename"),
+    audioDurationMs: integer("audio_duration_ms"),
+    /** Set once storeAudioBuffer succeeds, so a retry after a later failure doesn't re-upload (and orphan) the audio. */
+    resolvedAudioFileId: uuid("resolved_audio_file_id").references((): AnyPgColumn => audioFiles.id),
+    status: submissionStatus("status").default("pending").notNull(),
+    attempts: integer("attempts").default(0).notNull(),
+    errorMessage: text("error_message"),
+    contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
+    pointsAwarded: integer("points_awarded"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("ix_pending_submissions_status").on(t.status), index("ix_pending_submissions_user").on(t.userId)],
+);
+
+/* -------------------------------------------------------------------------- */
 /*                        Module 1 — word recordings                          */
 /* -------------------------------------------------------------------------- */
 
@@ -680,6 +732,16 @@ export const contributions = pgTable(
     sceneContributionId: uuid("scene_contribution_id").references(
       (): AnyPgColumn => sceneContributions.id,
     ),
+    /**
+     * Set when created by the submission-buffer worker. If the process
+     * restarts between this contribution being committed and its
+     * pending_submissions row being marked "done", the retry re-runs the
+     * same submit call -- this unique column (checked before the retry
+     * submits) is what stops that from creating a second contribution and
+     * double-awarding points, since a plain resolvedAudioFileId check only
+     * covers the earlier upload step, not this one.
+     */
+    sourceBufferId: uuid("source_buffer_id").references((): AnyPgColumn => pendingSubmissions.id),
     deviceId: text("device_id"),
     appVersion: text("app_version"),
     /** web, ios, android */
@@ -699,6 +761,7 @@ export const contributions = pgTable(
     index("ix_contributions_pending_queue")
       .on(t.status, t.submittedAt)
       .where(sql`${t.status} = 'pending'`),
+    uniqueIndex("uq_contributions_source_buffer_id").on(t.sourceBufferId),
     /** Exactly one module payload per contribution. */
     check(
       "ck_contribution_single_reference",

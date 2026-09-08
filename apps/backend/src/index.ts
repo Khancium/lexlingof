@@ -22,6 +22,8 @@ import gamificationRoutes from "./modules/gamification/gamification.routes.js";
 import reviewsRoutes from "./modules/reviews/reviews.routes.js";
 import translationRoutes from "./modules/contributions/translation/translation.routes.js";
 import wordRoutes from "./modules/contributions/word/word.routes.js";
+import bufferRoutes from "./modules/contributions/buffer/buffer.routes.js";
+import { startSubmissionBufferWorker } from "./services/submission-buffer.service.js";
 import { HttpError } from "./utils/http-error.js";
 
 // 2. Create the Fastify instance.
@@ -96,6 +98,7 @@ await server.register(audioRoutes, { prefix: "/api/v1/audio" });
 await server.register(wordRoutes, { prefix: "/api/v1" });
 await server.register(audioUploadRoutes, { prefix: "/api/v1/contributions/audio" });
 await server.register(translationRoutes, { prefix: "/api/v1" });
+await server.register(bufferRoutes, { prefix: "/api/v1/contributions/buffer" });
 await server.register(sceneRoutes, { prefix: "/api/v1/scenes" });
 await server.register(reviewsRoutes, { prefix: "/api/v1/reviews" });
 await server.register(gamificationRoutes, { prefix: "/api/v1" });
@@ -116,6 +119,7 @@ const host = process.env.HOST ?? "0.0.0.0";
 
 try {
   await server.listen({ port, host });
+  startSubmissionBufferWorker();
   server.log.info(`Lexlingo API running on port ${port}`);
 } catch (err) {
   server.log.error(err);

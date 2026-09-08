@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
-import { reserveAndUploadAudio } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
 
@@ -90,31 +89,23 @@ export default function TranslatePage() {
     setIsSubmitting(true);
     setSubmitError(null);
     try {
-      const { audioFileId, confirm } = await reserveAndUploadAudio({
-        blob: draft.recording.file,
-        filename: draft.recording.file.name,
-        mimeType: draft.recording.file.type,
-        durationMs: draft.recording.durationMs,
-        module: "TRANSLATION",
-      });
-
-      // Submitting doesn't depend on confirm's result (translations carry no
-      // duration cap), so run them concurrently instead of waiting on confirm
-      // first -- each is a full round trip through a backend that's itself a
-      // network hop from its database.
-      const [result] = await Promise.all([
-        api.contributions.submitTranslation(sentence.id, {
+      // A single request hands the audio + fields to the backend's buffer,
+      // which acks immediately and finishes the R2 upload + DB write in the
+      // background -- no waiting on either network hop here.
+      await api.buffer.submitTranslation(
+        {
+          sentenceId: sentence.id,
           nativeText: draft.translation.trim() || undefined,
           romanization: draft.romanization.trim() || undefined,
           ipa: draft.ipa.trim() || undefined,
-          audioFileId,
           languageId,
           dialectId: dialectId ?? undefined,
-        }),
-        confirm(),
-      ]);
+          durationMs: Math.round(draft.recording.durationMs),
+        },
+        draft.recording.file,
+      );
 
-      setSuccessMessage(`Submitted! +${result.pointsAwarded} points`);
+      setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setDrafts((prev) => {
         const next = { ...prev };
         delete next[sentence.id];

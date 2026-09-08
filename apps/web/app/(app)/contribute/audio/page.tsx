@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, getErrorMessage, type Language } from "@/lib/api";
-import { reserveAndUploadAudio } from "@/lib/upload";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 
 const RECORDING_TYPES = ["conversation", "story", "interview", "speech", "song", "other"] as const;
@@ -116,22 +115,13 @@ export default function AudioUploadPage() {
     setDoneMessage(null);
     try {
       const durationMs = await getAudioFileDurationMs(file);
+      const validSegments = segments.filter((s) => s.startMs !== "" && s.endMs !== "");
 
-      const { audioFileId, confirm } = await reserveAndUploadAudio({
-        blob: file,
-        filename: file.name,
-        mimeType: file.type || "audio/mpeg",
-        durationMs,
-        module: "TRANSCRIPTION",
-      });
-
-      // submitAudio doesn't depend on confirm's result (no duration cap for
-      // this module) -- run them concurrently instead of waiting on confirm
-      // first, each of which is a full round trip through a backend that's
-      // itself a network hop from its database.
-      const [result] = await Promise.all([
-        api.contributions.submitAudio({
-          audioFileId,
+      // A single request hands the audio + fields to the backend's buffer,
+      // which acks immediately and finishes the R2 upload + DB writes
+      // (submit, transcription, segments) in the background.
+      await api.buffer.submitAudioUpload(
+        {
           languageId,
           dialectId: dialectId ?? undefined,
           title: title.trim() || undefined,
@@ -139,41 +129,31 @@ export default function AudioUploadPage() {
           recordingType,
           location: location.trim() || undefined,
           recordedAt: recordedAt || undefined,
-        }),
-        confirm(),
-      ]);
+          durationMs: Math.round(durationMs),
+          transcription:
+            nativeText.trim() || romanization.trim() || ipa.trim() || englishTranslation.trim()
+              ? {
+                  nativeText: nativeText.trim() || undefined,
+                  romanization: romanization.trim() || undefined,
+                  ipa: ipa.trim() || undefined,
+                  englishTranslation: englishTranslation.trim() || undefined,
+                }
+              : undefined,
+          segments: validSegments.length
+            ? validSegments.map((s) => ({
+                startMs: Number(s.startMs),
+                endMs: Number(s.endMs),
+                nativeText: s.nativeText.trim() || undefined,
+                romanization: s.romanization.trim() || undefined,
+                ipa: s.ipa.trim() || undefined,
+                speakerLabel: s.speakerLabel.trim() || undefined,
+              }))
+            : undefined,
+        },
+        file,
+      );
 
-      let total = result.pointsAwarded;
-
-      const validSegments = segments.filter((s) => s.startMs !== "" && s.endMs !== "");
-      const [transcriptionResult, segmentResults] = await Promise.all([
-        nativeText.trim() || romanization.trim() || ipa.trim() || englishTranslation.trim()
-          ? api.contributions.addTranscription(result.audioUploadId, {
-              nativeText: nativeText.trim() || undefined,
-              romanization: romanization.trim() || undefined,
-              ipa: ipa.trim() || undefined,
-              englishTranslation: englishTranslation.trim() || undefined,
-            })
-          : null,
-        Promise.all(
-          validSegments.map((segment) =>
-            api.contributions.addSegment(result.audioUploadId, {
-              segmentIndex: segment.segmentIndex,
-              startMs: Number(segment.startMs),
-              endMs: Number(segment.endMs),
-              nativeText: segment.nativeText.trim() || undefined,
-              romanization: segment.romanization.trim() || undefined,
-              ipa: segment.ipa.trim() || undefined,
-              speakerLabel: segment.speakerLabel.trim() || undefined,
-            }),
-          ),
-        ),
-      ]);
-
-      if (transcriptionResult) total += transcriptionResult.pointsAwarded ?? 0;
-      for (const segmentResult of segmentResults) total += segmentResult.pointsAwarded ?? 0;
-
-      setDoneMessage(`Submitted! +${total} points`);
+      setDoneMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setFile(null);
       setTitle("");
       setDescription("");

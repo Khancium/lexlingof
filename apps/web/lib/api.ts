@@ -300,16 +300,6 @@ export type NextConceptResponse = {
   limits: WordLimits;
 };
 
-export type GetUploadUrlInput = {
-  module: ModuleType;
-  filename: string;
-  mimeType: string;
-  checksumSha256: string;
-  fileSizeBytes: number;
-};
-export type GetUploadUrlResponse = { audioFileId: string; uploadUrl: string; storageKey: string; expiresAt: string };
-export type ConfirmUploadInput = { durationMs: number; checksumSha256: string };
-export type ConfirmUploadResponse = { audioFileId: string; storageKey: string; durationMs: number; processingStatus: string };
 export type PlayUrlResponse = { url: string; expiresAt: string };
 
 export type SubmitWordInput = {
@@ -382,6 +372,69 @@ export type RandomSentence = {
   englishText: string;
   category: { id: string; name: string; slug: string } | null;
 };
+
+export type WordBufferMeta = {
+  conceptId: string;
+  languageId: string;
+  dialectId?: string;
+  nativeWord?: string;
+  romanization?: string;
+  ipa?: string;
+  synonymIndex: number;
+  takeIndex: number;
+  durationMs: number;
+};
+
+export type TranslationBufferMeta = {
+  sentenceId: string;
+  languageId: string;
+  dialectId?: string;
+  nativeText?: string;
+  romanization?: string;
+  ipa?: string;
+  durationMs: number;
+};
+
+export type AudioUploadBufferMeta = {
+  languageId: string;
+  dialectId?: string;
+  title?: string;
+  description?: string;
+  recordingType: string;
+  location?: string;
+  recordedAt?: string;
+  durationMs: number;
+  transcription?: { nativeText?: string; romanization?: string; ipa?: string; englishTranslation?: string };
+  segments?: { startMs: number; endMs: number; nativeText?: string; romanization?: string; ipa?: string; speakerLabel?: string }[];
+};
+
+export type SceneBufferMeta = {
+  sceneId: string;
+  languageId: string;
+  dialectId?: string;
+  durationMs: number;
+};
+
+export type PendingSubmissionItem = {
+  id: string;
+  moduleType: ModuleType;
+  status: "pending" | "processing" | "failed";
+  errorMessage: string | null;
+  createdAt: string;
+};
+
+function submitToBuffer(
+  endpoint: "word" | "translation" | "audio-upload" | "scene",
+  meta: object,
+  audio: File,
+): Promise<{ bufferId: string; status: "pending" }> {
+  const form = new FormData();
+  form.append("meta", JSON.stringify(meta));
+  form.append("file", audio, audio.name);
+  return apiClient
+    .post<{ bufferId: string; status: "pending" }>(`/api/v1/contributions/buffer/${endpoint}`, form)
+    .then((r) => r.data);
+}
 
 export type SubmitTranslationInput = {
   nativeText?: string;
@@ -751,11 +804,20 @@ export const api = {
   },
 
   audio: {
-    getUploadUrl: (data: GetUploadUrlInput) =>
-      apiClient.post<GetUploadUrlResponse>("/api/v1/audio/upload-url", data).then((r) => r.data),
-    confirmUpload: (id: string, data: ConfirmUploadInput) =>
-      apiClient.post<ConfirmUploadResponse>(`/api/v1/audio/${id}/confirm`, data).then((r) => r.data),
     getPlayUrl: (id: string) => apiClient.get<PlayUrlResponse>(`/api/v1/audio/${id}/play-url`).then((r) => r.data),
+  },
+
+  // Fast-path contribution submission: a single multipart POST hands the
+  // audio + form fields straight to the backend, which acks immediately and
+  // finishes the R2 upload + DB write in the background -- the caller never
+  // waits on either. See buffer.routes.ts / submission-buffer.service.ts.
+  buffer: {
+    submitWord: (meta: WordBufferMeta, audio: File) => submitToBuffer("word", meta, audio),
+    submitTranslation: (meta: TranslationBufferMeta, audio: File) => submitToBuffer("translation", meta, audio),
+    submitAudioUpload: (meta: AudioUploadBufferMeta, audio: File) => submitToBuffer("audio-upload", meta, audio),
+    submitScene: (meta: SceneBufferMeta, audio: File) => submitToBuffer("scene", meta, audio),
+    getMine: () =>
+      apiClient.get<{ items: PendingSubmissionItem[] }>("/api/v1/contributions/buffer/mine").then((r) => r.data.items),
   },
 
   contributions: {
