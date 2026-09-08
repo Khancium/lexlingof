@@ -930,6 +930,8 @@ export const api = {
       apiClient.get<{ items: SceneImageKeyword[] }>(`/api/v1/admin/scenes/${sceneId}/keywords`).then((r) => r.data.items),
     addSceneKeyword: (sceneId: string, keyword: string) =>
       apiClient.post<SceneImageKeyword>(`/api/v1/admin/scenes/${sceneId}/keywords`, { keyword }).then((r) => r.data),
+    addSceneMediaKeyword: (mediaId: string, keyword: string) =>
+      apiClient.post<SceneImageKeyword>(`/api/v1/admin/scenes/media/${mediaId}/keywords`, { keyword }).then((r) => r.data),
     deleteSceneKeyword: (sceneId: string, keywordId: string) =>
       apiClient.delete(`/api/v1/admin/scenes/${sceneId}/keywords/${keywordId}`).then((r) => r.data),
 

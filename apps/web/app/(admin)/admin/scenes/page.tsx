@@ -39,6 +39,9 @@ export default function AdminScenesPage() {
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+  // A file the admin has chosen but not yet confirmed -- lets them type
+  // keywords for it before the actual upload+tag round trips fire.
+  const [pendingUploads, setPendingUploads] = useState<Record<string, { file: File; keywordsText: string }>>({});
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -88,13 +91,52 @@ export default function AdminScenesPage() {
     }
   }
 
-  async function handleUploadImage(sceneId: string, file: File | undefined) {
+  function selectFileForUpload(sceneId: string, file: File | undefined) {
     if (!file) return;
+    setUploadMessage(null);
+    setPendingUploads((prev) => ({ ...prev, [sceneId]: { file, keywordsText: "" } }));
+  }
+
+  function updatePendingKeywords(sceneId: string, keywordsText: string) {
+    setPendingUploads((prev) => (prev[sceneId] ? { ...prev, [sceneId]: { ...prev[sceneId], keywordsText } } : prev));
+  }
+
+  function cancelPendingUpload(sceneId: string) {
+    setPendingUploads((prev) => {
+      const next = { ...prev };
+      delete next[sceneId];
+      return next;
+    });
+  }
+
+  async function confirmUpload(sceneId: string) {
+    const pending = pendingUploads[sceneId];
+    if (!pending) return;
     setUploadingId(sceneId);
     setUploadMessage(null);
     try {
-      await api.admin.uploadSceneMedia(sceneId, file);
-      setUploadMessage({ id: sceneId, text: "Image uploaded" });
+      const media = await api.admin.uploadSceneMedia(sceneId, pending.file);
+
+      const keywordList = pending.keywordsText
+        .split(",")
+        .map((k) => k.trim())
+        .filter(Boolean);
+      // Independent inserts against the same image -- fired concurrently
+      // instead of one at a time. A duplicate (already-tagged) keyword 409s
+      // on its own without blocking the others.
+      const results = await Promise.allSettled(keywordList.map((k) => api.admin.addSceneMediaKeyword(media.id, k)));
+      const addedCount = results.filter((r) => r.status === "fulfilled").length;
+
+      setUploadMessage({
+        id: sceneId,
+        text: addedCount > 0 ? `Image uploaded with ${addedCount} keyword${addedCount === 1 ? "" : "s"}` : "Image uploaded",
+      });
+      cancelPendingUpload(sceneId);
+      // If the standalone Keywords panel for this scene happens to be open,
+      // refresh it so the just-added keywords show up there too.
+      if (keywordsSceneId === sceneId) {
+        setKeywords(await api.admin.getSceneKeywords(sceneId));
+      }
     } catch (err) {
       setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Upload failed", error: true });
     } finally {
@@ -313,13 +355,13 @@ export default function AdminScenesPage() {
                 </div>
                 <div className="flex items-center gap-4">
                   <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
-                    {uploadingId === scene.id ? "Uploading..." : "Upload Image"}
+                    {pendingUploads[scene.id] ? "Choose Different Image" : "Upload Image"}
                     <input
                       type="file"
                       accept="image/*"
                       className="hidden"
                       disabled={uploadingId === scene.id}
-                      onChange={(e) => handleUploadImage(scene.id, e.target.files?.[0])}
+                      onChange={(e) => selectFileForUpload(scene.id, e.target.files?.[0])}
                     />
                   </label>
                   <button
@@ -346,6 +388,40 @@ export default function AdminScenesPage() {
 
               {uploadMessage?.id === scene.id ? (
                 <p className={`text-xs ${uploadMessage.error ? "text-red-600" : "text-emerald-600"}`}>{uploadMessage.text}</p>
+              ) : null}
+
+              {pendingUploads[scene.id] ? (
+                <div className="mt-4 space-y-2 border-t border-border pt-4">
+                  <p className="text-xs text-ink-muted">Selected: {pendingUploads[scene.id].file.name}</p>
+                  <div className="flex gap-3">
+                    <input
+                      value={pendingUploads[scene.id].keywordsText}
+                      onChange={(e) => updatePendingKeywords(scene.id, e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          confirmUpload(scene.id);
+                        }
+                      }}
+                      placeholder="Keywords for this image, comma-separated (optional)"
+                      className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
+                    />
+                    <button
+                      onClick={() => confirmUpload(scene.id)}
+                      disabled={uploadingId === scene.id}
+                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                    >
+                      {uploadingId === scene.id ? "Uploading..." : "Upload"}
+                    </button>
+                    <button
+                      onClick={() => cancelPendingUpload(scene.id)}
+                      disabled={uploadingId === scene.id}
+                      className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               ) : null}
 
               {coverageSceneId === scene.id ? (

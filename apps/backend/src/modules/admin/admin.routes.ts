@@ -230,6 +230,7 @@ const annotateSceneConceptSchema = z.object({
 
 const addSceneImageKeywordSchema = z.object({ keyword: z.string().trim().min(1).max(100) });
 const sceneKeywordParamSchema = z.object({ id: z.string().uuid(), keywordId: z.string().uuid() });
+const sceneMediaIdParamSchema = z.object({ mediaId: z.string().uuid() });
 
 const sentencesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -766,9 +767,37 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   /* --------------------------- Scene image keywords -------------------------- */
-  // ADMIN ONLY: free-text training-data labels, keyed by scene (resolved to
-  // that scene's primary image) rather than a media id directly, matching
-  // the /media upload route above. Never exposed to contributors.
+  // ADMIN ONLY: free-text training-data labels. Never exposed to contributors.
+
+  // Media-scoped: attaches to the exact image just uploaded above, which
+  // matters because a re-upload isn't primary (a scene can end up with
+  // several sceneMedia rows) -- the scene-scoped routes below resolve to
+  // whichever image is primary, which would silently tag the wrong image
+  // if used right after uploading a second one.
+  fastify.post("/admin/scenes/media/:mediaId/keywords", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { mediaId } = sceneMediaIdParamSchema.parse(request.params);
+    const body = addSceneImageKeywordSchema.parse(request.body);
+
+    const [media] = await db.select({ id: sceneMedia.id }).from(sceneMedia).where(eq(sceneMedia.id, mediaId)).limit(1);
+    if (!media) {
+      throw new HttpError(404, "NOT_FOUND", "Scene image not found");
+    }
+
+    const [keyword] = await db
+      .insert(sceneImageKeywords)
+      .values({ sceneMediaId: mediaId, keyword: body.keyword })
+      .onConflictDoNothing({ target: [sceneImageKeywords.sceneMediaId, sceneImageKeywords.keyword] })
+      .returning();
+
+    if (!keyword) {
+      throw new HttpError(409, "DUPLICATE_KEYWORD", "That keyword is already on this image");
+    }
+
+    reply.code(201).send(keyword);
+  });
+
+  // Scene-scoped: resolved to that scene's primary image, used by the
+  // standalone "Keywords" review/edit panel.
 
   fastify.get("/admin/scenes/:id/keywords", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
