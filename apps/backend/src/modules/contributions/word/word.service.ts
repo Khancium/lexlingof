@@ -2,8 +2,10 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
 import { audioFiles, contributions, gamificationConfig, pointsTransactions, streaks, userStats, wordRecordings } from "../../../db/schema.js";
+import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { storageService } from "../../../services/storage.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
+import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
 type SynonymIndex = 1 | 2 | 3;
@@ -96,12 +98,10 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
   if (!config) {
     throw new HttpError(500, "CONFIG_MISSING", "points.word.base is not configured");
   }
-  // This submission doesn't change level (only review/verification does),
-  // so the pre-fetched value is still correct after the writes below.
   const basePoints = (config.configValue as { value: number }).value;
-  const userLevel = levelRow?.level ?? null;
+  const userLevel = levelRow?.level ?? "BRONZE";
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     // 1. Insert word_recordings (the DB CHECK constraint is the 3rd layer).
     const [wordRecording] = await tx
       .insert(wordRecordings)
@@ -154,7 +154,7 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
     // trips. postgres.js pipelines queries issued this way on one
     // connection, so this genuinely overlaps their network latency instead
     // of just reordering it.
-    const [, , { currentStreak }] = await Promise.all([
+    const [, [updatedStats], { currentStreak }] = await Promise.all([
       tx
         .insert(pointsTransactions)
         .values({
@@ -173,22 +173,43 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
           wordContributions: sql`${userStats.wordContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
           totalPoints: sql`${userStats.totalPoints} + ${basePoints}`,
+          level: levelUpdateExpr(1),
           lastContributionAt: new Date(),
           lastContributionModule: "WORD",
           updatedAt: new Date(),
         })
-        .where(eq(userStats.userId, userId)),
+        .where(eq(userStats.userId, userId))
+        .returning({ level: userStats.level }),
       updateStreakOnContribution(tx, userId),
     ]);
+
+    if (!updatedStats) {
+      throw new HttpError(500, "STATS_MISSING", "user_stats row not found for user");
+    }
+
+    await insertLevelUpNotificationIfChanged(tx, userId, userLevel, updatedStats.level);
 
     return {
       contributionId: contribution.id,
       wordRecordingId: wordRecording.id,
       pointsAwarded: basePoints,
-      userLevel,
+      userLevel: updatedStats.level,
       currentStreak,
     };
   });
+
+  // Push notification is best-effort external I/O -- sent after the
+  // transaction has committed, never inside it, and swallowed on failure so
+  // a notification problem never fails the submission itself.
+  if (result.userLevel !== userLevel) {
+    try {
+      await sendLevelUpNotification(userId, result.userLevel);
+    } catch (err) {
+      console.error("[word] sendLevelUpNotification failed:", err);
+    }
+  }
+
+  return result;
 }
 
 /**

@@ -13,15 +13,6 @@ const MODULE_ICON: Record<ModuleType, string> = {
   SCENE: "🖼️",
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  draft: "bg-slate-600",
-  pending: "bg-yellow-600",
-  under_review: "bg-yellow-600",
-  verified: "bg-emerald-600",
-  needs_correction: "bg-red-600",
-  rejected: "bg-red-600",
-};
-
 const QUICK_ACTIONS = [
   { href: "/contribute/concept", title: "Record a Word", color: "border-brand" },
   { href: "/contribute/audio", title: "Upload Audio", color: "border-accent" },
@@ -44,10 +35,11 @@ export default function DashboardPage() {
   }, []);
 
   const level = stats?.level ?? user?.level ?? "BRONZE";
+  const totalContributions = stats?.totalContributions ?? user?.totalContributions ?? 0;
   const verified = stats?.verifiedContributions ?? user?.verifiedContributions ?? 0;
   const nextLevel = NEXT_LEVEL[level];
   const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
-  const progressPct = nextThreshold ? Math.min(100, Math.round((verified / nextThreshold) * 100)) : 100;
+  const progressPct = nextThreshold ? Math.min(100, Math.round((totalContributions / nextThreshold) * 100)) : 100;
 
   return (
     <div className="space-y-8">
@@ -57,11 +49,11 @@ export default function DashboardPage() {
         <div className="flex items-center justify-between">
           <div>
             <div className="text-2xl font-extrabold">{level}</div>
-            <div className="text-sm opacity-90">{verified} verified contributions</div>
+            <div className="text-sm opacity-90">{totalContributions} contributions</div>
           </div>
           {nextThreshold ? (
             <div className="text-right text-sm font-semibold opacity-90">
-              {verified} / {nextThreshold} for {nextLevel}
+              {totalContributions} / {nextThreshold} for {nextLevel}
             </div>
           ) : (
             <div className="text-sm font-semibold opacity-90">Highest level reached</div>
@@ -106,11 +98,6 @@ export default function DashboardPage() {
               <div key={item.id} className="card-duo flex items-center justify-between rounded-xl bg-surface p-4 shadow-sm">
                 <div className="flex items-center gap-3">
                   <span>{MODULE_ICON[item.moduleType]}</span>
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-600"}`}
-                  >
-                    {item.status.replace("_", " ")}
-                  </span>
                   <span className="text-sm text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</span>
                 </div>
                 <span className="font-semibold text-emerald-600">+{item.totalPoints ?? 0}</span>

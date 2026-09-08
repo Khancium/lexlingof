@@ -7,10 +7,8 @@ import {
   conceptMedia,
   contributionModule,
   contributions,
-  contributorLevel,
   gamificationConfig,
   languages,
-  notifications,
   pointsTransactions,
   reviews,
   scenes,
@@ -23,11 +21,10 @@ import {
   users,
   wordRecordings,
 } from "../../db/schema.js";
-import { sendContributionVerifiedNotification, sendLevelUpNotification } from "../notifications/push.service.js";
+import { sendContributionVerifiedNotification } from "../notifications/push.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 type Module = (typeof contributionModule.enumValues)[number];
-type Level = (typeof contributorLevel.enumValues)[number];
 type Decision = "valid" | "needs_correction" | "invalid";
 
 export type SubmitReviewInput = {
@@ -53,13 +50,6 @@ const VERIFIED_BONUS_CONFIG_KEY: Record<Module, string> = {
 };
 
 const REVIEW_AWARD_CONFIG_KEY = "points.review.award";
-
-function levelForVerifiedCount(verifiedContributions: number): Level {
-  if (verifiedContributions >= 1000) return "PLATINUM";
-  if (verifiedContributions >= 500) return "GOLD";
-  if (verifiedContributions >= 100) return "SILVER";
-  return "BRONZE";
-}
 
 async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], configKey: string): Promise<number> {
   const [config] = await tx
@@ -278,7 +268,6 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
       .onConflictDoNothing();
 
     let contributorPointsAwarded = 0;
-    let levelChange: { oldLevel: Level; newLevel: Level } | null = null;
 
     if (data.decision === "valid") {
       // 10a. Verified bonus for this module.
@@ -299,21 +288,10 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
         .onConflictDoNothing();
 
       // 10c. Contributor stats: verified/pending counters, per-module
-      // counter, total_points, and level.
-      const [contributorStats] = await tx
-        .select({ verifiedContributions: userStats.verifiedContributions, level: userStats.level })
-        .from(userStats)
-        .where(eq(userStats.userId, contribution.userId))
-        .limit(1);
-
-      if (!contributorStats) {
-        throw new HttpError(500, "STATS_MISSING", "user_stats row not found for contributor");
-      }
-
-      const newVerifiedContributions = contributorStats.verifiedContributions + 1;
-      const oldLevel = contributorStats.level;
-      const newLevel = levelForVerifiedCount(newVerifiedContributions);
-
+      // counter, and total_points. Level is NOT recalculated here -- it
+      // depends on total contribution count (set at submission time in
+      // each module's submit service), not verified count, so verifying a
+      // contribution doesn't move it.
       const moduleCounterUpdate =
         contribution.moduleType === "WORD"
           ? { verifiedWords: sql`${userStats.verifiedWords} + 1` }
@@ -329,24 +307,10 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
           verifiedContributions: sql`${userStats.verifiedContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} - 1`,
           totalPoints: sql`${userStats.totalPoints} + ${verifiedBonus}`,
-          level: newLevel,
           updatedAt: new Date(),
           ...moduleCounterUpdate,
         })
         .where(eq(userStats.userId, contribution.userId));
-
-      // 10d. Notify on level change.
-      if (newLevel !== oldLevel) {
-        levelChange = { oldLevel, newLevel };
-        await tx.insert(notifications).values({
-          userId: contribution.userId,
-          channel: "in_app",
-          notificationType: "LEVEL_UP",
-          title: `You reached ${newLevel} level!`,
-          body: `Congratulations -- your verified contributions moved you from ${oldLevel} to ${newLevel}.`,
-          data: { oldLevel, newLevel },
-        });
-      }
     }
 
     // 11. Audit trail.
@@ -365,7 +329,6 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
       decision: data.decision,
       contributorPointsAwarded,
       newStatus: statusAfter,
-      levelChange,
     };
   });
 
@@ -380,16 +343,7 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
     } catch (err) {
       console.error("[reviews] sendContributionVerifiedNotification failed:", err);
     }
-
-    if (result.levelChange) {
-      try {
-        await sendLevelUpNotification(contribution.userId, result.levelChange.newLevel);
-      } catch (err) {
-        console.error("[reviews] sendLevelUpNotification failed:", err);
-      }
-    }
   }
 
-  const { levelChange: _levelChange, ...response } = result;
-  return response;
+  return result;
 }

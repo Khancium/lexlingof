@@ -10,7 +10,9 @@ import {
   translations,
   userStats,
 } from "../../../db/schema.js";
+import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
+import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
 // Module 3 translations carry NO 3-second limit anywhere in this file.
@@ -90,7 +92,10 @@ export async function getRandomSentence(userId: string, languageId: string) {
 }
 
 export async function submitTranslation(userId: string, sentenceId: string, data: SubmitTranslationInput) {
-  return db.transaction(async (tx) => {
+  const [levelRow] = await db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1);
+  const previousLevel = levelRow?.level ?? "BRONZE";
+
+  const result = await db.transaction(async (tx) => {
     // 1. Insert translations.
     const [translation] = await tx
       .insert(translations)
@@ -150,7 +155,7 @@ export async function submitTranslation(userId: string, sentenceId: string, data
     // 5, 6, 7: independent of each other -- issued together instead of as
     // three sequential round trips. (Spec lists only two user_stats
     // counters here; see the module-level note on totalPoints.)
-    await Promise.all([
+    const [, [updatedStats]] = await Promise.all([
       tx
         .insert(pointsTransactions)
         .values({
@@ -168,15 +173,36 @@ export async function submitTranslation(userId: string, sentenceId: string, data
           totalContributions: sql`${userStats.totalContributions} + 1`,
           translationContributions: sql`${userStats.translationContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          level: levelUpdateExpr(1),
           lastContributionAt: new Date(),
           lastContributionModule: "TRANSLATION",
           updatedAt: new Date(),
         })
-        .where(eq(userStats.userId, userId)),
+        .where(eq(userStats.userId, userId))
+        .returning({ level: userStats.level }),
       updateStreakOnContribution(tx, userId),
     ]);
 
+    if (!updatedStats) {
+      throw new HttpError(500, "STATS_MISSING", "user_stats row not found for user");
+    }
+
+    await insertLevelUpNotificationIfChanged(tx, userId, previousLevel, updatedStats.level);
+
     // 8.
-    return { contributionId: contribution.id, translationId: translation.id, pointsAwarded };
+    return { contributionId: contribution.id, translationId: translation.id, pointsAwarded, newLevel: updatedStats.level };
   });
+
+  // Push notification is best-effort external I/O -- sent after the
+  // transaction has committed, never inside it, and swallowed on failure so
+  // a notification problem never fails the submission itself.
+  if (result.newLevel !== previousLevel) {
+    try {
+      await sendLevelUpNotification(userId, result.newLevel);
+    } catch (err) {
+      console.error("[translation] sendLevelUpNotification failed:", err);
+    }
+  }
+
+  return { contributionId: result.contributionId, translationId: result.translationId, pointsAwarded: result.pointsAwarded };
 }

@@ -48,14 +48,9 @@ const MODULE_BAR_COLOR: Record<RecentContribution['moduleType'], string> = {
   SCENE: colors.warning,
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  draft: colors.inkMuted,
-  pending: colors.warning,
-  under_review: colors.warning,
-  verified: colors.success,
-  needs_correction: colors.danger,
-  rejected: colors.danger,
-};
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
 export default function ProfileMainScreen({ navigation }: Props) {
   const user = useAuthStore((state) => state.user);
@@ -121,10 +116,11 @@ export default function ProfileMainScreen({ navigation }: Props) {
   }
 
   const level = stats?.level ?? user?.level ?? 'BRONZE';
+  const totalContributions = stats?.totalContributions ?? user?.totalContributions ?? 0;
   const verified = stats?.verifiedContributions ?? user?.verifiedContributions ?? 0;
   const nextLevel = NEXT_LEVEL[level];
   const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
-  const progressPct = nextThreshold ? Math.min(100, Math.round((verified / nextThreshold) * 100)) : 100;
+  const progressPct = nextThreshold ? Math.min(100, Math.round((totalContributions / nextThreshold) * 100)) : 100;
 
   const moduleCounts: { module: RecentContribution['moduleType']; count: number }[] = [
     { module: 'WORD', count: stats?.wordContributions ?? 0 },
@@ -216,9 +212,7 @@ export default function ProfileMainScreen({ navigation }: Props) {
           recent.map((item) => (
             <View key={item.id} style={styles.recentRow}>
               <Ionicons name={MODULE_ICON[item.moduleType]} size={18} color={colors.ink} />
-              <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] ?? colors.inkMuted }]}>
-                <Text style={styles.statusBadgeText}>{item.status.replace('_', ' ')}</Text>
-              </View>
+              <Text style={styles.recentDate}>{formatDate(item.submittedAt)}</Text>
               <Text style={styles.recentPoints}>+{item.totalPoints ?? 0}</Text>
             </View>
           ))
@@ -444,17 +438,10 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
   },
-  statusBadge: {
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  recentDate: {
     flex: 1,
-  },
-  statusBadgeText: {
-    color: colors.inkInverted,
-    fontSize: 12,
-    fontWeight: '600',
-    textTransform: 'capitalize',
+    color: colors.inkMuted,
+    fontSize: 13,
   },
   recentPoints: {
     color: colors.success,

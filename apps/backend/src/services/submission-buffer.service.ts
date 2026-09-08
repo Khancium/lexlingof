@@ -216,7 +216,12 @@ async function processOne(row: PendingRow): Promise<void> {
     await markDone(row.id, result);
   } catch (err) {
     const attempts = row.attempts + 1;
-    const message = err instanceof Error ? err.message : "Unknown error";
+    // DrizzleQueryError's own .message is just the failed SQL + params --
+    // the actual reason (e.g. a Postgres error code/detail) lives in .cause.
+    // Surfacing that here is what made a real bug (see levelUpdateExpr's
+    // missing enum cast) diagnosable instead of just "Failed query: ...".
+    const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
+    const message = err instanceof Error ? `${err.message}${cause}` : "Unknown error";
     const isPermanent = err instanceof PermanentFailure;
     await db
       .update(pendingSubmissions)

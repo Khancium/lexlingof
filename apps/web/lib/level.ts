@@ -1,7 +1,8 @@
 import type { ContributorLevel } from "./api";
 
-// Mirrors levelForVerifiedCount() in apps/backend/src/modules/reviews/reviews.service.ts --
-// not exposed via any API, so kept in sync here (same values used in the mobile app).
+// Mirrors LEVEL_THRESHOLDS in apps/backend/src/services/level.service.ts --
+// level is based on TOTAL contribution count (not verified count), not
+// exposed via any API, so kept in sync here (same values used in the mobile app).
 export const LEVEL_THRESHOLDS: Record<ContributorLevel, number> = {
   BRONZE: 0,
   SILVER: 100,

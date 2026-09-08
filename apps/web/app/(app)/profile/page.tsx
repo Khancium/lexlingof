@@ -44,6 +44,7 @@ export default function ProfilePage() {
   if (!user) return null;
 
   const level = stats?.level ?? user.level;
+  const totalContributions = stats?.totalContributions ?? user.totalContributions;
   const verified = stats?.verifiedContributions ?? user.verifiedContributions;
   const nextLevel = NEXT_LEVEL[level];
   const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
@@ -148,7 +149,7 @@ export default function ProfilePage() {
           </span>
           {nextThreshold ? (
             <p className="mt-2 text-sm text-ink-muted">
-              {verified} / {nextThreshold} verified contributions to reach {nextLevel}
+              {totalContributions} / {nextThreshold} contributions to reach {nextLevel}
             </p>
           ) : (
             <p className="mt-2 text-sm text-ink-muted">Highest level reached</p>

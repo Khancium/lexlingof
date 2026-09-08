@@ -10,7 +10,9 @@ import {
   transcriptions,
   userStats,
 } from "../../../db/schema.js";
+import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
+import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
 // Module 2 audio uploads carry NO 3-second limit anywhere in this file.
@@ -87,7 +89,10 @@ async function getOwnedAudioUpload(userId: string, audioUploadId: string) {
 }
 
 export async function submitAudioUpload(userId: string, data: SubmitAudioUploadInput) {
-  return db.transaction(async (tx) => {
+  const [levelRow] = await db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1);
+  const previousLevel = levelRow?.level ?? "BRONZE";
+
+  const result = await db.transaction(async (tx) => {
     // 1. Insert audio_uploads.
     const [audioUpload] = await tx
       .insert(audioUploads)
@@ -146,7 +151,7 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
     // word.service's submitWordRecording, there is no explicit step
     // incrementing user_stats.totalPoints for audio uploads or for
     // addTranscription/addSegment below; see the module-level note.)
-    await Promise.all([
+    const [, [updatedStats]] = await Promise.all([
       tx
         .insert(pointsTransactions)
         .values({
@@ -164,16 +169,37 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
           totalContributions: sql`${userStats.totalContributions} + 1`,
           audioContributions: sql`${userStats.audioContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          level: levelUpdateExpr(1),
           lastContributionAt: new Date(),
           lastContributionModule: "TRANSCRIPTION",
           updatedAt: new Date(),
         })
-        .where(eq(userStats.userId, userId)),
+        .where(eq(userStats.userId, userId))
+        .returning({ level: userStats.level }),
       updateStreakOnContribution(tx, userId),
     ]);
 
-    return { contributionId: contribution.id, audioUploadId: audioUpload.id, pointsAwarded: basePoints };
+    if (!updatedStats) {
+      throw new HttpError(500, "STATS_MISSING", "user_stats row not found for user");
+    }
+
+    await insertLevelUpNotificationIfChanged(tx, userId, previousLevel, updatedStats.level);
+
+    return { contributionId: contribution.id, audioUploadId: audioUpload.id, pointsAwarded: basePoints, newLevel: updatedStats.level };
   });
+
+  // Push notification is best-effort external I/O -- sent after the
+  // transaction has committed, never inside it, and swallowed on failure so
+  // a notification problem never fails the submission itself.
+  if (result.newLevel !== previousLevel) {
+    try {
+      await sendLevelUpNotification(userId, result.newLevel);
+    } catch (err) {
+      console.error("[audio-upload] sendLevelUpNotification failed:", err);
+    }
+  }
+
+  return { contributionId: result.contributionId, audioUploadId: result.audioUploadId, pointsAwarded: result.pointsAwarded };
 }
 
 export async function addTranscription(userId: string, audioUploadId: string, data: AddTranscriptionInput) {

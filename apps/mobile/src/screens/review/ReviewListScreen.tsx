@@ -60,21 +60,21 @@ function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function UnlockReviewAccess({ navigation, verifiedContributions }: { navigation: Props['navigation']; verifiedContributions: number }) {
+function UnlockReviewAccess({ navigation, totalContributions }: { navigation: Props['navigation']; totalContributions: number }) {
   const threshold = LEVEL_THRESHOLDS.SILVER;
-  const progress = Math.min(1, verifiedContributions / threshold);
+  const progress = Math.min(1, totalContributions / threshold);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
       <View style={styles.unlockContainer}>
         <Ionicons name="trophy" size={72} color={colors.warning} />
         <Text style={styles.unlockTitle}>Unlock Review Access</Text>
-        <Text style={styles.unlockSubtitle}>Review access requires SILVER level (100 verified contributions)</Text>
+        <Text style={styles.unlockSubtitle}>Review access requires SILVER level (100 contributions)</Text>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
         </View>
         <Text style={styles.progressLabel}>
-          {verifiedContributions} / {threshold}
+          {totalContributions} / {threshold}
         </Text>
         <Text style={styles.unlockHint}>Keep contributing to unlock!</Text>
         <DuoButton
@@ -120,7 +120,7 @@ export default function ReviewListScreen({ navigation }: Props) {
   }
 
   if (!canReview) {
-    return <UnlockReviewAccess navigation={navigation} verifiedContributions={user?.verifiedContributions ?? 0} />;
+    return <UnlockReviewAccess navigation={navigation} totalContributions={user?.totalContributions ?? 0} />;
   }
 
   return (

@@ -46,15 +46,6 @@ const MODULE_ICON: Record<RecentContribution['moduleType'], string> = {
   SCENE: 'image',
 };
 
-const STATUS_COLOR: Record<string, string> = {
-  draft: colors.inkMuted,
-  pending: colors.warning,
-  under_review: colors.warning,
-  verified: colors.success,
-  needs_correction: colors.danger,
-  rejected: colors.danger,
-};
-
 const DIFFICULTY_COLOR: Record<DailyScene['difficulty'], string> = {
   easy: colors.success,
   medium: colors.warning,
@@ -119,10 +110,11 @@ export default function HomeScreen({ navigation }: Props) {
   }
 
   const level = stats?.level ?? user?.level ?? 'BRONZE';
+  const totalContributions = stats?.totalContributions ?? user?.totalContributions ?? 0;
   const verified = stats?.verifiedContributions ?? user?.verifiedContributions ?? 0;
   const nextLevel = NEXT_LEVEL[level];
   const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
-  const progress = nextThreshold ? Math.min(1, verified / nextThreshold) : 1;
+  const progress = nextThreshold ? Math.min(1, totalContributions / nextThreshold) : 1;
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
@@ -145,14 +137,14 @@ export default function HomeScreen({ navigation }: Props) {
 
         <LinearGradient colors={LEVEL_GRADIENT[level]} style={styles.levelCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           <Text style={styles.levelName}>{level}</Text>
-          <Text style={styles.levelSubtitle}>{verified} verified contributions</Text>
+          <Text style={styles.levelSubtitle}>{totalContributions} contributions</Text>
           {nextThreshold ? (
             <>
               <View style={styles.progressTrack}>
                 <View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} />
               </View>
               <Text style={styles.progressLabel}>
-                {verified} / {nextThreshold} for {nextLevel}
+                {totalContributions} / {nextThreshold} for {nextLevel}
               </Text>
             </>
           ) : (
@@ -227,9 +219,6 @@ export default function HomeScreen({ navigation }: Props) {
             <View key={item.id} style={styles.recentRow}>
               <Ionicons name={MODULE_ICON[item.moduleType]} size={20} color={colors.ink} style={styles.recentIcon} />
               <View style={styles.recentInfo}>
-                <View style={[styles.statusBadge, { backgroundColor: STATUS_COLOR[item.status] ?? colors.inkMuted }]}>
-                  <Text style={styles.statusBadgeText}>{item.status.replace('_', ' ')}</Text>
-                </View>
                 <Text style={styles.recentDate}>{formatDate(item.submittedAt)}</Text>
               </View>
               <Text style={styles.recentPoints}>+{item.totalPoints ?? 0}</Text>
@@ -487,19 +476,6 @@ const styles = StyleSheet.create({
   },
   recentInfo: {
     flex: 1,
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    marginBottom: 4,
-  },
-  statusBadgeText: {
-    color: colors.inkInverted,
-    fontSize: 11,
-    fontWeight: '700',
-    textTransform: 'capitalize',
   },
   recentDate: {
     color: colors.inkMuted,

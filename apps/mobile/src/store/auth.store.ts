@@ -15,6 +15,7 @@ export type AuthUser = {
   role: string;
   level: ContributorLevel;
   totalPoints: number;
+  totalContributions: number;
   verifiedContributions: number;
   currentStreak: number;
 };
