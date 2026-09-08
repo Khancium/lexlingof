@@ -362,6 +362,29 @@ export const sceneMedia = pgTable("scene_media", {
 });
 
 /**
+ * ADMIN ONLY — free-text training-data labels for a scene image (e.g. "dog",
+ * "riverbank", "sunset"), independent of scene_concepts (which links a scene
+ * to an existing Concept row for coverage tracking). A scene image can carry
+ * any number of these. Never exposed to contributors -- same rule as
+ * scene_concepts above.
+ */
+export const sceneImageKeywords = pgTable(
+  "scene_image_keywords",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sceneMediaId: uuid("scene_media_id")
+      .notNull()
+      .references(() => sceneMedia.id, { onDelete: "cascade" }),
+    keyword: text("keyword").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_scene_image_keywords_media_keyword").on(t.sceneMediaId, t.keyword),
+    index("ix_scene_image_keywords_media").on(t.sceneMediaId),
+  ],
+);
+
+/**
  * ADMIN ONLY — never expose to contributors.
  *
  * Records concepts visible in a scene image. `annotatedPresence` is set ONLY by

@@ -642,6 +642,7 @@ export type AdminSceneUpdateInput = Partial<{
 
 export type AdminSceneConceptInput = { sceneId: string; conceptId: string; categoryId: string; importance?: number };
 export type BulkEditScenesInput = { ids: string[]; difficulty?: SceneDifficulty; isActive?: boolean };
+export type SceneImageKeyword = { id: string; keyword: string };
 
 export type AdminSentenceInput = { englishText: string; categoryId?: string };
 export type BulkUploadResult = { created: number; errors: { row: number; message: string }[] };
@@ -925,6 +926,12 @@ export const api = {
     },
     createSceneConcept: (data: AdminSceneConceptInput) =>
       apiClient.post<{ id: string }>("/api/v1/admin/scene-concepts", data).then((r) => r.data),
+    getSceneKeywords: (sceneId: string) =>
+      apiClient.get<{ items: SceneImageKeyword[] }>(`/api/v1/admin/scenes/${sceneId}/keywords`).then((r) => r.data.items),
+    addSceneKeyword: (sceneId: string, keyword: string) =>
+      apiClient.post<SceneImageKeyword>(`/api/v1/admin/scenes/${sceneId}/keywords`, { keyword }).then((r) => r.data),
+    deleteSceneKeyword: (sceneId: string, keywordId: string) =>
+      apiClient.delete(`/api/v1/admin/scenes/${sceneId}/keywords/${keywordId}`).then((r) => r.data),
 
     getSentences: (params?: { limit?: number; offset?: number }) =>
       apiClient.get<AdminSentencesResponse>("/api/v1/admin/sentences", { params }).then((r) => r.data),

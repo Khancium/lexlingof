@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type ConceptListItem, type Scene, type SceneDifficulty } from "@/lib/api";
+import { api, type ConceptListItem, type Scene, type SceneDifficulty, type SceneImageKeyword } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
@@ -29,6 +29,13 @@ export default function AdminScenesPage() {
   const [coverageImportance, setCoverageImportance] = useState(1);
   const [coverageMessage, setCoverageMessage] = useState<string | null>(null);
   const [isAddingCoverage, setIsAddingCoverage] = useState(false);
+
+  const [keywordsSceneId, setKeywordsSceneId] = useState<string | null>(null);
+  const [keywords, setKeywords] = useState<SceneImageKeyword[]>([]);
+  const [loadingKeywords, setLoadingKeywords] = useState(false);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [isAddingKeyword, setIsAddingKeyword] = useState(false);
+  const [keywordError, setKeywordError] = useState<string | null>(null);
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
@@ -160,6 +167,51 @@ export default function AdminScenesPage() {
     }
   }
 
+  async function toggleKeywords(sceneId: string) {
+    if (keywordsSceneId === sceneId) {
+      setKeywordsSceneId(null);
+      return;
+    }
+    setKeywordsSceneId(sceneId);
+    setKeywordError(null);
+    setNewKeyword("");
+    setLoadingKeywords(true);
+    try {
+      setKeywords(await api.admin.getSceneKeywords(sceneId));
+    } catch (err) {
+      setKeywordError(err instanceof Error ? err.message : "Failed to load keywords");
+    } finally {
+      setLoadingKeywords(false);
+    }
+  }
+
+  async function handleAddKeyword() {
+    if (!keywordsSceneId || newKeyword.trim().length === 0) return;
+    setIsAddingKeyword(true);
+    setKeywordError(null);
+    try {
+      const created = await api.admin.addSceneKeyword(keywordsSceneId, newKeyword.trim());
+      setKeywords((prev) => [...prev, created]);
+      setNewKeyword("");
+    } catch (err) {
+      setKeywordError(err instanceof Error ? err.message : "Failed to add keyword");
+    } finally {
+      setIsAddingKeyword(false);
+    }
+  }
+
+  async function handleRemoveKeyword(keywordId: string) {
+    if (!keywordsSceneId) return;
+    const previous = keywords;
+    setKeywords((prev) => prev.filter((k) => k.id !== keywordId));
+    try {
+      await api.admin.deleteSceneKeyword(keywordsSceneId, keywordId);
+    } catch (err) {
+      setKeywords(previous);
+      setKeywordError(err instanceof Error ? err.message : "Failed to remove keyword");
+    }
+  }
+
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-ink">Scenes</h1>
@@ -279,6 +331,9 @@ export default function AdminScenesPage() {
                   >
                     {coverageSceneId === scene.id ? "Close" : "Add Concept Coverage"}
                   </button>
+                  <button onClick={() => toggleKeywords(scene.id)} className="text-xs font-semibold text-brand hover:underline">
+                    {keywordsSceneId === scene.id ? "Close" : "Keywords"}
+                  </button>
                   <button
                     onClick={() => handleDelete(scene)}
                     disabled={deletingId === scene.id}
@@ -331,6 +386,61 @@ export default function AdminScenesPage() {
                     </button>
                   </div>
                   {coverageMessage ? <p className="text-sm text-emerald-600">{coverageMessage}</p> : null}
+                </div>
+              ) : null}
+
+              {keywordsSceneId === scene.id ? (
+                <div className="mt-4 space-y-2 border-t border-border pt-4">
+                  <p className="text-xs text-ink-muted">
+                    Free-text training labels for this scene&apos;s image -- admin-only, never shown to contributors.
+                  </p>
+                  {loadingKeywords ? (
+                    <p className="text-sm text-ink-muted">Loading...</p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {keywords.length === 0 ? (
+                        <p className="text-sm text-ink-muted">No keywords yet.</p>
+                      ) : (
+                        keywords.map((k) => (
+                          <span
+                            key={k.id}
+                            className="flex items-center gap-1.5 rounded-full bg-surface-card px-3 py-1 text-sm text-ink ring-1 ring-border"
+                          >
+                            {k.keyword}
+                            <button
+                              onClick={() => handleRemoveKeyword(k.id)}
+                              className="text-ink-muted hover:text-red-600"
+                              aria-label={`Remove keyword ${k.keyword}`}
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  )}
+                  <div className="flex gap-3">
+                    <input
+                      value={newKeyword}
+                      onChange={(e) => setNewKeyword(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddKeyword();
+                        }
+                      }}
+                      placeholder="Add a keyword (e.g. river, boat, sunset)"
+                      className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
+                    />
+                    <button
+                      onClick={handleAddKeyword}
+                      disabled={isAddingKeyword || newKeyword.trim().length === 0}
+                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {keywordError ? <p className="text-sm text-red-600">{keywordError}</p> : null}
                 </div>
               ) : null}
             </div>

@@ -23,6 +23,7 @@ import {
   sceneConcepts,
   sceneContributions,
   sceneDifficulty,
+  sceneImageKeywords,
   sceneMedia,
   sentences,
   transcriptions,
@@ -226,6 +227,9 @@ const annotateSceneConceptSchema = z.object({
   annotatedPresence: z.boolean(),
   annotationSource: z.string().min(1),
 });
+
+const addSceneImageKeywordSchema = z.object({ keyword: z.string().trim().min(1).max(100) });
+const sceneKeywordParamSchema = z.object({ id: z.string().uuid(), keywordId: z.string().uuid() });
 
 const sentencesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
@@ -761,6 +765,81 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.code(201).send(media);
   });
 
+  /* --------------------------- Scene image keywords -------------------------- */
+  // ADMIN ONLY: free-text training-data labels, keyed by scene (resolved to
+  // that scene's primary image) rather than a media id directly, matching
+  // the /media upload route above. Never exposed to contributors.
+
+  fastify.get("/admin/scenes/:id/keywords", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [media] = await db
+      .select({ id: sceneMedia.id })
+      .from(sceneMedia)
+      .where(and(eq(sceneMedia.sceneId, id), eq(sceneMedia.isPrimary, true)))
+      .limit(1);
+    if (!media) {
+      return { items: [] };
+    }
+
+    const items = await db
+      .select({ id: sceneImageKeywords.id, keyword: sceneImageKeywords.keyword })
+      .from(sceneImageKeywords)
+      .where(eq(sceneImageKeywords.sceneMediaId, media.id))
+      .orderBy(asc(sceneImageKeywords.createdAt));
+
+    return { items };
+  });
+
+  fastify.post("/admin/scenes/:id/keywords", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const body = addSceneImageKeywordSchema.parse(request.body);
+
+    const [media] = await db
+      .select({ id: sceneMedia.id })
+      .from(sceneMedia)
+      .where(and(eq(sceneMedia.sceneId, id), eq(sceneMedia.isPrimary, true)))
+      .limit(1);
+    if (!media) {
+      throw new HttpError(400, "NO_IMAGE", "Upload an image for this scene before adding keywords");
+    }
+
+    const [keyword] = await db
+      .insert(sceneImageKeywords)
+      .values({ sceneMediaId: media.id, keyword: body.keyword })
+      .onConflictDoNothing({ target: [sceneImageKeywords.sceneMediaId, sceneImageKeywords.keyword] })
+      .returning();
+
+    if (!keyword) {
+      throw new HttpError(409, "DUPLICATE_KEYWORD", "That keyword is already on this image");
+    }
+
+    reply.code(201).send(keyword);
+  });
+
+  fastify.delete("/admin/scenes/:id/keywords/:keywordId", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { id, keywordId } = sceneKeywordParamSchema.parse(request.params);
+
+    const deleted = await db
+      .delete(sceneImageKeywords)
+      .where(
+        and(
+          eq(sceneImageKeywords.id, keywordId),
+          inArray(
+            sceneImageKeywords.sceneMediaId,
+            db.select({ id: sceneMedia.id }).from(sceneMedia).where(eq(sceneMedia.sceneId, id)),
+          ),
+        ),
+      )
+      .returning({ id: sceneImageKeywords.id });
+
+    if (deleted.length === 0) {
+      throw new HttpError(404, "NOT_FOUND", "Keyword not found on this scene");
+    }
+
+    reply.code(204).send();
+  });
+
   /* ----------------------------- Scene concepts ----------------------------- */
   // ADMIN ONLY: this is the concept coverage map, never exposed to
   // contributors. Nothing in this file returns scene_concepts to a
@@ -1004,6 +1083,41 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         fileCount: storageRow?.fileCount ?? 0,
       },
     };
+  });
+
+  // A ready-to-consume manifest of {imageUrl, keywords} for both image-based
+  // modules, meant to make building an AI training dataset straightforward:
+  // Word/concept images get a single keyword (the concept's own label --
+  // there's no separate annotation step for those), Scene images get
+  // whatever free-text keywords were entered against them above.
+  fastify.get("/admin/training-data/images", { preHandler: requirePermission("analytics.read") }, async () => {
+    const [conceptRows, sceneMediaRows, sceneKeywordRows] = await Promise.all([
+      db
+        .select({ imageUrl: conceptMedia.publicUrl, label: concepts.labelEnglish })
+        .from(conceptMedia)
+        .innerJoin(concepts, eq(concepts.id, conceptMedia.conceptId))
+        .where(isNull(concepts.deletedAt)),
+      db.select({ id: sceneMedia.id, imageUrl: sceneMedia.publicUrl }).from(sceneMedia),
+      db.select({ sceneMediaId: sceneImageKeywords.sceneMediaId, keyword: sceneImageKeywords.keyword }).from(sceneImageKeywords),
+    ]);
+
+    const keywordsByMedia = new Map<string, string[]>();
+    for (const row of sceneKeywordRows) {
+      const list = keywordsByMedia.get(row.sceneMediaId) ?? [];
+      list.push(row.keyword);
+      keywordsByMedia.set(row.sceneMediaId, list);
+    }
+
+    const items = [
+      ...conceptRows
+        .filter((r) => r.imageUrl)
+        .map((r) => ({ module: "WORD" as const, imageUrl: r.imageUrl!, keywords: [r.label] })),
+      ...sceneMediaRows
+        .filter((r) => r.imageUrl)
+        .map((r) => ({ module: "SCENE" as const, imageUrl: r.imageUrl!, keywords: keywordsByMedia.get(r.id) ?? [] })),
+    ];
+
+    return { items };
   });
 
   /* ------------------------------ Super-admin ------------------------------ */
