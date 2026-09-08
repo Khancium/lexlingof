@@ -8,7 +8,7 @@ import {
   type Category,
   type ConceptDetail,
   type ConceptListItem,
-  type WordLimits,
+  type RecordedSynonyms,
 } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
@@ -31,7 +31,7 @@ export default function ConceptPage() {
   const [loadingConcepts, setLoadingConcepts] = useState(false);
 
   const [concept, setConcept] = useState<ConceptDetail | null>(null);
-  const [limits, setLimits] = useState<WordLimits | null>(null);
+  const [recordedSynonyms, setRecordedSynonyms] = useState<RecordedSynonyms | null>(null);
   const [loadingConcept, setLoadingConcept] = useState(false);
   const [conceptError, setConceptError] = useState<string | null>(null);
 
@@ -41,6 +41,11 @@ export default function ConceptPage() {
   const [romanization, setRomanization] = useState("");
   const [ipa, setIpa] = useState("");
   const [recording, setRecording] = useState<Recording | null>(null);
+  // Tracks which recording (by object identity) was last successfully
+  // submitted, so Submit re-locks after a click instead of staying clickable
+  // -- it only unlocks again once `recording` actually changes (a retake, or
+  // switching to a different synonym resets both to null).
+  const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -69,17 +74,18 @@ export default function ConceptPage() {
     setRomanization("");
     setIpa("");
     setRecording(null);
+    setLastSubmittedRecording(null);
     setSynonymIndex(1);
     setDetailsOpen(false);
     setSuccessMessage(null);
     setSubmitError(null);
     try {
-      const [detail, wordLimits] = await Promise.all([
+      const [detail, recorded] = await Promise.all([
         api.concepts.getById(item.id),
         api.contributions.getWordLimits(item.id),
       ]);
       setConcept(detail);
-      setLimits(wordLimits);
+      setRecordedSynonyms(recorded);
     } catch (err) {
       setConcept(null);
       setConceptError(err instanceof Error ? err.message : "Failed to load object");
@@ -88,19 +94,30 @@ export default function ConceptPage() {
     }
   }, []);
 
-  const takesForSelectedSynonym = limits?.takesPerSynonym[String(synonymIndex) as "1" | "2" | "3"] ?? 0;
-  const takeIndex = Math.min(3, takesForSelectedSynonym + 1) as 1 | 2 | 3;
-  const synonymFull = takesForSelectedSynonym >= 3;
+  function selectSynonym(idx: 1 | 2 | 3) {
+    if (idx === synonymIndex) return;
+    setSynonymIndex(idx);
+    setRecording(null);
+    setLastSubmittedRecording(null);
+    setNativeWord("");
+    setRomanization("");
+    setIpa("");
+    setDetailsOpen(false);
+    setSubmitError(null);
+    setSuccessMessage(null);
+  }
 
   async function handleSubmit() {
-    if (!concept || !languageId || !recording || synonymFull) return;
+    if (!concept || !languageId || !recording) return;
     setIsSubmitting(true);
     setSubmitError(null);
     setSuccessMessage(null);
     try {
       // A single request hands the audio + fields to the backend's buffer,
       // which acks immediately and finishes the R2 upload + DB write in the
-      // background -- no waiting on either network hop here.
+      // background -- no waiting on either network hop here. There's no take
+      // limit -- recording this synonym again overrides whatever's already
+      // stored for it, in the database and in object storage.
       await api.buffer.submitWord(
         {
           conceptId: concept.id,
@@ -110,33 +127,14 @@ export default function ConceptPage() {
           romanization: romanization.trim() || undefined,
           ipa: ipa.trim() || undefined,
           synonymIndex,
-          takeIndex,
           durationMs: Math.round(recording.durationMs),
         },
         recording.file,
       );
 
       setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
-      setRecording(null);
-      setNativeWord("");
-      setRomanization("");
-      setIpa("");
-      // The take/synonym quota check (limits) can't be refreshed from the
-      // server yet -- the buffered submission hasn't been written to
-      // word_recordings until the background worker finishes -- so this
-      // take is credited optimistically to keep the 3-per-synonym gating
-      // correct without racing the worker.
-      setLimits((prev) =>
-        prev
-          ? {
-              ...prev,
-              takesPerSynonym: {
-                ...prev.takesPerSynonym,
-                [synonymIndex]: (prev.takesPerSynonym[synonymIndex] ?? 0) + 1,
-              },
-            }
-          : prev,
-      );
+      setLastSubmittedRecording(recording);
+      setRecordedSynonyms((prev) => (prev ? { ...prev, [synonymIndex]: true } : prev));
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit recording"));
     } finally {
@@ -144,7 +142,7 @@ export default function ConceptPage() {
     }
   }
 
-  const canSubmit = !!recording && !!languageId && !synonymFull && !isSubmitting;
+  const canSubmit = !!recording && recording !== lastSubmittedRecording && !!languageId && !isSubmitting;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -229,89 +227,88 @@ export default function ConceptPage() {
               <div className="flex items-center justify-center gap-3">
                 <span className="text-sm font-medium text-ink-muted">Synonym:</span>
                 {([1, 2, 3] as const).map((idx) => {
-                  const takes = limits?.takesPerSynonym[String(idx) as "1" | "2" | "3"] ?? 0;
+                  const recorded = recordedSynonyms?.[idx] ?? false;
                   return (
                     <button
                       key={idx}
-                      onClick={() => setSynonymIndex(idx)}
-                      className={`h-9 w-9 rounded-full text-sm font-bold transition ${
+                      onClick={() => selectSynonym(idx)}
+                      className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold transition ${
                         synonymIndex === idx
                           ? "bg-brand text-ink-inverted"
-                          : takes >= 3
-                            ? "bg-surface-card text-ink-muted/50"
+                          : recorded
+                            ? "bg-brand-light text-brand-dark hover:bg-border"
                             : "bg-surface-card text-ink-muted hover:bg-border"
                       }`}
                     >
-                      {idx}
+                      {recorded && synonymIndex !== idx ? "✓" : idx}
                     </button>
                   );
                 })}
-                <span className="text-xs text-ink-muted">Take {takeIndex} of 3</span>
+              </div>
+              {recordedSynonyms?.[synonymIndex] ? (
+                <p className="text-center text-xs text-ink-muted">
+                  Already recorded -- record again to replace it.
+                </p>
+              ) : null}
+
+              <div className="card-duo flex flex-col items-center justify-center gap-4 rounded-2xl bg-surface py-10 shadow-sm">
+                <AudioRecorder
+                  key={synonymIndex}
+                  maxDurationMs={5000}
+                  onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
+                  onError={(message) => setSubmitError(message)}
+                />
+                <p className="text-sm text-ink-muted">Tap to record</p>
               </div>
 
-              {synonymFull ? (
-                <p className="text-center text-emerald-600">This synonym slot is complete. Pick another synonym.</p>
-              ) : (
-                <>
-                  <div className="card-duo flex flex-col items-center justify-center gap-4 rounded-2xl bg-surface py-10 shadow-sm">
-                    <AudioRecorder
-                      maxDurationMs={5000}
-                      onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
-                      onError={(message) => setSubmitError(message)}
+              <div className="overflow-hidden rounded-2xl bg-surface shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen((v) => !v)}
+                  className="flex w-full items-center justify-between px-5 py-4 text-left"
+                >
+                  <span className="font-medium text-ink">Add word details (optional)</span>
+                  <span className={`text-ink-muted transition-transform ${detailsOpen ? "rotate-180" : ""}`}>▾</span>
+                </button>
+                {detailsOpen && (
+                  <div className="space-y-3 px-5 pb-5">
+                    <input
+                      value={nativeWord}
+                      onChange={(e) => setNativeWord(e.target.value)}
+                      placeholder="Your word"
+                      className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                     />
-                    <p className="text-sm text-ink-muted">Tap to record</p>
+                    <input
+                      value={romanization}
+                      onChange={(e) => setRomanization(e.target.value)}
+                      placeholder="Romanization"
+                      className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                    />
+                    <input
+                      value={ipa}
+                      onChange={(e) => setIpa(e.target.value)}
+                      placeholder="IPA"
+                      className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                    />
                   </div>
+                )}
+              </div>
 
-                  <div className="overflow-hidden rounded-2xl bg-surface shadow-sm">
-                    <button
-                      type="button"
-                      onClick={() => setDetailsOpen((v) => !v)}
-                      className="flex w-full items-center justify-between px-5 py-4 text-left"
-                    >
-                      <span className="font-medium text-ink">Add word details (optional)</span>
-                      <span className={`text-ink-muted transition-transform ${detailsOpen ? "rotate-180" : ""}`}>▾</span>
-                    </button>
-                    {detailsOpen && (
-                      <div className="space-y-3 px-5 pb-5">
-                        <input
-                          value={nativeWord}
-                          onChange={(e) => setNativeWord(e.target.value)}
-                          placeholder="Your word"
-                          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-                        />
-                        <input
-                          value={romanization}
-                          onChange={(e) => setRomanization(e.target.value)}
-                          placeholder="Romanization"
-                          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-                        />
-                        <input
-                          value={ipa}
-                          onChange={(e) => setIpa(e.target.value)}
-                          placeholder="IPA"
-                          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-                        />
-                      </div>
-                    )}
-                  </div>
+              <p className="text-center text-sm text-ink-muted">Base points awarded now, plus a bonus once verified.</p>
 
-                  <p className="text-center text-sm text-ink-muted">Base points awarded now, plus a bonus once verified.</p>
+              {!languageId && !languageLoading ? (
+                <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
+              ) : null}
+              {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+              {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
-                  {!languageId && !languageLoading ? (
-                    <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
-                  ) : null}
-                  {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-                  {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
-
-                  <button
-                    onClick={handleSubmit}
-                    disabled={!canSubmit}
-                    className="btn-duo w-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
-                  >
-                    {isSubmitting ? "Submitting..." : "Submit"}
-                  </button>
-                </>
-              )}
+              <button
+                onClick={handleSubmit}
+                disabled={!canSubmit}
+                className="btn-duo w-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
+              >
+                {isSubmitting ? "Submitting..." : "Submit"}
+              </button>
             </>
           )}
         </>

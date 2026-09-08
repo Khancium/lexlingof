@@ -509,6 +509,25 @@ export const wordRecordings = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     /** Set after the parent contribution row is created. */
     contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
+    /**
+     * Denormalized from contributions.userId so "does this user already have
+     * a recording for this concept+synonym" can be a plain lookup on this
+     * table instead of a join -- that lookup is what makes each synonym a
+     * single, overridable entry (see submitWordRecording): re-recording the
+     * same synonym updates this row (and replaces its audio in R2) instead
+     * of being capped or creating another row.
+     */
+    /**
+     * Denormalized from contributions.userId so "does this user already have
+     * a recording for this concept+synonym" can be a plain lookup on this
+     * table instead of a join -- that lookup is what makes each synonym a
+     * single, overridable entry (see submitWordRecording): re-recording the
+     * same synonym updates this row (and replaces its audio in R2) instead
+     * of being capped or creating another row.
+     */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
     conceptId: uuid("concept_id")
       .notNull()
       .references(() => concepts.id),
@@ -519,7 +538,6 @@ export const wordRecordings = pgTable(
     romanization: text("romanization"),
     ipa: text("ipa"),
     synonymIndex: smallint("synonym_index").default(1).notNull(),
-    takeIndex: smallint("take_index").default(1).notNull(),
     durationMs: integer("duration_ms").notNull(),
     isCurrent: boolean("is_current").default(true).notNull(),
     supersededBy: uuid("superseded_by").references((): AnyPgColumn => wordRecordings.id),
@@ -528,15 +546,15 @@ export const wordRecordings = pgTable(
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
   (t) => [
-    uniqueIndex("uq_word_recordings_take")
-      .on(t.contributionId, t.conceptId, t.synonymIndex, t.takeIndex)
+    /** At most one live recording per user+concept+synonym -- re-recording overrides it instead of adding another. */
+    uniqueIndex("uq_word_recordings_user_concept_synonym")
+      .on(t.userId, t.conceptId, t.synonymIndex)
       .where(sql`${t.deletedAt} is null`),
     index("ix_word_recordings_concept").on(t.conceptId),
     /** Module 1 ONLY. 3-second limit. NEVER apply to other tables. */
     check("ck_word_recording_max_duration", sql`${t.durationMs} <= 5000`),
     check("ck_word_recording_min_duration", sql`${t.durationMs} > 0`),
     check("ck_word_recording_synonym_index", sql`${t.synonymIndex} between 1 and 3`),
-    check("ck_word_recording_take_index", sql`${t.takeIndex} between 1 and 3`),
   ],
 );
 

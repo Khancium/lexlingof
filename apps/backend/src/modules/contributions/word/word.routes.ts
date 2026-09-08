@@ -3,12 +3,12 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../../db/index.js";
-import { categories, conceptMedia, concepts, contributions, wordRecordings } from "../../../db/schema.js";
+import { categories, conceptMedia, concepts, wordRecordings } from "../../../db/schema.js";
 import { verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
-import { checkLimits, submitWordRecording } from "./word.service.js";
+import { getRecordedSynonyms, submitWordRecording } from "./word.service.js";
 
-const MAX_RECORDINGS_PER_CONCEPT = 9; // 3 synonyms x 3 takes
+const MAX_RECORDINGS_PER_CONCEPT = 3; // one per synonym slot -- no take limit, so this is the only cap left
 
 const nextConceptQuerySchema = z.object({ categoryId: z.string().uuid().optional() });
 const conceptIdParamSchema = z.object({ conceptId: z.string().uuid() });
@@ -22,7 +22,6 @@ const submitSchema = z.object({
   romanization: z.string().optional(),
   ipa: z.string().optional(),
   synonymIndex: z.number().int().min(1).max(3),
-  takeIndex: z.number().int().min(1).max(3),
   durationMs: z.number().int().min(1).max(5000), // FIRST enforcement layer
   deviceId: z.string().optional(),
   appVersion: z.string().optional(),
@@ -61,8 +60,7 @@ export default async function wordRoutes(fastify: FastifyInstance) {
     const recordingCounts = await db
       .select({ conceptId: wordRecordings.conceptId, total: sql<number>`count(*)`.mapWith(Number) })
       .from(wordRecordings)
-      .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
-      .where(and(eq(contributions.userId, userId), isNull(wordRecordings.deletedAt)))
+      .where(and(eq(wordRecordings.userId, userId), isNull(wordRecordings.deletedAt)))
       .groupBy(wordRecordings.conceptId);
 
     const countByConcept = new Map(recordingCounts.map((r) => [r.conceptId, r.total]));
@@ -78,7 +76,7 @@ export default async function wordRoutes(fastify: FastifyInstance) {
       .where(and(eq(conceptMedia.conceptId, nextConcept.id), eq(conceptMedia.isPrimary, true)))
       .limit(1);
 
-    const limits = await checkLimits(userId, nextConcept.id);
+    const recordedSynonyms = await getRecordedSynonyms(userId, nextConcept.id);
 
     return {
       concept: {
@@ -89,13 +87,13 @@ export default async function wordRoutes(fastify: FastifyInstance) {
       },
       category: { id: nextConcept.categoryId, name: nextConcept.categoryName, slug: nextConcept.categorySlug },
       publicUrl: media?.publicUrl ?? null,
-      limits,
+      recordedSynonyms,
     };
   });
 
   fastify.get("/contributions/word/:conceptId/limits", { preHandler: verifyToken }, async (request) => {
     const { conceptId } = conceptIdParamSchema.parse(request.params);
-    return checkLimits(request.user!.id, conceptId);
+    return getRecordedSynonyms(request.user!.id, conceptId);
   });
 
   fastify.post("/contributions/word", { preHandler: verifyToken }, async (request, reply) => {

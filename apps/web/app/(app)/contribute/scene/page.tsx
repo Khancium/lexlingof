@@ -22,6 +22,10 @@ export default function ScenePage() {
   const [loadingScene, setLoadingScene] = useState(true);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [recording, setRecording] = useState<Recording | null>(null);
+  // Tracks which recording (by object identity) was last successfully
+  // submitted, so Submit re-locks after a click instead of staying
+  // clickable -- it only unlocks again once a new recording is made.
+  const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -30,6 +34,7 @@ export default function ScenePage() {
     setLoadingScene(true);
     setSceneError(null);
     setRecording(null);
+    setLastSubmittedRecording(null);
     setSuccessMessage(null);
     try {
       setScene(await api.scenes.getRandom(excludeId));
@@ -64,6 +69,7 @@ export default function ScenePage() {
       );
 
       setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
+      setLastSubmittedRecording(recording);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit scene description"));
     } finally {
@@ -71,7 +77,7 @@ export default function ScenePage() {
     }
   }
 
-  const canSubmit = !!recording && !!languageId && !isSubmitting;
+  const canSubmit = !!recording && recording !== lastSubmittedRecording && !!languageId && !isSubmitting;
 
   if (loadingScene) {
     return <p className="text-ink-muted">Loading...</p>;

@@ -1,20 +1,14 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
-import { contributions, gamificationConfig, pointsTransactions, userStats, wordRecordings } from "../../../db/schema.js";
+import { audioFiles, contributions, gamificationConfig, pointsTransactions, streaks, userStats, wordRecordings } from "../../../db/schema.js";
+import { storageService } from "../../../services/storage.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
 type SynonymIndex = 1 | 2 | 3;
 
-export type WordLimits = {
-  synonymCount: number;
-  takesPerSynonym: Record<SynonymIndex, number>;
-  canAddSynonym: boolean;
-  canAddTake: boolean;
-  nextSynonymIndex: SynonymIndex | null;
-  nextTakeIndex: 1 | 2 | 3 | null;
-};
+export type RecordedSynonyms = Record<SynonymIndex, boolean>;
 
 export type SubmitWordRecordingInput = {
   audioFileId: string;
@@ -25,7 +19,6 @@ export type SubmitWordRecordingInput = {
   romanization?: string | null;
   ipa?: string | null;
   synonymIndex: number;
-  takeIndex: number;
   durationMs: number;
   deviceId?: string | null;
   appVersion?: string | null;
@@ -33,72 +26,35 @@ export type SubmitWordRecordingInput = {
   sourceBufferId?: string | null;
 };
 
-/**
- * Existing recordings for this user + concept. word_recordings has no direct
- * userId column, so ownership is resolved through its (nullable, set after
- * creation) contribution_id -> contributions.user_id.
- */
-async function getExistingRecordings(userId: string, conceptId: string) {
-  return db
-    .select({ synonymIndex: wordRecordings.synonymIndex, takeIndex: wordRecordings.takeIndex })
+export type SubmitWordRecordingResult = {
+  contributionId: string;
+  wordRecordingId: string;
+  pointsAwarded: number;
+  userLevel: string | null;
+  currentStreak: number;
+};
+
+/** Which of the 3 synonym slots already have a recording -- there is no take limit, just this yes/no per slot. */
+export async function getRecordedSynonyms(userId: string, conceptId: string): Promise<RecordedSynonyms> {
+  const rows = await db
+    .select({ synonymIndex: wordRecordings.synonymIndex })
     .from(wordRecordings)
-    .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
-    .where(
-      and(
-        eq(contributions.userId, userId),
-        eq(wordRecordings.conceptId, conceptId),
-        isNull(wordRecordings.deletedAt),
-      ),
-    );
+    .where(and(eq(wordRecordings.userId, userId), eq(wordRecordings.conceptId, conceptId), isNull(wordRecordings.deletedAt)));
+
+  const recorded: RecordedSynonyms = { 1: false, 2: false, 3: false };
+  for (const row of rows) recorded[row.synonymIndex as SynonymIndex] = true;
+  return recorded;
 }
 
-export async function checkLimits(userId: string, conceptId: string): Promise<WordLimits> {
-  const rows = await getExistingRecordings(userId, conceptId);
+export async function submitWordRecording(userId: string, data: SubmitWordRecordingInput): Promise<SubmitWordRecordingResult> {
+  const { synonymIndex, durationMs } = data;
 
-  const takesPerSynonym: Record<SynonymIndex, number> = { 1: 0, 2: 0, 3: 0 };
-  const synonymsSeen = new Set<SynonymIndex>();
-
-  for (const row of rows) {
-    const synonymIndex = row.synonymIndex as SynonymIndex;
-    synonymsSeen.add(synonymIndex);
-    takesPerSynonym[synonymIndex] += 1;
-  }
-
-  const synonymCount = synonymsSeen.size;
-  const canAddSynonym = synonymCount < 3;
-
-  // "Current synonym" is the first one (in order 1, 2, 3) that doesn't yet
-  // have all 3 takes -- i.e. the one a client would naturally continue
-  // recording next. null means all 9 slots (3 synonyms x 3 takes) are full.
-  let nextSynonymIndex: SynonymIndex | null = null;
-  for (const idx of [1, 2, 3] as SynonymIndex[]) {
-    if (takesPerSynonym[idx] < 3) {
-      nextSynonymIndex = idx;
-      break;
-    }
-  }
-
-  const nextTakeIndex = nextSynonymIndex ? ((takesPerSynonym[nextSynonymIndex] + 1) as 1 | 2 | 3) : null;
-  const canAddTake = nextSynonymIndex !== null;
-
-  return { synonymCount, takesPerSynonym, canAddSynonym, canAddTake, nextSynonymIndex, nextTakeIndex };
-}
-
-export async function submitWordRecording(userId: string, data: SubmitWordRecordingInput) {
-  const { synonymIndex, takeIndex, durationMs } = data;
-
-  // 1. Layer: synonymIndex range.
   if (![1, 2, 3].includes(synonymIndex)) {
     throw new HttpError(400, "INVALID_SYNONYM_INDEX", "synonymIndex must be 1, 2 or 3");
   }
 
-  // 2. Layer: takeIndex range.
-  if (![1, 2, 3].includes(takeIndex)) {
-    throw new HttpError(400, "INVALID_TAKE_INDEX", "takeIndex must be 1, 2 or 3");
-  }
-
-  // 3. Second duration enforcement layer (first is Zod at the route; the DB
-  // CHECK constraint ck_word_recording_max_duration is the fourth and last).
+  // Second duration enforcement layer (first is Zod at the route; the DB
+  // CHECK constraint ck_word_recording_max_duration is the third and last).
   if (durationMs > 5000) {
     throw new HttpError(
       400,
@@ -107,27 +63,28 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
     );
   }
 
-  // 4. Duplicate check, base-points config, and current level are all
-  // independent reads (none depend on each other or on anything this
-  // request writes) -- fetched concurrently over separate pool connections
-  // instead of as three sequential round trips. This matters because the
-  // DB is in a different region from this backend, so every round trip
-  // costs real wall-clock time regardless of query cost.
-  const [[duplicate], [config], [levelRow]] = await Promise.all([
-    db
-      .select({ id: wordRecordings.id })
-      .from(wordRecordings)
-      .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
-      .where(
-        and(
-          eq(contributions.userId, userId),
-          eq(wordRecordings.conceptId, data.conceptId),
-          eq(wordRecordings.synonymIndex, synonymIndex),
-          eq(wordRecordings.takeIndex, takeIndex),
-          isNull(wordRecordings.deletedAt),
-        ),
-      )
-      .limit(1),
+  // There is no take limit -- recording the same synonym again overrides
+  // whatever's already there (in the DB and in R2) instead of being capped
+  // or creating a second row. uq_word_recordings_user_concept_synonym is
+  // what guarantees at most one live row per user+concept+synonym.
+  const [existing] = await db
+    .select({ id: wordRecordings.id, audioFileId: wordRecordings.audioFileId, contributionId: wordRecordings.contributionId })
+    .from(wordRecordings)
+    .where(
+      and(
+        eq(wordRecordings.userId, userId),
+        eq(wordRecordings.conceptId, data.conceptId),
+        eq(wordRecordings.synonymIndex, synonymIndex),
+        isNull(wordRecordings.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  if (existing && existing.contributionId) {
+    return overrideWordRecording(userId, existing as { id: string; audioFileId: string; contributionId: string }, data);
+  }
+
+  const [[config], [levelRow]] = await Promise.all([
     db
       .select({ configValue: gamificationConfig.configValue })
       .from(gamificationConfig)
@@ -136,9 +93,6 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
     db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1),
   ]);
 
-  if (duplicate) {
-    throw new HttpError(409, "DUPLICATE_RECORDING", "A recording already exists for this concept, synonym and take");
-  }
   if (!config) {
     throw new HttpError(500, "CONFIG_MISSING", "points.word.base is not configured");
   }
@@ -148,17 +102,17 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
   const userLevel = levelRow?.level ?? null;
 
   return db.transaction(async (tx) => {
-    // 5. Insert word_recordings (the DB CHECK constraint is the 4th layer).
+    // 1. Insert word_recordings (the DB CHECK constraint is the 3rd layer).
     const [wordRecording] = await tx
       .insert(wordRecordings)
       .values({
+        userId,
         conceptId: data.conceptId,
         audioFileId: data.audioFileId,
         nativeWord: data.nativeWord ?? null,
         romanization: data.romanization ?? null,
         ipa: data.ipa ?? null,
         synonymIndex,
-        takeIndex,
         durationMs,
       })
       .returning({ id: wordRecordings.id });
@@ -167,7 +121,7 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       throw new HttpError(500, "INSERT_FAILED", "Failed to create word recording");
     }
 
-    // 6. Insert contributions.
+    // 2. Insert contributions.
     const [contribution] = await tx
       .insert(contributions)
       .values({
@@ -188,13 +142,13 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       throw new HttpError(500, "INSERT_FAILED", "Failed to create contribution");
     }
 
-    // 7. Point word_recordings back at its contribution.
+    // 3. Point word_recordings back at its contribution.
     await tx
       .update(wordRecordings)
       .set({ contributionId: contribution.id, updatedAt: new Date() })
       .where(eq(wordRecordings.id, wordRecording.id));
 
-    // 8, 9, 10: the points ledger insert, user_stats counters, and streak
+    // 4, 5, 6: the points ledger insert, user_stats counters, and streak
     // bookkeeping are all independent of each other (none reads a value the
     // others write) -- issued together instead of as three sequential round
     // trips. postgres.js pipelines queries issued this way on one
@@ -235,4 +189,82 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       currentStreak,
     };
   });
+}
+
+/**
+ * Re-recording a synonym that already has a live word_recording: replaces
+ * its audio (in R2 and in the row) and puts the contribution back to
+ * "pending" for re-review, but does NOT award points or bump user_stats
+ * again -- those were already credited the first time this synonym was
+ * recorded, and re-crediting on every retake would make the "no take limit"
+ * change a free-points exploit.
+ */
+async function overrideWordRecording(
+  userId: string,
+  existing: { id: string; audioFileId: string; contributionId: string },
+  data: SubmitWordRecordingInput,
+): Promise<SubmitWordRecordingResult> {
+  const [[levelRow], [streakRow]] = await Promise.all([
+    db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1),
+    db.select({ currentStreak: streaks.currentStreak }).from(streaks).where(eq(streaks.userId, userId)).limit(1),
+  ]);
+  const userLevel = levelRow?.level ?? null;
+  const currentStreak = streakRow?.currentStreak ?? 0;
+
+  // Idempotent short-circuit: a buffer-worker retry after a crash resolves
+  // to the SAME audioFileId (resolveAudioFileId persists it), so if it's
+  // already applied there's nothing left to do -- re-running the override
+  // below would delete the audio file it just finished setting.
+  if (existing.audioFileId === data.audioFileId) {
+    return { contributionId: existing.contributionId, wordRecordingId: existing.id, pointsAwarded: 0, userLevel, currentStreak };
+  }
+
+  const oldAudioFileId = existing.audioFileId;
+  const [oldAudio] = await db.select({ storageKey: audioFiles.storageKey }).from(audioFiles).where(eq(audioFiles.id, oldAudioFileId)).limit(1);
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(wordRecordings)
+      .set({
+        audioFileId: data.audioFileId,
+        nativeWord: data.nativeWord ?? null,
+        romanization: data.romanization ?? null,
+        ipa: data.ipa ?? null,
+        durationMs: data.durationMs,
+        updatedAt: new Date(),
+      })
+      .where(eq(wordRecordings.id, existing.id));
+
+    await tx
+      .update(contributions)
+      .set({
+        status: "pending",
+        verifiedAt: null,
+        verifiedBy: null,
+        rejectedAt: null,
+        rejectedBy: null,
+        rejectionReason: null,
+        version: sql`${contributions.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(contributions.id, existing.contributionId));
+
+    if (oldAudio) {
+      // Not a hard delete: pending_submissions.resolvedAudioFileId from the
+      // original submission still references this row (kept for that
+      // buffer row's own audit trail), so deleting it here would fail the
+      // whole override on an FK violation. Quarantining leaves the row (and
+      // that reference) intact while making clear the file itself is gone.
+      await tx
+        .update(audioFiles)
+        .set({ processingStatus: "quarantined", processingError: "Superseded by a newer recording for this word/synonym" })
+        .where(eq(audioFiles.id, oldAudioFileId));
+    }
+  });
+
+  if (oldAudio) {
+    await storageService.deleteAudioFile(oldAudio.storageKey);
+  }
+
+  return { contributionId: existing.contributionId, wordRecordingId: existing.id, pointsAwarded: 0, userLevel, currentStreak };
 }

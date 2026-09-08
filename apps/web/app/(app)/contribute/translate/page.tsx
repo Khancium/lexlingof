@@ -27,6 +27,10 @@ export default function TranslatePage() {
   const [sentenceError, setSentenceError] = useState<string | null>(null);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // Tracks which recording (by object identity) was last successfully
+  // submitted, so Submit re-locks after a click instead of staying
+  // clickable during the brief window before the next sentence loads.
+  const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
@@ -106,6 +110,7 @@ export default function TranslatePage() {
       );
 
       setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
+      setLastSubmittedRecording(draft.recording);
       setDrafts((prev) => {
         const next = { ...prev };
         delete next[sentence.id];
@@ -122,7 +127,8 @@ export default function TranslatePage() {
     }
   }
 
-  const canSubmit = !!sentence && !!languageId && !!draft.recording && !isSubmitting;
+  const canSubmit =
+    !!sentence && !!languageId && !!draft.recording && draft.recording !== lastSubmittedRecording && !isSubmitting;
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">

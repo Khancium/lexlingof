@@ -85,6 +85,20 @@
       "when": 1788845543587,
       "tag": "0011_overconfident_whiplash",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788847755384,
+      "tag": "0012_fair_silver_centurion",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788847870231,
+      "tag": "0013_fresh_deathstrike",
+      "breakpoints": true
     }
   ]
 }

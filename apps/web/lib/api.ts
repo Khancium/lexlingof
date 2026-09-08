@@ -297,7 +297,7 @@ export type NextConceptResponse = {
   concept: { id: string; slug: string; labelEnglish: string; description: string | null };
   category: { id: string; name: string; slug: string };
   publicUrl: string | null;
-  limits: WordLimits;
+  recordedSynonyms: RecordedSynonyms;
 };
 
 export type PlayUrlResponse = { url: string; expiresAt: string };
@@ -311,7 +311,6 @@ export type SubmitWordInput = {
   romanization?: string;
   ipa?: string;
   synonymIndex: 1 | 2 | 3;
-  takeIndex: 1 | 2 | 3;
   durationMs: number;
   deviceId?: string;
   appVersion?: string;
@@ -325,14 +324,8 @@ export type SubmitWordResponse = {
   currentStreak: number;
 };
 
-export type WordLimits = {
-  synonymCount: number;
-  takesPerSynonym: Record<"1" | "2" | "3", number>;
-  canAddSynonym: boolean;
-  canAddTake: boolean;
-  nextSynonymIndex: 1 | 2 | 3 | null;
-  nextTakeIndex: 1 | 2 | 3 | null;
-};
+/** Which of the 3 synonym slots already have a recording -- there is no take limit, recording again just overrides it. */
+export type RecordedSynonyms = Record<1 | 2 | 3, boolean>;
 
 export type SubmitAudioInput = {
   audioFileId: string;
@@ -381,7 +374,6 @@ export type WordBufferMeta = {
   romanization?: string;
   ipa?: string;
   synonymIndex: number;
-  takeIndex: number;
   durationMs: number;
 };
 
@@ -824,7 +816,7 @@ export const api = {
     submitWord: (data: SubmitWordInput) =>
       apiClient.post<SubmitWordResponse>("/api/v1/contributions/word", data).then((r) => r.data),
     getWordLimits: (conceptId: string) =>
-      apiClient.get<WordLimits>(`/api/v1/contributions/word/${conceptId}/limits`).then((r) => r.data),
+      apiClient.get<RecordedSynonyms>(`/api/v1/contributions/word/${conceptId}/limits`).then((r) => r.data),
     submitAudio: (data: SubmitAudioInput) =>
       apiClient.post<SubmitAudioResponse>("/api/v1/contributions/audio", data).then((r) => r.data),
     addTranscription: (id: string, data: AddTranscriptionInput) =>

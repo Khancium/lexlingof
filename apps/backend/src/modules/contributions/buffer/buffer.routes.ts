@@ -22,7 +22,6 @@ const wordMetaSchema = z.object({
   romanization: z.string().optional(),
   ipa: z.string().optional(),
   synonymIndex: z.number().int().min(1).max(3),
-  takeIndex: z.number().int().min(1).max(3),
   durationMs: z.number().int().min(1).max(5000),
   deviceId: z.string().optional(),
   appVersion: z.string().optional(),
