@@ -1,0 +1,1 @@
+ALTER TABLE "pending_submissions" DROP COLUMN "audio_data";

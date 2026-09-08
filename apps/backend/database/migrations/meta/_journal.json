@@ -71,6 +71,20 @@
       "when": 1788843481886,
       "tag": "0009_foamy_bloodstorm",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788845497072,
+      "tag": "0010_daffy_prowler",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788845543587,
+      "tag": "0011_overconfident_whiplash",
+      "breakpoints": true
     }
   ]
 }

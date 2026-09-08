@@ -5,6 +5,7 @@ dist
 build
 .next
 uploads
+apps/backend/data
 *.log
 .expo
 android/build

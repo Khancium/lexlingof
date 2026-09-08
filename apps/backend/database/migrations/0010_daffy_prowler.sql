@@ -1,0 +1,1 @@
+ALTER TABLE "pending_submissions" ADD COLUMN "audio_file_path" text;

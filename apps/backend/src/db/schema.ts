@@ -3,7 +3,6 @@ import {
   bigint,
   boolean,
   check,
-  customType,
   date,
   index,
   integer,
@@ -19,13 +18,6 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-
-/** Raw binary storage for buffered audio (see pendingSubmissions below). */
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({
-  dataType() {
-    return "bytea";
-  },
-});
 
 /* -------------------------------------------------------------------------- */
 /*                                    Enums                                   */
@@ -460,14 +452,17 @@ export const audioFiles = pgTable(
 export const submissionStatus = pgEnum("submission_status", ["pending", "processing", "done", "failed"]);
 
 /**
- * A durable client-facing buffer: the contribute pages hand off audio bytes
- * and form fields here in a single fast request and get an immediate ack,
- * instead of waiting on the R2 upload plus the module's full DB transaction.
- * A background worker (submission-buffer.service.ts) drains this table --
- * uploading audioData to R2, then running the same submit logic the old
- * synchronous routes used -- and records the resulting contribution here.
- * Using a real table (not an in-memory queue) means a buffered submission
- * survives a Railway redeploy/restart instead of being silently dropped.
+ * A client-facing staging area: the contribute pages hand off audio + form
+ * fields in a single fast request and get an immediate ack, instead of
+ * waiting on the R2 upload plus the module's full DB transaction. The audio
+ * itself is written to local disk (see LOCAL_STAGING_DIR in
+ * submission-buffer.service.ts), not this table -- only its path is kept
+ * here. A background worker drains this table: reads the staged file,
+ * uploads it to R2, runs the same submit logic the old synchronous routes
+ * used, then deletes the local file. NOTE: local disk on Railway is wiped on
+ * every redeploy/restart, so a row still pending when that happens loses its
+ * audio file (its own row survives and gets marked "failed" once the worker
+ * notices the file is gone -- only the recording itself is unrecoverable).
  */
 export const pendingSubmissions = pgTable(
   "pending_submissions",
@@ -479,8 +474,8 @@ export const pendingSubmissions = pgTable(
     moduleType: contributionModule("module_type").notNull(),
     /** Module-specific fields the eventual submit call needs (everything but the audio itself). */
     payload: jsonb("payload").notNull(),
-    /** Raw audio bytes, cleared once successfully uploaded to R2 (kept null for text-only translations). */
-    audioData: bytea("audio_data"),
+    /** Absolute path to the staged file on local disk, cleared once successfully uploaded to R2. */
+    audioFilePath: text("audio_file_path"),
     audioMimeType: text("audio_mime_type"),
     audioFilename: text("audio_filename"),
     audioDurationMs: integer("audio_duration_ms"),
