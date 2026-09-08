@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { api, getErrorMessage, type Language } from "@/lib/api";
+import { useRef, useState } from "react";
+import { api, getErrorMessage } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 
 const RECORDING_TYPES = ["conversation", "story", "interview", "speech", "song", "other"] as const;
@@ -49,8 +49,7 @@ function getAudioFileDurationMs(file: File): Promise<number> {
 }
 
 export default function AudioUploadPage() {
-  const { languageId: defaultLanguageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
-  const [languages, setLanguages] = useState<Language[]>([]);
+  const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isDragging, setIsDragging] = useState(false);
@@ -58,7 +57,6 @@ export default function AudioUploadPage() {
 
   const [title, setTitle] = useState("");
   const [recordingType, setRecordingType] = useState<(typeof RECORDING_TYPES)[number]>("conversation");
-  const [languageId, setLanguageId] = useState<string | null>(null);
   const [description, setDescription] = useState("");
   const [location, setLocation] = useState("");
   const [recordedAt, setRecordedAt] = useState("");
@@ -73,14 +71,6 @@ export default function AudioUploadPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-
-  useEffect(() => {
-    api.languages.getAll().then(setLanguages);
-  }, []);
-
-  useEffect(() => {
-    if (defaultLanguageId && languageId === null) setLanguageId(defaultLanguageId);
-  }, [defaultLanguageId, languageId]);
 
   function handleFileSelected(selected: File | undefined | null) {
     if (!selected) return;
@@ -224,21 +214,6 @@ export default function AudioUploadPage() {
         ))}
       </select>
 
-      <select
-        value={languageId ?? ""}
-        onChange={(e) => setLanguageId(e.target.value)}
-        className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
-      >
-        <option value="" disabled>
-          Select a language
-        </option>
-        {languages.map((l) => (
-          <option key={l.id} value={l.id}>
-            {l.nameEnglish}
-          </option>
-        ))}
-      </select>
-
       <textarea
         value={description}
         onChange={(e) => setDescription(e.target.value)}
@@ -349,7 +324,7 @@ export default function AudioUploadPage() {
         )}
       </div>
 
-      {!defaultLanguageId && !languageLoading && !languageId ? (
+      {!languageId && !languageLoading ? (
         <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
       ) : null}
       {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
