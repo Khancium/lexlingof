@@ -28,14 +28,12 @@ export default function ScenePage() {
   const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const loadScene = useCallback(async (excludeId?: string) => {
     setLoadingScene(true);
     setSceneError(null);
     setRecording(null);
     setLastSubmittedRecording(null);
-    setSuccessMessage(null);
     try {
       setScene(await api.scenes.getRandom(excludeId));
     } catch (err) {
@@ -68,7 +66,6 @@ export default function ScenePage() {
         recording.file,
       );
 
-      setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setLastSubmittedRecording(recording);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit scene description"));
@@ -124,7 +121,6 @@ export default function ScenePage() {
         <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
       ) : null}
       {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-      {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
       <button
         onClick={handleSubmit}

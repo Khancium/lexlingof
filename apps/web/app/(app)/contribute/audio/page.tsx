@@ -73,7 +73,6 @@ export default function AudioUploadPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [doneMessage, setDoneMessage] = useState<string | null>(null);
 
   useEffect(() => {
     api.languages.getAll().then(setLanguages);
@@ -112,7 +111,6 @@ export default function AudioUploadPage() {
     if (!file || !languageId) return;
     setIsSubmitting(true);
     setSubmitError(null);
-    setDoneMessage(null);
     try {
       const durationMs = await getAudioFileDurationMs(file);
       const validSegments = segments.filter((s) => s.startMs !== "" && s.endMs !== "");
@@ -153,7 +151,6 @@ export default function AudioUploadPage() {
         file,
       );
 
-      setDoneMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setFile(null);
       setTitle("");
       setDescription("");
@@ -356,7 +353,6 @@ export default function AudioUploadPage() {
         <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
       ) : null}
       {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-      {doneMessage ? <p className="text-center text-emerald-600">{doneMessage}</p> : null}
 
       <button
         onClick={handleSubmit}

@@ -33,7 +33,6 @@ export default function TranslatePage() {
   const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const sentence = historyIndex >= 0 ? history[historyIndex] : null;
   const draft = sentence ? (drafts[sentence.id] ?? emptyDraft) : emptyDraft;
@@ -47,7 +46,6 @@ export default function TranslatePage() {
     async (forLanguageId: string) => {
       setLoadingSentence(true);
       setSentenceError(null);
-      setSuccessMessage(null);
       setDetailsOpen(false);
       try {
         const next = await api.contributions.getRandomSentence(forLanguageId);
@@ -71,14 +69,12 @@ export default function TranslatePage() {
 
   function goPrevious() {
     if (historyIndex <= 0) return;
-    setSuccessMessage(null);
     setSubmitError(null);
     setDetailsOpen(false);
     setHistoryIndex((i) => i - 1);
   }
 
   function goNext() {
-    setSuccessMessage(null);
     setSubmitError(null);
     if (historyIndex < history.length - 1) {
       setDetailsOpen(false);
@@ -109,7 +105,6 @@ export default function TranslatePage() {
         draft.recording.file,
       );
 
-      setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setLastSubmittedRecording(draft.recording);
       setDrafts((prev) => {
         const next = { ...prev };
@@ -201,7 +196,6 @@ export default function TranslatePage() {
             <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
           ) : null}
           {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-          {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
           <div className="flex gap-3">
             <button

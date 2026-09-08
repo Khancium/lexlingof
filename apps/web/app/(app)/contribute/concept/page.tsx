@@ -48,7 +48,6 @@ export default function ConceptPage() {
   const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     api.categories.getAll().then((all) => {
@@ -77,7 +76,6 @@ export default function ConceptPage() {
     setLastSubmittedRecording(null);
     setSynonymIndex(1);
     setDetailsOpen(false);
-    setSuccessMessage(null);
     setSubmitError(null);
     try {
       const [detail, recorded] = await Promise.all([
@@ -104,14 +102,12 @@ export default function ConceptPage() {
     setIpa("");
     setDetailsOpen(false);
     setSubmitError(null);
-    setSuccessMessage(null);
   }
 
   async function handleSubmit() {
     if (!concept || !languageId || !recording) return;
     setIsSubmitting(true);
     setSubmitError(null);
-    setSuccessMessage(null);
     try {
       // A single request hands the audio + fields to the backend's buffer,
       // which acks immediately and finishes the R2 upload + DB write in the
@@ -132,7 +128,6 @@ export default function ConceptPage() {
         recording.file,
       );
 
-      setSuccessMessage("Submitted! Processing in the background -- points will show up on My Contributions shortly.");
       setLastSubmittedRecording(recording);
       setRecordedSynonyms((prev) => (prev ? { ...prev, [synonymIndex]: true } : prev));
     } catch (err) {
@@ -300,7 +295,6 @@ export default function ConceptPage() {
                 <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
               ) : null}
               {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-              {successMessage ? <p className="text-center text-emerald-600">{successMessage}</p> : null}
 
               <button
                 onClick={handleSubmit}
