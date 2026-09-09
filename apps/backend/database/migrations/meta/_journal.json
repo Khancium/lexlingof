@@ -127,6 +127,20 @@
       "when": 1788941496908,
       "tag": "0017_whole_penance",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788958712602,
+      "tag": "0018_pending_submissions_buffer_in_db",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788958836336,
+      "tag": "0019_translations_user_id_override",
+      "breakpoints": true
     }
   ]
 }

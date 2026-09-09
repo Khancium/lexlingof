@@ -355,7 +355,7 @@ export default function OnboardingPage() {
 
           <div>
             <label className={labelClass}>Dialect (optional)</label>
-            <input {...register("dialect")} className={inputClass} placeholder="Dialect" />
+            <input {...register("dialect")} className={inputClass} placeholder="Dialect" autoComplete="off" />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -372,7 +372,7 @@ export default function OnboardingPage() {
             </div>
             <div>
               <label className={labelClass}>Profession (optional)</label>
-              <input {...register("profession")} className={inputClass} placeholder="Profession" />
+              <input {...register("profession")} className={inputClass} placeholder="Profession" autoComplete="off" />
             </div>
           </div>
 

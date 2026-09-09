@@ -297,6 +297,7 @@ export default function ProfilePage() {
                     value={subTribeInput}
                     onChange={(e) => setSubTribeInput(e.target.value)}
                     placeholder="Sub-tribe (comma-separated for nested, e.g. Yousafzai, Akozai)"
+                    autoComplete="off"
                     className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                   />
                 ) : null}
@@ -305,6 +306,7 @@ export default function ProfilePage() {
                     value={quarterInput}
                     onChange={(e) => setQuarterInput(e.target.value)}
                     placeholder="Quarter"
+                    autoComplete="off"
                     className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                   />
                 ) : null}
@@ -313,6 +315,7 @@ export default function ProfilePage() {
                     value={dialectInput}
                     onChange={(e) => setDialectInput(e.target.value)}
                     placeholder="Dialect"
+                    autoComplete="off"
                     className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                   />
                 ) : null}
@@ -335,6 +338,7 @@ export default function ProfilePage() {
                     value={professionInput}
                     onChange={(e) => setProfessionInput(e.target.value)}
                     placeholder="Profession"
+                    autoComplete="off"
                     className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                   />
                 ) : null}

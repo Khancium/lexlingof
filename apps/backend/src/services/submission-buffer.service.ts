@@ -1,7 +1,3 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
-
 import { asc, db, eq, inArray, sql } from "../db/index.js";
 import { contributions, pendingSubmissions, pointsTransactions } from "../db/schema.js";
 import { storeAudioBuffer } from "./audio-file.service.js";
@@ -35,23 +31,19 @@ const MAX_ATTEMPTS = 3;
 const BATCH_SIZE = 5;
 const POLL_INTERVAL_MS = 3000;
 
-// Local disk staging for buffered audio. NOTE: this directory does not
-// survive a Railway redeploy/restart (ephemeral container filesystem) -- a
-// row still "pending" when that happens will fail permanently once the
-// worker notices its file is gone, since there's nothing left to upload.
-// The row itself (in Postgres) does survive, so the failure is visible in
-// My Contributions rather than silently vanishing.
-const LOCAL_STAGING_DIR = process.env.PENDING_SUBMISSIONS_DIR ?? path.join(process.cwd(), "data", "pending-submissions");
-
 let isProcessing = false;
 
 /**
- * Stages a submission's audio to local disk and enqueues its metadata,
- * returning immediately -- the caller doesn't wait on the R2 upload or the
- * module's DB transaction. audio is omitted for the rare no-audio case (a
- * translation with no recording is no longer possible since audio became
- * required there, but the type stays permissive for future modules that
- * might not need it).
+ * Buffers a submission's audio directly in the pending_submissions row (as
+ * bytea, not on local disk -- a local-disk staging path was tried first, but
+ * Railway's container filesystem is wiped on every redeploy, which failed
+ * real in-flight submissions during active development. The DB row is
+ * durable across redeploys, so this is what makes the buffer actually
+ * survive one) and enqueues it, returning immediately -- the caller doesn't
+ * wait on the R2 upload or the module's DB transaction. audio is omitted for
+ * the rare no-audio case (a translation with no recording is no longer
+ * possible since audio became required there, but the type stays permissive
+ * for future modules that might not need it).
  */
 export async function enqueueSubmission(params: {
   userId: string;
@@ -59,21 +51,13 @@ export async function enqueueSubmission(params: {
   payload: WordPayload | TranslationPayload | AudioUploadPayload | ScenePayload;
   audio?: { buffer: Buffer; mimeType: string; filename: string; durationMs: number } | null;
 }): Promise<{ id: string }> {
-  let audioFilePath: string | null = null;
-  if (params.audio) {
-    await mkdir(LOCAL_STAGING_DIR, { recursive: true });
-    const ext = params.audio.filename.includes(".") ? params.audio.filename.split(".").pop() : "bin";
-    audioFilePath = path.join(LOCAL_STAGING_DIR, `${randomUUID()}.${ext}`);
-    await writeFile(audioFilePath, params.audio.buffer);
-  }
-
   const [row] = await db
     .insert(pendingSubmissions)
     .values({
       userId: params.userId,
       moduleType: params.moduleType,
       payload: params.payload,
-      audioFilePath,
+      audioBuffer: params.audio?.buffer ?? null,
       audioMimeType: params.audio?.mimeType ?? null,
       audioFilename: params.audio?.filename ?? null,
       audioDurationMs: params.audio?.durationMs != null ? Math.round(params.audio.durationMs) : null,
@@ -100,10 +84,6 @@ export function kickProcessor(): void {
 
 /** Called once at server boot: recovers rows stuck "processing" from a crash/restart, and starts the poll loop. */
 export function startSubmissionBufferWorker(): void {
-  mkdir(LOCAL_STAGING_DIR, { recursive: true }).catch((err) =>
-    console.error("[submission-buffer] failed to create staging dir", err),
-  );
-
   db.update(pendingSubmissions)
     .set({ status: "pending", updatedAt: new Date() })
     .where(eq(pendingSubmissions.status, "processing"))
@@ -268,27 +248,21 @@ async function findContributionForBuffer(
 
 /**
  * Idempotent: returns the already-resolved audioFileId on a retry instead of
- * re-uploading (which would orphan the previous R2 object). Throws
- * permanently (no point retrying) if the staged file is gone -- the only way
- * that happens is the local disk having been wiped by a redeploy/restart.
+ * re-uploading (which would orphan the previous R2 object). The audio bytes
+ * live in this same row (audioBuffer), so unlike the earlier local-disk
+ * design there's nothing external that can go missing between the submit
+ * call and this running -- a redeploy in that window just means the worker
+ * picks the row back up (via the "processing" -> "pending" reset at startup)
+ * and finishes it from the same buffered bytes.
  */
 async function resolveAudioFileId(row: PendingRow): Promise<string | null> {
   if (row.resolvedAudioFileId) return row.resolvedAudioFileId;
-  if (!row.audioFilePath || !row.audioMimeType || !row.audioFilename) return null;
-
-  let buffer: Buffer;
-  try {
-    buffer = await readFile(row.audioFilePath);
-  } catch {
-    throw new PermanentFailure(
-      "Staged audio file is missing (the backend likely redeployed/restarted before this was processed) -- please record and submit again",
-    );
-  }
+  if (!row.audioBuffer || !row.audioMimeType || !row.audioFilename) return null;
 
   const { audioFileId } = await storeAudioBuffer({
     userId: row.userId,
     module: row.moduleType,
-    buffer,
+    buffer: row.audioBuffer,
     filename: row.audioFilename,
     mimeType: row.audioMimeType,
     durationMs: row.audioDurationMs ?? 0,
@@ -296,10 +270,8 @@ async function resolveAudioFileId(row: PendingRow): Promise<string | null> {
 
   await db
     .update(pendingSubmissions)
-    .set({ resolvedAudioFileId: audioFileId, audioFilePath: null, updatedAt: new Date() })
+    .set({ resolvedAudioFileId: audioFileId, audioBuffer: null, updatedAt: new Date() })
     .where(eq(pendingSubmissions.id, row.id));
-
-  await unlink(row.audioFilePath).catch(() => {});
 
   return audioFileId;
 }

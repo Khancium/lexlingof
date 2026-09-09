@@ -146,9 +146,10 @@ export default function TranslatePage() {
         delete next[sentence.id];
         return next;
       });
-      // Drop the submitted sentence from history and load a fresh one.
-      setHistory((prev) => prev.filter((s) => s.id !== sentence.id));
-      setHistoryIndex((i) => i - 1);
+      // Keep the submitted sentence in history (rather than dropping it) so
+      // Previous can navigate back to it -- the backend now overrides an
+      // existing translation for the same sentence instead of creating a
+      // duplicate, so recording again there replaces this submission.
       fetchNewSentence(languageId);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit translation"));

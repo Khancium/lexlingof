@@ -116,6 +116,7 @@ export default function ContributionsPage() {
     audioRef.current?.pause();
     setPlayingId(null);
     setLoadedId(null);
+    setCurrentTime(0);
   }
 
   async function togglePlay(item: ContributionListItem) {
@@ -164,6 +165,16 @@ export default function ContributionsPage() {
     } finally {
       setLoadingId(null);
     }
+  }
+
+  function stopPlayback(item: ContributionListItem) {
+    const audioEl = audioRef.current;
+    if (!audioEl || loadedId !== item.id) return;
+    audioEl.pause();
+    audioEl.currentTime = 0;
+    setPlayingId(null);
+    setLoadedId(null);
+    setCurrentTime(0);
   }
 
   function seek(e: React.MouseEvent<HTMLDivElement>) {
@@ -257,23 +268,33 @@ export default function ContributionsPage() {
                   {playError?.id === item.id ? <p className="mt-1 text-xs text-red-600">{playError.message}</p> : null}
                 </div>
 
-                <div className="flex flex-shrink-0 items-center gap-4">
+                <div className="flex flex-shrink-0 items-center gap-2">
                   {item.detail?.audioFileId ? (
-                    <button
-                      onClick={() => togglePlay(item)}
-                      disabled={loadingId === item.id}
-                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
-                    >
-                      {loadingId === item.id ? "Loading..." : playingId === item.id ? "⏸ Pause" : "▶ Play"}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => togglePlay(item)}
+                        disabled={loadingId === item.id}
+                        className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                      >
+                        {loadingId === item.id ? "Loading..." : playingId === item.id ? "⏸ Pause" : "▶ Play"}
+                      </button>
+                      {loadedId === item.id ? (
+                        <button
+                          onClick={() => stopPlayback(item)}
+                          className="btn-duo btn-duo-secondary bg-surface-card px-3 py-2 text-sm font-semibold text-ink hover:bg-border"
+                        >
+                          ■ Stop
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
-                  <span className="text-sm font-semibold text-emerald-600">
+                  <span className="ml-2 text-sm font-semibold text-emerald-600">
                     {item.totalPoints != null ? `+${item.totalPoints}` : "--"}
                   </span>
                 </div>
               </div>
 
-              {playingId === item.id ? (
+              {loadedId === item.id ? (
                 <div className="flex items-center gap-2 pl-[72px]">
                   <span className="w-9 flex-shrink-0 text-xs tabular-nums text-ink-muted">{formatTime(currentTime)}</span>
                   <div onClick={seek} className="h-1.5 flex-1 cursor-pointer rounded-full bg-surface-card">

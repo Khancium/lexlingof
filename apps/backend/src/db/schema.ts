@@ -3,6 +3,7 @@ import {
   bigint,
   boolean,
   check,
+  customType,
   date,
   index,
   integer,
@@ -18,6 +19,13 @@ import {
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+
+/** Raw binary storage -- used for durably buffering audio bytes in the DB row itself (see pendingSubmissions.audioBuffer) instead of on local disk, which doesn't survive a container redeploy. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 /* -------------------------------------------------------------------------- */
 /*                                    Enums                                   */
@@ -518,8 +526,13 @@ export const pendingSubmissions = pgTable(
     moduleType: contributionModule("module_type").notNull(),
     /** Module-specific fields the eventual submit call needs (everything but the audio itself). */
     payload: jsonb("payload").notNull(),
-    /** Absolute path to the staged file on local disk, cleared once successfully uploaded to R2. */
-    audioFilePath: text("audio_file_path"),
+    /**
+     * Raw audio bytes, buffered directly in the row (not on local disk --
+     * a Railway container redeploy wipes local disk but not the DB, so this
+     * is what makes a pending submission survive one). Cleared once
+     * successfully uploaded to R2.
+     */
+    audioBuffer: bytea("audio_buffer"),
     audioMimeType: text("audio_mime_type"),
     audioFilename: text("audio_filename"),
     audioDurationMs: integer("audio_duration_ms"),
@@ -695,6 +708,16 @@ export const translations = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     contributionId: uuid("contribution_id").references((): AnyPgColumn => contributions.id),
+    /**
+     * Denormalized from contributions.userId so "does this user already have
+     * a live translation for this sentence" is a plain lookup on this table
+     * instead of a join -- mirrors wordRecordings.userId, and is what makes
+     * re-recording a translation override the existing one in place instead
+     * of creating a duplicate contribution.
+     */
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
     sentenceId: uuid("sentence_id")
       .notNull()
       .references(() => sentences.id),
@@ -711,7 +734,11 @@ export const translations = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("ix_translations_contribution").on(t.contributionId)],
+  (t) => [
+    index("ix_translations_contribution").on(t.contributionId),
+    /** At most one live translation per user+sentence -- re-recording overrides it instead of adding another. */
+    uniqueIndex("uq_translations_user_sentence").on(t.userId, t.sentenceId).where(sql`${t.deletedAt} is null`),
+  ],
 );
 
 /* -------------------------------------------------------------------------- */

@@ -2,6 +2,7 @@ import { and, eq, ilike, inArray, isNull, not, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
 import {
+  audioFiles,
   categories,
   contributions,
   gamificationConfig,
@@ -11,6 +12,7 @@ import {
   userStats,
 } from "../../../db/schema.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
+import { storageService } from "../../../services/storage.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
@@ -126,6 +128,21 @@ export async function getRandomSentence(userId: string, languageId: string) {
 }
 
 export async function submitTranslation(userId: string, sentenceId: string, data: SubmitTranslationInput) {
+  // There is no take limit -- re-recording a translation for the same
+  // sentence overrides whatever's already there (in the DB and in R2)
+  // instead of creating a second contribution. uq_translations_user_sentence
+  // is what guarantees at most one live row per user+sentence, mirroring
+  // word_recordings' per-synonym override.
+  const [existing] = await db
+    .select({ id: translations.id, audioFileId: translations.audioFileId, contributionId: translations.contributionId })
+    .from(translations)
+    .where(and(eq(translations.userId, userId), eq(translations.sentenceId, sentenceId), isNull(translations.deletedAt)))
+    .limit(1);
+
+  if (existing && existing.contributionId) {
+    return overrideTranslation(userId, existing as { id: string; audioFileId: string | null; contributionId: string }, data);
+  }
+
   const [levelRow] = await db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1);
   const previousLevel = levelRow?.level ?? "BRONZE";
 
@@ -134,6 +151,7 @@ export async function submitTranslation(userId: string, sentenceId: string, data
     const [translation] = await tx
       .insert(translations)
       .values({
+        userId,
         sentenceId,
         audioFileId: data.audioFileId,
         nativeText: data.nativeText?.trim() || null,
@@ -239,4 +257,79 @@ export async function submitTranslation(userId: string, sentenceId: string, data
   }
 
   return { contributionId: result.contributionId, translationId: result.translationId, pointsAwarded: result.pointsAwarded };
+}
+
+/**
+ * Re-recording a translation that already has a live row for this
+ * user+sentence: replaces its audio (in R2 and in the row) and puts the
+ * contribution back to "pending" for re-review, but does NOT award points
+ * again -- those were already credited the first time this sentence was
+ * translated, and re-crediting on every retake would make "no take limit" a
+ * free-points exploit. Mirrors word.service.ts's overrideWordRecording.
+ */
+async function overrideTranslation(
+  userId: string,
+  existing: { id: string; audioFileId: string | null; contributionId: string },
+  data: SubmitTranslationInput,
+) {
+  const [levelRow] = await db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1);
+  const userLevel = levelRow?.level ?? null;
+
+  // Idempotent short-circuit: a buffer-worker retry after a crash resolves
+  // to the SAME audioFileId (resolveAudioFileId persists it), so if it's
+  // already applied there's nothing left to do -- re-running the override
+  // below would delete the audio file it just finished setting.
+  if (existing.audioFileId === data.audioFileId) {
+    return { contributionId: existing.contributionId, translationId: existing.id, pointsAwarded: 0, newLevel: userLevel };
+  }
+
+  const oldAudioFileId = existing.audioFileId;
+  const [oldAudio] = oldAudioFileId
+    ? await db.select({ storageKey: audioFiles.storageKey }).from(audioFiles).where(eq(audioFiles.id, oldAudioFileId)).limit(1)
+    : [null];
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(translations)
+      .set({
+        audioFileId: data.audioFileId,
+        nativeText: data.nativeText?.trim() || null,
+        romanization: data.romanization ?? null,
+        ipa: data.ipa ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(translations.id, existing.id));
+
+    await tx
+      .update(contributions)
+      .set({
+        status: "pending",
+        verifiedAt: null,
+        verifiedBy: null,
+        rejectedAt: null,
+        rejectedBy: null,
+        rejectionReason: null,
+        version: sql`${contributions.version} + 1`,
+        updatedAt: new Date(),
+      })
+      .where(eq(contributions.id, existing.contributionId));
+
+    if (oldAudio && oldAudioFileId) {
+      // Not a hard delete: a buffer row's resolvedAudioFileId from the
+      // original submission may still reference this row, so deleting it
+      // here would fail the whole override on an FK violation. Quarantining
+      // leaves the row (and that reference) intact while making clear the
+      // file itself is gone.
+      await tx
+        .update(audioFiles)
+        .set({ processingStatus: "quarantined", processingError: "Superseded by a newer recording for this translation" })
+        .where(eq(audioFiles.id, oldAudioFileId));
+    }
+  });
+
+  if (oldAudio) {
+    await storageService.deleteAudioFile(oldAudio.storageKey);
+  }
+
+  return { contributionId: existing.contributionId, translationId: existing.id, pointsAwarded: 0, newLevel: userLevel };
 }
