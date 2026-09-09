@@ -776,7 +776,13 @@ export const sceneContributions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("ix_scene_contributions_contribution").on(t.contributionId)],
+  (t) => [
+    index("ix_scene_contributions_contribution").on(t.contributionId),
+    // Without this, the scenes list's per-row hasContributed EXISTS subquery
+    // (scene.service.ts) sequentially scans this whole table once per scene
+    // on every page load instead of doing an index lookup.
+    index("ix_scene_contributions_scene").on(t.sceneId),
+  ],
 );
 
 /* -------------------------------------------------------------------------- */
@@ -853,6 +859,13 @@ export const contributions = pgTable(
     index("ix_contributions_pending_queue")
       .on(t.status, t.submittedAt)
       .where(sql`${t.status} = 'pending'`),
+    // The admin contributions list always orders by submittedAt regardless
+    // of status filter (verified/rejected/all pages don't match the partial
+    // index above) and can also filter by language/dialect -- without these,
+    // those pages sort/filter via a full-table scan.
+    index("ix_contributions_submitted_at").on(t.submittedAt),
+    index("ix_contributions_language").on(t.languageId),
+    index("ix_contributions_dialect").on(t.dialectId),
     uniqueIndex("uq_contributions_source_buffer_id").on(t.sourceBufferId),
     /** Exactly one module payload per contribution. */
     check(
