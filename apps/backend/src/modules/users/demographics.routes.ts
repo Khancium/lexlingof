@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -37,28 +37,45 @@ async function getOrCreateTribe(name: string): Promise<string> {
   return row.id;
 }
 
-async function getOrCreateSubTribe(tribeId: string, name: string): Promise<string> {
+/**
+ * `parentSubTribeId` null means a top-level sub-tribe directly under the
+ * tribe; a chain (sub-tribe of a sub-tribe, to any depth) is built by
+ * calling this once per level, feeding each level's resolved id in as the
+ * next level's parentSubTribeId -- see resolveSubTribeChain below.
+ */
+async function getOrCreateSubTribe(tribeId: string, parentSubTribeId: string | null, name: string): Promise<string> {
+  const parentCondition = parentSubTribeId ? eq(subTribes.parentSubTribeId, parentSubTribeId) : isNull(subTribes.parentSubTribeId);
+
   const [existing] = await db
     .select({ id: subTribes.id })
     .from(subTribes)
-    .where(and(eq(subTribes.tribeId, tribeId), eq(subTribes.name, name)))
+    .where(and(eq(subTribes.tribeId, tribeId), parentCondition, eq(subTribes.name, name)))
     .limit(1);
   if (existing) return existing.id;
 
   const [created] = await db
     .insert(subTribes)
-    .values({ tribeId, name })
-    .onConflictDoNothing({ target: [subTribes.tribeId, subTribes.name] })
+    .values({ tribeId, parentSubTribeId, name })
+    .onConflictDoNothing({ target: [subTribes.tribeId, subTribes.parentSubTribeId, subTribes.name] })
     .returning({ id: subTribes.id });
   if (created) return created.id;
 
   const [row] = await db
     .select({ id: subTribes.id })
     .from(subTribes)
-    .where(and(eq(subTribes.tribeId, tribeId), eq(subTribes.name, name)))
+    .where(and(eq(subTribes.tribeId, tribeId), parentCondition, eq(subTribes.name, name)))
     .limit(1);
   if (!row) throw new HttpError(500, "SUB_TRIBE_LOOKUP_FAILED", "Failed to resolve sub-tribe");
   return row.id;
+}
+
+/** Resolves an ordered root-to-leaf chain of sub-tribe names, creating each level as needed, and returns the leaf's id. */
+async function resolveSubTribeChain(tribeId: string, chain: string[]): Promise<string | null> {
+  let parentId: string | null = null;
+  for (const name of chain) {
+    parentId = await getOrCreateSubTribe(tribeId, parentId, name);
+  }
+  return parentId;
 }
 
 async function getOrCreateVillage(country: string, city: string, name: string): Promise<string> {
@@ -168,6 +185,7 @@ const villagesQuerySchema = z.object({
 });
 
 const tribeIdParamSchema = z.object({ tribeId: z.string().uuid() });
+const subTribeIdParamSchema = z.object({ subTribeId: z.string().uuid() });
 const villageIdParamSchema = z.object({ villageId: z.string().uuid() });
 
 const submitDemographicsSchema = z.object({
@@ -180,7 +198,9 @@ const submitDemographicsSchema = z.object({
   gender: z.enum(GENDER_OPTIONS),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES),
   tribe: z.string().trim().min(1),
-  subTribe: z.string().trim().min(1).optional(),
+  // Ordered root-to-leaf chain -- e.g. ["Yousafzai", "Akozai"] means Akozai
+  // is a sub-tribe of Yousafzai. Empty/omitted means no sub-tribe at all.
+  subTribes: z.array(z.string().trim().min(1)).optional(),
   country: z.string().trim().min(1),
   city: z.string().trim().min(1),
   village: z.string().trim().min(1),
@@ -202,12 +222,25 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
     return { items: rows };
   });
 
+  // Top-level sub-tribes only (parentSubTribeId is null) -- deeper levels of
+  // the chain are fetched one at a time via the route below as each level
+  // is picked, since a sub-tribe's children aren't known until it's chosen.
   fastify.get("/tribes/:tribeId/sub-tribes", async (request) => {
     const { tribeId } = tribeIdParamSchema.parse(request.params);
     const rows = await db
       .select({ id: subTribes.id, name: subTribes.name })
       .from(subTribes)
-      .where(eq(subTribes.tribeId, tribeId))
+      .where(and(eq(subTribes.tribeId, tribeId), isNull(subTribes.parentSubTribeId)))
+      .orderBy(asc(subTribes.name));
+    return { items: rows };
+  });
+
+  fastify.get("/sub-tribes/:subTribeId/sub-tribes", async (request) => {
+    const { subTribeId } = subTribeIdParamSchema.parse(request.params);
+    const rows = await db
+      .select({ id: subTribes.id, name: subTribes.name })
+      .from(subTribes)
+      .where(eq(subTribes.parentSubTribeId, subTribeId))
       .orderBy(asc(subTribes.name));
     return { items: rows };
   });
@@ -275,7 +308,7 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       getOrCreateLanguageByName(body.motherTongue),
     ]);
     const [subTribeId, quarterId] = await Promise.all([
-      body.subTribe ? getOrCreateSubTribe(tribeId, body.subTribe) : Promise.resolve(null),
+      body.subTribes && body.subTribes.length > 0 ? resolveSubTribeChain(tribeId, body.subTribes) : Promise.resolve(null),
       body.quarter ? getOrCreateQuarter(villageId, body.quarter) : Promise.resolve(null),
     ]);
 

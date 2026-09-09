@@ -35,6 +35,16 @@ export const MOTHER_TONGUE_LANGUAGES = [
   "Chiliso",
   "Shina",
   "Pahari-Potohari",
+  "Pashayi",
+  "Persian",
+  "Dari",
+  "Tajiki",
+  "Balochi",
+  "Brahui",
+  "Nooristani",
+  "Sindhi",
+  "Parachi",
+  "Uzbek",
 ] as const;
 
 export const GENDER_OPTIONS = ["male", "female", "other", "prefer_not_to_say"] as const;

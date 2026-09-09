@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { canReview } from "@/lib/level";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -22,6 +23,7 @@ export default function Nav() {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [confirmingLogout, setConfirmingLogout] = useState(false);
 
   // Collapse the mobile dropdown whenever the route changes, so it doesn't
   // stay open over the newly-navigated-to page.
@@ -29,8 +31,8 @@ export default function Nav() {
     setMobileOpen(false);
   }, [pathname]);
 
-  async function handleLogout() {
-    if (!confirm("Sign out of Lexlingo?")) return;
+  async function confirmLogout() {
+    setConfirmingLogout(false);
     await logout();
     router.push("/login");
   }
@@ -73,7 +75,7 @@ export default function Nav() {
         <div className="hidden items-center gap-3 md:flex">
           <span className="text-sm text-ink-muted">{user?.displayName}</span>
           <button
-            onClick={handleLogout}
+            onClick={() => setConfirmingLogout(true)}
             className="rounded-full bg-surface-card px-3 py-2 text-sm font-medium text-ink hover:bg-border"
           >
             Sign Out
@@ -106,7 +108,7 @@ export default function Nav() {
           <div className="mt-2 flex items-center justify-between border-t border-border pt-3">
             <span className="text-sm text-ink-muted">{user?.displayName}</span>
             <button
-              onClick={handleLogout}
+              onClick={() => setConfirmingLogout(true)}
               className="rounded-full bg-surface-card px-3 py-2 text-sm font-medium text-ink hover:bg-border"
             >
               Sign Out
@@ -114,6 +116,16 @@ export default function Nav() {
           </div>
         </div>
       ) : null}
+
+      <ConfirmDialog
+        open={confirmingLogout}
+        title="Sign out of Lexlingo?"
+        message="You'll need to sign back in to continue contributing."
+        confirmLabel="Sign Out"
+        danger
+        onConfirm={confirmLogout}
+        onCancel={() => setConfirmingLogout(false)}
+      />
     </nav>
   );
 }

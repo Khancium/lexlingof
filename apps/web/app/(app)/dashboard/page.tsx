@@ -36,7 +36,6 @@ export default function DashboardPage() {
 
   const level = stats?.level ?? user?.level ?? "BRONZE";
   const totalContributions = stats?.totalContributions ?? user?.totalContributions ?? 0;
-  const verified = stats?.verifiedContributions ?? user?.verifiedContributions ?? 0;
   const nextLevel = NEXT_LEVEL[level];
   const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
   const progressPct = nextThreshold ? Math.min(100, Math.round((totalContributions / nextThreshold) * 100)) : 100;
@@ -66,9 +65,8 @@ export default function DashboardPage() {
         ) : null}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-3 gap-4">
         <StatCard label="Total Contributions" value={stats?.totalContributions ?? 0} />
-        <StatCard label="Verified" value={verified} />
         <StatCard label="Points" value={stats?.totalPoints ?? user?.totalPoints ?? 0} emoji="⚡" />
         <StatCard label="Streak" value={streak} emoji="🔥" />
       </div>

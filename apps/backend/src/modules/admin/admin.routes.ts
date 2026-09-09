@@ -12,13 +12,19 @@ import {
   categories,
   concepts,
   conceptMedia,
+  contributionKeywords,
   contributionModule,
   contributions,
   contributionStatus,
+  contributorDemographics,
+  dialects,
+  educationLevelEnum,
   gamificationConfig,
+  genderEnum,
   languages,
   featureFlags,
   auditLogs,
+  quarters,
   scenes,
   sceneConcepts,
   sceneContributions,
@@ -26,11 +32,14 @@ import {
   sceneImageKeywords,
   sceneMedia,
   sentences,
+  subTribes,
   transcriptions,
   translations,
+  tribes,
   userRole,
   users,
   userStats,
+  villages,
   wordRecordings,
 } from "../../db/schema.js";
 import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
@@ -198,9 +207,27 @@ const contributionsQuerySchema = z.object({
   status: z.enum(contributionStatus.enumValues).optional(),
   module_type: z.enum(contributionModule.enumValues).optional(),
   language_id: z.string().uuid().optional(),
+  dialect_id: z.string().uuid().optional(),
+  user_id: z.string().uuid().optional(),
+  // Contributor display name or email -- distinct from a module's own text
+  // content, which isn't searched here.
+  search: z.string().min(1).optional(),
+  tribe_id: z.string().uuid().optional(),
+  sub_tribe_id: z.string().uuid().optional(),
+  country: z.string().min(1).optional(),
+  city: z.string().min(1).optional(),
+  village_id: z.string().uuid().optional(),
+  quarter_id: z.string().uuid().optional(),
+  gender: z.enum(genderEnum.enumValues).optional(),
+  education_level: z.enum(educationLevelEnum.enumValues).optional(),
+  profession: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+const updateRemarksSchema = z.object({ remarks: z.string().trim().max(2000) });
+const addContributionKeywordSchema = z.object({ keyword: z.string().trim().min(1).max(100) });
+const contributionKeywordParamSchema = z.object({ id: z.string().uuid(), keywordId: z.string().uuid() });
 
 const updateContributionStatusSchema = z.object({
   status: z.enum(contributionStatus.enumValues),
@@ -343,14 +370,31 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   /* ------------------------------ Contributions ------------------------------ */
 
   fastify.get("/admin/contributions", { preHandler: requirePermission("contributions.manage") }, async (request) => {
-    const { status, module_type, language_id, limit, offset } = contributionsQuerySchema.parse(request.query);
+    const q = contributionsQuerySchema.parse(request.query);
 
-    const conditions = [];
-    if (status) conditions.push(eq(contributions.status, status));
-    if (module_type) conditions.push(eq(contributions.moduleType, module_type));
-    if (language_id) conditions.push(eq(contributions.languageId, language_id));
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    const conditions = [isNull(contributions.deletedAt)];
+    if (q.status) conditions.push(eq(contributions.status, q.status));
+    if (q.module_type) conditions.push(eq(contributions.moduleType, q.module_type));
+    if (q.language_id) conditions.push(eq(contributions.languageId, q.language_id));
+    if (q.dialect_id) conditions.push(eq(contributions.dialectId, q.dialect_id));
+    if (q.user_id) conditions.push(eq(contributions.userId, q.user_id));
+    if (q.search) conditions.push(or(ilike(users.displayName, `%${q.search}%`), ilike(users.email, `%${q.search}%`))!);
+    if (q.tribe_id) conditions.push(eq(contributorDemographics.tribeId, q.tribe_id));
+    if (q.sub_tribe_id) conditions.push(eq(contributorDemographics.subTribeId, q.sub_tribe_id));
+    if (q.country) conditions.push(eq(contributorDemographics.country, q.country));
+    if (q.city) conditions.push(eq(contributorDemographics.city, q.city));
+    if (q.village_id) conditions.push(eq(contributorDemographics.villageId, q.village_id));
+    if (q.quarter_id) conditions.push(eq(contributorDemographics.quarterId, q.quarter_id));
+    if (q.gender) conditions.push(eq(contributorDemographics.gender, q.gender));
+    if (q.education_level) conditions.push(eq(contributorDemographics.educationLevel, q.education_level));
+    if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
+    const whereClause = and(...conditions);
 
+    // Demographics-based filters (and the search-by-contributor box) need
+    // the same joins present on both the page query and the count query, or
+    // a filtered page could report a total from an unfiltered count -- so
+    // the join chain is duplicated here rather than factored out (drizzle's
+    // builder types don't abstract cleanly across a varying select()).
     const [rows, [totalRow]] = await Promise.all([
       db
         .select({
@@ -358,18 +402,25 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           moduleType: contributions.moduleType,
           status: contributions.status,
           submittedAt: contributions.submittedAt,
+          remarks: contributions.remarks,
           contributorId: users.id,
           contributorDisplayName: users.displayName,
+          contributorEmail: users.email,
           wordNativeWord: wordRecordings.nativeWord,
           wordDurationMs: wordRecordings.durationMs,
+          wordAudioFileId: wordRecordings.audioFileId,
           audioTitle: audioUploads.title,
           audioNativeText: transcriptions.nativeText,
+          audioAudioFileId: audioUploads.audioFileId,
           translationNativeText: translations.nativeText,
           translationEnglishText: sentences.englishText,
+          translationAudioFileId: translations.audioFileId,
           sceneTitle: scenes.title,
+          sceneAudioFileId: sceneContributions.audioFileId,
         })
         .from(contributions)
         .innerJoin(users, eq(users.id, contributions.userId))
+        .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
         .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
         .leftJoin(audioUploads, eq(audioUploads.id, contributions.audioUploadId))
         .leftJoin(transcriptions, and(eq(transcriptions.audioUploadId, audioUploads.id), eq(transcriptions.isCurrent, true)))
@@ -379,25 +430,34 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         .leftJoin(scenes, eq(scenes.id, sceneContributions.sceneId))
         .where(whereClause)
         .orderBy(desc(contributions.submittedAt))
-        .limit(limit)
-        .offset(offset),
-      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(contributions).where(whereClause),
+        .limit(q.limit)
+        .offset(q.offset),
+      db
+        .select({ value: sql<number>`count(*)`.mapWith(Number) })
+        .from(contributions)
+        .innerJoin(users, eq(users.id, contributions.userId))
+        .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
+        .where(whereClause),
     ]);
 
     const items = rows.map((row) => {
       let detail: Record<string, unknown> = {};
       switch (row.moduleType) {
         case "WORD":
-          detail = { nativeWord: row.wordNativeWord, durationMs: row.wordDurationMs };
+          detail = { nativeWord: row.wordNativeWord, durationMs: row.wordDurationMs, audioFileId: row.wordAudioFileId };
           break;
         case "TRANSCRIPTION":
-          detail = { title: row.audioTitle, nativeText: row.audioNativeText };
+          detail = { title: row.audioTitle, nativeText: row.audioNativeText, audioFileId: row.audioAudioFileId };
           break;
         case "TRANSLATION":
-          detail = { nativeText: row.translationNativeText, englishText: row.translationEnglishText };
+          detail = {
+            nativeText: row.translationNativeText,
+            englishText: row.translationEnglishText,
+            audioFileId: row.translationAudioFileId,
+          };
           break;
         case "SCENE":
-          detail = { title: row.sceneTitle };
+          detail = { title: row.sceneTitle, audioFileId: row.sceneAudioFileId };
           break;
       }
       return {
@@ -405,13 +465,106 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         moduleType: row.moduleType,
         status: row.status,
         submittedAt: row.submittedAt,
-        contributor: { id: row.contributorId, displayName: row.contributorDisplayName },
+        remarks: row.remarks,
+        contributor: { id: row.contributorId, displayName: row.contributorDisplayName, email: row.contributorEmail },
         detail,
       };
     });
 
-    return { items, limit, offset, total: totalRow?.value ?? 0 };
+    return { items, limit: q.limit, offset: q.offset, total: totalRow?.value ?? 0 };
   });
+
+  fastify.put("/admin/contributions/:id/remarks", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { remarks } = updateRemarksSchema.parse(request.body);
+
+    const [existing] = await db.select({ id: contributions.id }).from(contributions).where(eq(contributions.id, id)).limit(1);
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Contribution not found");
+    }
+
+    await db.update(contributions).set({ remarks: remarks || null, updatedAt: new Date() }).where(eq(contributions.id, id));
+
+    return { id, remarks: remarks || null };
+  });
+
+  fastify.delete("/admin/contributions/:id", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [existing] = await db.select({ id: contributions.id }).from(contributions).where(eq(contributions.id, id)).limit(1);
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Contribution not found");
+    }
+
+    await db.update(contributions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(contributions.id, id));
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_contribution_delete",
+      resourceType: "contribution",
+      resourceId: id,
+    });
+
+    return { id, deleted: true };
+  });
+
+  /* --------------------------- Contribution keywords -------------------------- */
+  // ADMIN ONLY: free-text training-data labels for any of the four modules'
+  // contributions. Never exposed to contributors.
+
+  fastify.get("/admin/contributions/:id/keywords", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const items = await db
+      .select({ id: contributionKeywords.id, keyword: contributionKeywords.keyword })
+      .from(contributionKeywords)
+      .where(eq(contributionKeywords.contributionId, id))
+      .orderBy(asc(contributionKeywords.createdAt));
+
+    return { items };
+  });
+
+  fastify.post("/admin/contributions/:id/keywords", { preHandler: requirePermission("contributions.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const body = addContributionKeywordSchema.parse(request.body);
+
+    const [contribution] = await db.select({ id: contributions.id }).from(contributions).where(eq(contributions.id, id)).limit(1);
+    if (!contribution) {
+      throw new HttpError(404, "NOT_FOUND", "Contribution not found");
+    }
+
+    const [keyword] = await db
+      .insert(contributionKeywords)
+      .values({ contributionId: id, keyword: body.keyword })
+      .onConflictDoNothing({ target: [contributionKeywords.contributionId, contributionKeywords.keyword] })
+      .returning();
+
+    if (!keyword) {
+      throw new HttpError(409, "DUPLICATE_KEYWORD", "That keyword is already on this contribution");
+    }
+
+    reply.code(201).send(keyword);
+  });
+
+  fastify.delete(
+    "/admin/contributions/:id/keywords/:keywordId",
+    { preHandler: requirePermission("contributions.manage") },
+    async (request, reply) => {
+      const { id, keywordId } = contributionKeywordParamSchema.parse(request.params);
+
+      const deleted = await db
+        .delete(contributionKeywords)
+        .where(and(eq(contributionKeywords.id, keywordId), eq(contributionKeywords.contributionId, id)))
+        .returning({ id: contributionKeywords.id });
+
+      if (deleted.length === 0) {
+        throw new HttpError(404, "NOT_FOUND", "Keyword not found on this contribution");
+      }
+
+      reply.code(204).send();
+    },
+  );
 
   fastify.put("/admin/contributions/:id/status", { preHandler: requirePermission("contributions.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);

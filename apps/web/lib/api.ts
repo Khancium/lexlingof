@@ -222,7 +222,7 @@ export type SubmitDemographicsInput = {
   gender: GenderOption;
   motherTongue: string;
   tribe: string;
-  subTribe?: string;
+  subTribes?: string[];
   country: string;
   city: string;
   village: string;
@@ -581,7 +581,8 @@ export type AdminContributionListItem = {
   moduleType: ModuleType;
   status: ContributionStatusValue;
   submittedAt: string;
-  contributor: { id: string; displayName: string };
+  remarks: string | null;
+  contributor: { id: string; displayName: string; email: string };
   detail: Record<string, unknown>;
 };
 export type AdminContributionsResponse = {
@@ -595,9 +596,23 @@ export type AdminContributionsQuery = {
   status?: ContributionStatusValue;
   module_type?: ModuleType;
   language_id?: string;
+  dialect_id?: string;
+  user_id?: string;
+  search?: string;
+  tribe_id?: string;
+  sub_tribe_id?: string;
+  country?: string;
+  city?: string;
+  village_id?: string;
+  quarter_id?: string;
+  gender?: GenderOption;
+  education_level?: EducationLevel;
+  profession?: string;
   limit?: number;
   offset?: number;
 };
+
+export type ContributionKeyword = { id: string; keyword: string };
 
 export type UpdateContributionStatusInput = { status: ContributionStatusValue; reason?: string };
 
@@ -753,6 +768,7 @@ export const api = {
       form.append("file", file);
       return apiClient.post<UserProfile>("/api/v1/users/me/avatar", form).then((r) => r.data);
     },
+    deleteAccount: () => apiClient.delete<{ deleted: boolean }>("/api/v1/users/me").then((r) => r.data),
   },
 
   languages: {
@@ -774,6 +790,10 @@ export const api = {
     getSubTribes: (tribeId: string) =>
       apiClient
         .get<{ items: NamedOption[] }>(`/api/v1/users/tribes/${tribeId}/sub-tribes`)
+        .then((r) => r.data.items),
+    getSubTribeChildren: (subTribeId: string) =>
+      apiClient
+        .get<{ items: NamedOption[] }>(`/api/v1/users/sub-tribes/${subTribeId}/sub-tribes`)
         .then((r) => r.data.items),
     getVillages: (country: string, city: string) =>
       apiClient
@@ -884,6 +904,16 @@ export const api = {
       apiClient.get<AdminContributionsResponse>("/api/v1/admin/contributions", { params }).then((r) => r.data),
     updateContributionStatus: (id: string, data: UpdateContributionStatusInput) =>
       apiClient.put<{ id: string; status: ContributionStatusValue }>(`/api/v1/admin/contributions/${id}/status`, data).then((r) => r.data),
+    updateContributionRemarks: (id: string, remarks: string) =>
+      apiClient.put<{ id: string; remarks: string | null }>(`/api/v1/admin/contributions/${id}/remarks`, { remarks }).then((r) => r.data),
+    deleteContribution: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/contributions/${id}`).then((r) => r.data),
+    getContributionKeywords: (id: string) =>
+      apiClient.get<{ items: ContributionKeyword[] }>(`/api/v1/admin/contributions/${id}/keywords`).then((r) => r.data.items),
+    addContributionKeyword: (id: string, keyword: string) =>
+      apiClient.post<ContributionKeyword>(`/api/v1/admin/contributions/${id}/keywords`, { keyword }).then((r) => r.data),
+    deleteContributionKeyword: (id: string, keywordId: string) =>
+      apiClient.delete(`/api/v1/admin/contributions/${id}/keywords/${keywordId}`).then((r) => r.data),
 
     getAnalytics: () => apiClient.get<AdminAnalytics>("/api/v1/admin/analytics").then((r) => r.data),
 

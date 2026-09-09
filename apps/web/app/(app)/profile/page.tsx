@@ -2,13 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
+import { useAuth } from "@/lib/auth";
 import { api, getErrorMessage, type UserStatsResponse, type UserBadgesResponse, type ContributorDemographics } from "@/lib/api";
 import { LEVEL_COLOR, LEVEL_THRESHOLDS, NEXT_LEVEL } from "@/lib/level";
+import { ConfirmDialog } from "@/components/confirm-dialog";
 
 export default function ProfilePage() {
   const user = useAuthStore((state) => state.user);
   const setUser = useAuthStore((state) => state.setUser);
+  const { logout } = useAuth();
+  const router = useRouter();
 
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
@@ -30,6 +35,24 @@ export default function ProfilePage() {
   const [isChangingPassword, setIsChangingPassword] = useState(false);
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [passwordSuccess, setPasswordSuccess] = useState<string | null>(null);
+
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function handleDeleteAccount() {
+    setConfirmingDelete(false);
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await api.users.deleteAccount();
+      await logout();
+      router.push("/login");
+    } catch (err) {
+      setDeleteError(getErrorMessage(err, "Failed to delete account"));
+      setIsDeleting(false);
+    }
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -287,6 +310,34 @@ export default function ProfilePage() {
           </button>
         </div>
       </div>
+
+      <div>
+        <h2 className="mb-3 text-lg font-bold text-red-600">Danger Zone</h2>
+        <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-red-200">
+          <p className="text-sm text-ink-muted">
+            Deleting your account removes your personal information and login access. Your contributions to the corpus
+            (recordings, translations, and descriptions) stay in the dataset and are not deleted.
+          </p>
+          {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            disabled={isDeleting}
+            className="btn-duo bg-red-600 px-5 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+          >
+            {isDeleting ? "Deleting..." : "Delete Account"}
+          </button>
+        </div>
+      </div>
+
+      <ConfirmDialog
+        open={confirmingDelete}
+        title="Delete your account?"
+        message="This permanently removes your personal information and signs you out. Your past contributions stay in the corpus, but this cannot be undone for your account."
+        confirmLabel="Delete Account"
+        danger
+        onConfirm={handleDeleteAccount}
+        onCancel={() => setConfirmingDelete(false)}
+      />
     </div>
   );
 }

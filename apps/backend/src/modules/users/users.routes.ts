@@ -9,9 +9,12 @@ import {
   concepts,
   contributionModule,
   contributions,
+  contributorDemographics,
   contributorProfiles,
+  deviceTokens,
   dialects,
   languages,
+  refreshTokens,
   scenes,
   sceneContributions,
   sceneMedia,
@@ -21,7 +24,7 @@ import {
   users,
   wordRecordings,
 } from "../../db/schema.js";
-import { verifyToken } from "../../middleware/auth.js";
+import { invalidateUserCache, verifyToken } from "../../middleware/auth.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -224,6 +227,44 @@ export default async function usersRoutes(fastify: FastifyInstance) {
       throw new HttpError(404, "NOT_FOUND", "User not found");
     }
     return profile;
+  });
+
+  // Self-service account deletion. This is a soft delete that scrubs PII
+  // (email, password, display name, avatar, biography, demographics) and
+  // revokes sessions -- it deliberately does NOT touch contributions,
+  // wordRecordings, translations, audioUploads, sceneContributions, or
+  // reviews, since those rows carry no PII themselves and FK-restrict back
+  // to users.id (a hard delete would either fail on those constraints or,
+  // on the tables that do cascade, wipe stats/badges/notifications that
+  // aren't "contributed data"). Keeping the same users.id row alive (rather
+  // than hard-deleting it) is what keeps every one of those references
+  // valid, so the corpus data this user contributed survives intact.
+  fastify.delete("/me", { preHandler: verifyToken }, async (request) => {
+    const userId = request.user!.id;
+
+    await Promise.all([
+      db
+        .update(users)
+        .set({
+          email: `deleted-${userId}@lexlingo.invalid`,
+          passwordHash: null,
+          displayName: "Deleted User",
+          avatarUrl: null,
+          biography: null,
+          isActive: false,
+          deletedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userId)),
+      db.delete(contributorDemographics).where(eq(contributorDemographics.userId, userId)),
+      db.delete(contributorProfiles).where(eq(contributorProfiles.userId, userId)),
+      db.delete(refreshTokens).where(eq(refreshTokens.userId, userId)),
+      db.delete(deviceTokens).where(eq(deviceTokens.userId, userId)),
+    ]);
+
+    invalidateUserCache(userId);
+
+    return { deleted: true };
   });
 
   fastify.get("/me/stats", { preHandler: verifyToken }, async (request) => {

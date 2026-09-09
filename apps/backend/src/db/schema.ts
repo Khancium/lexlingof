@@ -385,6 +385,27 @@ export const sceneImageKeywords = pgTable(
 );
 
 /**
+ * ADMIN ONLY -- free-text training-data labels for any contribution (all
+ * four modules), independent of sceneImageKeywords above (which is scoped to
+ * a scene's image specifically). Never exposed to contributors.
+ */
+export const contributionKeywords = pgTable(
+  "contribution_keywords",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    contributionId: uuid("contribution_id")
+      .notNull()
+      .references((): AnyPgColumn => contributions.id, { onDelete: "cascade" }),
+    keyword: text("keyword").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_contribution_keywords_contribution_keyword").on(t.contributionId, t.keyword),
+    index("ix_contribution_keywords_contribution").on(t.contributionId),
+  ],
+);
+
+/**
  * ADMIN ONLY — never expose to contributors.
  *
  * Records concepts visible in a scene image. `annotatedPresence` is set ONLY by
@@ -784,6 +805,8 @@ export const contributions = pgTable(
     clientType: text("client_type"),
     ipAddress: text("ip_address"),
     accessLevel: dataAccessLevel("access_level").default("public").notNull(),
+    /** Admin-only free-text notes on this specific contribution -- never shown to contributors. */
+    remarks: text("remarks"),
     submittedAt: timestamp("submitted_at", { withTimezone: true }).defaultNow().notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
@@ -1162,10 +1185,16 @@ export const subTribes = pgTable(
     tribeId: uuid("tribe_id")
       .notNull()
       .references(() => tribes.id, { onDelete: "cascade" }),
+    /**
+     * Self-reference so a contributor can add a sub-tribe, then a sub-tribe
+     * of that sub-tribe, and so on to an arbitrary depth -- null means a
+     * top-level sub-tribe directly under the tribe.
+     */
+    parentSubTribeId: uuid("parent_sub_tribe_id").references((): AnyPgColumn => subTribes.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (table) => [uniqueIndex("sub_tribes_tribe_id_name_key").on(table.tribeId, table.name)],
+  (table) => [uniqueIndex("sub_tribes_tribe_id_parent_name_key").on(table.tribeId, table.parentSubTribeId, table.name)],
 );
 
 export const villages = pgTable(

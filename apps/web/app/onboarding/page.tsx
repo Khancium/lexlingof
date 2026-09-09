@@ -32,7 +32,6 @@ const schema = z.object({
   gender: z.enum(["male", "female", "other", "prefer_not_to_say"], "Gender is required"),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES, "Language is required"),
   tribe: z.string().min(1, "Tribe is required"),
-  subTribe: z.string().optional(),
   countryCode: z.string().min(1, "Country is required"),
   city: z.string().min(1, "City is required"),
   village: z.string().min(1, "Village is required"),
@@ -53,12 +52,13 @@ export default function OnboardingPage() {
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
   const [tribes, setTribes] = useState<NamedOption[]>([]);
-  const [subTribes, setSubTribes] = useState<NamedOption[]>([]);
   const [villages, setVillages] = useState<NamedOption[]>([]);
   const [quarters, setQuarters] = useState<NamedOption[]>([]);
   const [countries, setCountries] = useState<{ code: string; name: string }[]>([]);
   const [cities, setCities] = useState<string[]>([]);
-  const [subTribeOpen, setSubTribeOpen] = useState(false);
+  // Each slot is one level of a root-to-leaf sub-tribe chain (a sub-tribe,
+  // then optionally a sub-tribe of that sub-tribe, and so on to any depth).
+  const [subTribeSlots, setSubTribeSlots] = useState<{ value: string; options: NamedOption[] }[]>([]);
   const [quarterOpen, setQuarterOpen] = useState(false);
 
   const {
@@ -86,14 +86,36 @@ export default function OnboardingPage() {
     api.geo.getCountries().then(setCountries).catch(() => setCountries([]));
   }, []);
 
+  // Sub-tribes are scoped to the selected tribe -- switching tribes discards
+  // whatever chain was being built for the old one.
   useEffect(() => {
-    const match = tribes.find((t) => t.name === tribe);
-    if (match) {
-      api.demographics.getSubTribes(match.id).then(setSubTribes).catch(() => setSubTribes([]));
+    setSubTribeSlots([]);
+  }, [tribe]);
+
+  async function addSubTribeLevel() {
+    const last = subTribeSlots[subTribeSlots.length - 1];
+    if (last && !last.value.trim()) return;
+
+    let options: NamedOption[] = [];
+    if (!last) {
+      const match = tribes.find((t) => t.name === tribe);
+      if (match) options = await api.demographics.getSubTribes(match.id).catch(() => []);
     } else {
-      setSubTribes([]);
+      const parentMatch = last.options.find((o) => o.name === last.value);
+      if (parentMatch) options = await api.demographics.getSubTribeChildren(parentMatch.id).catch(() => []);
     }
-  }, [tribe, tribes]);
+    setSubTribeSlots((prev) => [...prev, { value: "", options }]);
+  }
+
+  function updateSubTribeLevel(index: number, value: string) {
+    // Changing a level invalidates whatever was chosen below it, since
+    // those choices were children of the old value.
+    setSubTribeSlots((prev) => {
+      const next = prev.slice(0, index + 1);
+      next[index] = { ...next[index], value };
+      return next;
+    });
+  }
 
   const countryName = countries.find((c) => c.code === countryCode)?.name ?? "";
 
@@ -131,7 +153,7 @@ export default function OnboardingPage() {
         gender: values.gender,
         motherTongue: values.motherTongue,
         tribe: values.tribe,
-        subTribe: values.subTribe || undefined,
+        subTribes: subTribeSlots.map((s) => s.value.trim()).filter(Boolean),
         country: countryName,
         city: values.city,
         village: values.village,
@@ -222,34 +244,31 @@ export default function OnboardingPage() {
             />
             {errors.tribe && <p className="mt-1 text-xs text-red-600">{errors.tribe.message}</p>}
 
-            {subTribeOpen ? (
-              <div className="mt-2 pl-4">
-                <label className="mb-1 block text-xs font-medium text-ink-muted">Sub-tribe (optional)</label>
-                <Controller
-                  name="subTribe"
-                  control={control}
-                  render={({ field }) => (
-                    <Combobox
-                      id="sub-tribe"
-                      value={field.value ?? ""}
-                      onChange={field.onChange}
-                      options={subTribes}
-                      placeholder="Sub-tribe"
-                      disabled={!tribe}
-                    />
-                  )}
+            {subTribeSlots.map((slot, i) => (
+              <div key={i} className="mt-2 pl-4">
+                <label className="mb-1 block text-xs font-medium text-ink-muted">
+                  {i === 0 ? "Sub-tribe (optional)" : `Sub-tribe of "${subTribeSlots[i - 1].value}"`}
+                </label>
+                <Combobox
+                  id={`sub-tribe-${i}`}
+                  value={slot.value}
+                  onChange={(v) => updateSubTribeLevel(i, v)}
+                  options={slot.options}
+                  placeholder="Sub-tribe"
                 />
               </div>
-            ) : (
+            ))}
+
+            {subTribeSlots.length === 0 || subTribeSlots[subTribeSlots.length - 1].value.trim() ? (
               <button
                 type="button"
-                onClick={() => setSubTribeOpen(true)}
+                onClick={addSubTribeLevel}
                 disabled={!tribe}
                 className="mt-2 text-sm font-medium text-brand hover:underline disabled:cursor-not-allowed disabled:text-ink-muted disabled:no-underline"
               >
                 + Add sub-tribe
               </button>
-            )}
+            ) : null}
           </div>
 
           <div className="grid grid-cols-2 gap-4">
