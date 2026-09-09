@@ -510,6 +510,11 @@ export const audioFiles = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     deletionScheduledAt: timestamp("deletion_scheduled_at", { withTimezone: true }),
+    /** Crude peer-review tallies, incremented in reviews.service.ts's submitReview -- not a substitute for querying the reviews table, just a fast denormalized count for admin/UI display. */
+    reviewCount: integer("review_count").default(0).notNull(),
+    correctReviewCount: integer("correct_review_count").default(0).notNull(),
+    incorrectReviewCount: integer("incorrect_review_count").default(0).notNull(),
+    cannotDecideReviewCount: integer("cannot_decide_review_count").default(0).notNull(),
   },
   (t) => [
     index("ix_audio_files_uploaded_by").on(t.uploadedBy),

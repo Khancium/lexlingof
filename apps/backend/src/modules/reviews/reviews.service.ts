@@ -3,6 +3,7 @@ import { and, asc, eq, inArray, isNull, ne, not, sql } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import {
   auditLogs,
+  audioFiles,
   audioUploads,
   conceptMedia,
   contributionModule,
@@ -66,6 +67,35 @@ async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[
   }
 
   return (config.configValue as { value: number }).value;
+}
+
+/** Each module keeps its audio_file_id on a different payload table -- resolve whichever one this contribution actually references. */
+async function resolveAudioFileId(
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  contribution: { moduleType: Module; wordRecordingId: string | null; audioUploadId: string | null; translationId: string | null; sceneContributionId: string | null },
+): Promise<string | null> {
+  switch (contribution.moduleType) {
+    case "WORD": {
+      if (!contribution.wordRecordingId) return null;
+      const [row] = await tx.select({ audioFileId: wordRecordings.audioFileId }).from(wordRecordings).where(eq(wordRecordings.id, contribution.wordRecordingId)).limit(1);
+      return row?.audioFileId ?? null;
+    }
+    case "TRANSCRIPTION": {
+      if (!contribution.audioUploadId) return null;
+      const [row] = await tx.select({ audioFileId: audioUploads.audioFileId }).from(audioUploads).where(eq(audioUploads.id, contribution.audioUploadId)).limit(1);
+      return row?.audioFileId ?? null;
+    }
+    case "TRANSLATION": {
+      if (!contribution.translationId) return null;
+      const [row] = await tx.select({ audioFileId: translations.audioFileId }).from(translations).where(eq(translations.id, contribution.translationId)).limit(1);
+      return row?.audioFileId ?? null;
+    }
+    case "SCENE": {
+      if (!contribution.sceneContributionId) return null;
+      const [row] = await tx.select({ audioFileId: sceneContributions.audioFileId }).from(sceneContributions).where(eq(sceneContributions.id, contribution.sceneContributionId)).limit(1);
+      return row?.audioFileId ?? null;
+    }
+  }
 }
 
 async function getDemographics(userId: string): Promise<{ tribeId: string; city: string } | null> {
@@ -227,6 +257,10 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
       userId: contributions.userId,
       status: contributions.status,
       moduleType: contributions.moduleType,
+      wordRecordingId: contributions.wordRecordingId,
+      audioUploadId: contributions.audioUploadId,
+      translationId: contributions.translationId,
+      sceneContributionId: contributions.sceneContributionId,
     })
     .from(contributions)
     .where(eq(contributions.id, data.contributionId))
@@ -310,6 +344,30 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
 
     if (!review) {
       throw new HttpError(500, "INSERT_FAILED", "Failed to create review");
+    }
+
+    // 7b. Crude per-audio-file tallies: total reviews plus one bucket for
+    // the decision made. "needs_correction" only bumps the total, since the
+    // user only asked for correct/incorrect/cannot_decide buckets.
+    const audioFileId = await resolveAudioFileId(tx, contribution);
+    if (audioFileId) {
+      const decisionCounterUpdate =
+        data.decision === "valid"
+          ? { correctReviewCount: sql`${audioFiles.correctReviewCount} + 1` }
+          : data.decision === "invalid"
+            ? { incorrectReviewCount: sql`${audioFiles.incorrectReviewCount} + 1` }
+            : data.decision === "cannot_decide"
+              ? { cannotDecideReviewCount: sql`${audioFiles.cannotDecideReviewCount} + 1` }
+              : {};
+
+      await tx
+        .update(audioFiles)
+        .set({
+          reviewCount: sql`${audioFiles.reviewCount} + 1`,
+          updatedAt: new Date(),
+          ...decisionCounterUpdate,
+        })
+        .where(eq(audioFiles.id, audioFileId));
     }
 
     // 8. Reviewer's completed-review count.
