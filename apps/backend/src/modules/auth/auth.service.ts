@@ -6,6 +6,7 @@ import jwt from "jsonwebtoken";
 
 import { db } from "../../db/index.js";
 import { contributorProfiles, refreshTokens, streaks, userStats, users } from "../../db/schema.js";
+import { writeAuditLog } from "../../services/audit-log.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
@@ -62,6 +63,15 @@ class AuthService {
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
 
+    await writeAuditLog({
+      actorId: user.id,
+      actorRole: user.role,
+      action: "user_register",
+      resourceType: "user",
+      resourceId: user.id,
+      afterState: { email: user.email },
+    });
+
     return { user, ...tokens };
   }
 
@@ -109,6 +119,14 @@ class AuthService {
     }
 
     const tokens = await this.generateTokens(user.id, user.email, user.role);
+
+    await writeAuditLog({
+      actorId: user.id,
+      actorRole: user.role,
+      action: "user_login",
+      resourceType: "user",
+      resourceId: user.id,
+    });
 
     return {
       user: { id: user.id, email: user.email, displayName: user.displayName, role: user.role },

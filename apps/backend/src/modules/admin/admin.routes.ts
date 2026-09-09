@@ -45,6 +45,7 @@ import {
 } from "../../db/schema.js";
 import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
+import { writeAuditLog } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache } from "../../services/level.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -54,26 +55,6 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
 /* -------------------------------------------------------------------------- */
-
-async function writeAuditLog(params: {
-  actorId: string;
-  actorRole: (typeof userRole.enumValues)[number] | null;
-  action: string;
-  resourceType: string;
-  resourceId?: string | null;
-  beforeState?: Record<string, unknown> | null;
-  afterState?: Record<string, unknown> | null;
-}) {
-  await db.insert(auditLogs).values({
-    actorId: params.actorId,
-    actorRole: params.actorRole,
-    action: params.action,
-    resourceType: params.resourceType,
-    resourceId: params.resourceId ?? null,
-    beforeState: params.beforeState ?? null,
-    afterState: params.afterState ?? null,
-  });
-}
 
 async function readImageFile(request: FastifyRequest) {
   const file = await request.file();
@@ -358,6 +339,7 @@ const promoteAdminSchema = z.object({ userId: z.string().uuid() });
 const auditLogsQuerySchema = z.object({
   action: z.string().optional(),
   resource_type: z.string().optional(),
+  search: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -586,7 +568,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
 
     const items = await db
-      .select({ id: contributionKeywords.id, keyword: contributionKeywords.keyword })
+      .select({ id: contributionKeywords.id, keyword: contributionKeywords.keyword, audioFileId: contributionKeywords.audioFileId })
       .from(contributionKeywords)
       .where(eq(contributionKeywords.contributionId, id))
       .orderBy(asc(contributionKeywords.createdAt));
@@ -598,14 +580,34 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     const body = addContributionKeywordSchema.parse(request.body);
 
-    const [contribution] = await db.select({ id: contributions.id }).from(contributions).where(eq(contributions.id, id)).limit(1);
+    const [contribution] = await db
+      .select({
+        id: contributions.id,
+        wordAudioFileId: wordRecordings.audioFileId,
+        audioAudioFileId: audioUploads.audioFileId,
+        translationAudioFileId: translations.audioFileId,
+        sceneAudioFileId: sceneContributions.audioFileId,
+      })
+      .from(contributions)
+      .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
+      .leftJoin(audioUploads, eq(audioUploads.id, contributions.audioUploadId))
+      .leftJoin(translations, eq(translations.id, contributions.translationId))
+      .leftJoin(sceneContributions, eq(sceneContributions.id, contributions.sceneContributionId))
+      .where(eq(contributions.id, id))
+      .limit(1);
     if (!contribution) {
       throw new HttpError(404, "NOT_FOUND", "Contribution not found");
     }
 
+    // Denormalized onto the keyword row at creation time (see the column's
+    // comment in schema.ts) so every training-data label is directly
+    // attached to the audio file it describes, not just to the contribution.
+    const audioFileId =
+      contribution.wordAudioFileId ?? contribution.audioAudioFileId ?? contribution.translationAudioFileId ?? contribution.sceneAudioFileId ?? null;
+
     const [keyword] = await db
       .insert(contributionKeywords)
-      .values({ contributionId: id, keyword: body.keyword })
+      .values({ contributionId: id, keyword: body.keyword, audioFileId })
       .onConflictDoNothing({ target: [contributionKeywords.contributionId, contributionKeywords.keyword] })
       .returning();
 
@@ -1767,21 +1769,49 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return updated;
   });
 
+  // The crude admin Logs page's data source -- every writeAuditLog() call
+  // anywhere in the backend (moderation actions, registration/login,
+  // contribution submissions, permanent buffer failures) shows up here with
+  // a timestamp. Joins users for a readable actor name/email instead of a
+  // bare UUID, since that's the whole point of a page a human reads.
   fastify.get("/superadmin/audit-logs", { preHandler: requirePermission("audit.read") }, async (request) => {
-    const { action, resource_type, limit, offset } = auditLogsQuerySchema.parse(request.query);
+    const { action, resource_type, search, limit, offset } = auditLogsQuerySchema.parse(request.query);
 
     const conditions = [];
     if (action) conditions.push(eq(auditLogs.action, action));
     if (resource_type) conditions.push(eq(auditLogs.resourceType, resource_type));
+    if (search) conditions.push(or(ilike(users.displayName, `%${search}%`), ilike(users.email, `%${search}%`))!);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-    return db
-      .select()
-      .from(auditLogs)
-      .where(whereClause)
-      .orderBy(desc(auditLogs.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const [items, [totalRow]] = await Promise.all([
+      db
+        .select({
+          id: auditLogs.id,
+          actorId: auditLogs.actorId,
+          actorRole: auditLogs.actorRole,
+          actorDisplayName: users.displayName,
+          actorEmail: users.email,
+          action: auditLogs.action,
+          resourceType: auditLogs.resourceType,
+          resourceId: auditLogs.resourceId,
+          beforeState: auditLogs.beforeState,
+          afterState: auditLogs.afterState,
+          createdAt: auditLogs.createdAt,
+        })
+        .from(auditLogs)
+        .leftJoin(users, eq(users.id, auditLogs.actorId))
+        .where(whereClause)
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db
+        .select({ value: sql<number>`count(*)`.mapWith(Number) })
+        .from(auditLogs)
+        .leftJoin(users, eq(users.id, auditLogs.actorId))
+        .where(whereClause),
+    ]);
+
+    return { items, limit, offset, total: totalRow?.value ?? 0 };
   });
 
   // No list endpoint existed -- only the toggle-by-key PUT below -- so there

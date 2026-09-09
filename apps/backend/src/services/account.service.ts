@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { contributorDemographics, contributorProfiles, deviceTokens, refreshTokens, users } from "../db/schema.js";
 import { invalidateUserCache } from "../middleware/auth.js";
+import { writeAuditLog } from "./audit-log.service.js";
 
 /**
  * Soft-deletes a user's account -- NOT a hard delete. Scrubs PII (password,
@@ -23,6 +24,8 @@ import { invalidateUserCache } from "../middleware/auth.js";
  * module's "ban (delete account)" action.
  */
 export async function deleteUserAccount(userId: string): Promise<void> {
+  const [before] = await db.select({ role: users.role, email: users.email }).from(users).where(eq(users.id, userId)).limit(1);
+
   await Promise.all([
     db
       .update(users)
@@ -43,4 +46,13 @@ export async function deleteUserAccount(userId: string): Promise<void> {
   ]);
 
   invalidateUserCache(userId);
+
+  await writeAuditLog({
+    actorId: userId,
+    actorRole: before?.role ?? null,
+    action: "account_deleted",
+    resourceType: "user",
+    resourceId: userId,
+    beforeState: before ? { email: before.email } : null,
+  });
 }

@@ -411,11 +411,23 @@ export const contributionKeywords = pgTable(
       .notNull()
       .references((): AnyPgColumn => contributions.id, { onDelete: "cascade" }),
     keyword: text("keyword").notNull(),
+    /**
+     * Denormalized from the contribution's module-specific payload row
+     * (word_recordings/translations/scene_contributions/audio_uploads) at
+     * the moment the keyword is added, so this row is self-contained --
+     * "this audio file has this keyword" -- instead of requiring a join
+     * through contributions and back out to whichever payload table applies
+     * for every read (training-data export, admin keyword display with
+     * playback, etc). Nullable only because a contribution can in principle
+     * have no audio yet when annotated.
+     */
+    audioFileId: uuid("audio_file_id").references(() => audioFiles.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
     uniqueIndex("uq_contribution_keywords_contribution_keyword").on(t.contributionId, t.keyword),
     index("ix_contribution_keywords_contribution").on(t.contributionId),
+    index("ix_contribution_keywords_audio_file").on(t.audioFileId),
   ],
 );
 

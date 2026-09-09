@@ -10,6 +10,7 @@ import {
   transcriptions,
   userStats,
 } from "../../../db/schema.js";
+import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
@@ -201,6 +202,15 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
       console.error("[audio-upload] sendLevelUpNotification failed:", err);
     }
   }
+
+  await writeAuditLog({
+    actorId: userId,
+    actorRole: null,
+    action: "contribution_submitted",
+    resourceType: "contribution",
+    resourceId: result.contributionId,
+    afterState: { moduleType: "TRANSCRIPTION" },
+  });
 
   return { contributionId: result.contributionId, audioUploadId: result.audioUploadId, pointsAwarded: result.pointsAwarded };
 }

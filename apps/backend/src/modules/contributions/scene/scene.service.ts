@@ -10,6 +10,7 @@ import {
   scenes,
   userStats,
 } from "../../../db/schema.js";
+import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
@@ -277,6 +278,15 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
       console.error("[scene] sendLevelUpNotification failed:", err);
     }
   }
+
+  await writeAuditLog({
+    actorId: userId,
+    actorRole: null,
+    action: "contribution_submitted",
+    resourceType: "contribution",
+    resourceId: result.contributionId,
+    afterState: { moduleType: "SCENE", sceneId },
+  });
 
   return {
     contributionId: result.contributionId,

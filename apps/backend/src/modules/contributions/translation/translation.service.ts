@@ -11,6 +11,7 @@ import {
   translations,
   userStats,
 } from "../../../db/schema.js";
+import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { storageService } from "../../../services/storage.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
@@ -285,6 +286,15 @@ export async function submitTranslation(userId: string, sentenceId: string, data
       console.error("[translation] sendLevelUpNotification failed:", err);
     }
   }
+
+  await writeAuditLog({
+    actorId: userId,
+    actorRole: null,
+    action: "contribution_submitted",
+    resourceType: "contribution",
+    resourceId: result.contributionId,
+    afterState: { moduleType: "TRANSLATION", sentenceId },
+  });
 
   return { contributionId: result.contributionId, translationId: result.translationId, pointsAwarded: result.pointsAwarded };
 }

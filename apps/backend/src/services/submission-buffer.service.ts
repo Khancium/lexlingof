@@ -1,6 +1,7 @@
 import { asc, db, eq, inArray, sql } from "../db/index.js";
 import { contributions, notifications, pendingSubmissions, pointsTransactions } from "../db/schema.js";
 import { storeAudioBuffer } from "./audio-file.service.js";
+import { writeAuditLog } from "./audit-log.service.js";
 import { submitWordRecording, type SubmitWordRecordingInput } from "../modules/contributions/word/word.service.js";
 import { submitTranslation, type SubmitTranslationInput } from "../modules/contributions/translation/translation.service.js";
 import {
@@ -231,6 +232,15 @@ async function processOne(row: PendingRow): Promise<void> {
           data: { pendingSubmissionId: row.id, moduleType: row.moduleType },
         })
         .catch((notifyErr) => console.error("[submission-buffer] failed to create failure notification", notifyErr));
+
+      await writeAuditLog({
+        actorId: row.userId,
+        actorRole: null,
+        action: "submission_failed",
+        resourceType: "pending_submission",
+        resourceId: row.id,
+        afterState: { moduleType: row.moduleType, attempts, isPermanent },
+      }).catch((logErr) => console.error("[submission-buffer] failed to write audit log", logErr));
     }
   }
 }

@@ -2,6 +2,7 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
 import { audioFiles, contributions, gamificationConfig, pointsTransactions, streaks, userStats, wordRecordings } from "../../../db/schema.js";
+import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { storageService } from "../../../services/storage.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
@@ -214,6 +215,15 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       console.error("[word] sendLevelUpNotification failed:", err);
     }
   }
+
+  await writeAuditLog({
+    actorId: userId,
+    actorRole: null,
+    action: "contribution_submitted",
+    resourceType: "contribution",
+    resourceId: result.contributionId,
+    afterState: { moduleType: "WORD", conceptId: data.conceptId, synonymIndex: data.synonymIndex },
+  });
 
   return result;
 }

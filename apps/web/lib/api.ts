@@ -642,7 +642,7 @@ export type AdminContributionsQuery = {
   offset?: number;
 };
 
-export type ContributionKeyword = { id: string; keyword: string };
+export type ContributionKeyword = { id: string; keyword: string; audioFileId: string | null };
 
 export type UpdateContributionStatusInput = { status: ContributionStatusValue; reason?: string };
 
@@ -741,6 +741,22 @@ export type FeatureFlag = {
   updatedBy: string | null;
   updatedAt: string;
 };
+
+export type AuditLog = {
+  id: string;
+  actorId: string | null;
+  actorRole: string | null;
+  actorDisplayName: string | null;
+  actorEmail: string | null;
+  action: string;
+  resourceType: string;
+  resourceId: string | null;
+  beforeState: Record<string, unknown> | null;
+  afterState: Record<string, unknown> | null;
+  createdAt: string;
+};
+
+export type AuditLogsResponse = { items: AuditLog[]; limit: number; offset: number; total: number };
 
 /* -------------------------------------------------------------------------- */
 /*                                     API                                    */
@@ -1090,5 +1106,8 @@ export const api = {
     getFeatureFlags: () => apiClient.get<FeatureFlag[]>("/api/v1/superadmin/feature-flags").then((r) => r.data),
     updateFeatureFlag: (key: string, isEnabled: boolean) =>
       apiClient.put<FeatureFlag>(`/api/v1/superadmin/feature-flags/${key}`, { isEnabled }).then((r) => r.data),
+
+    getAuditLogs: (params?: { action?: string; resource_type?: string; search?: string; limit?: number; offset?: number }) =>
+      apiClient.get<AuditLogsResponse>("/api/v1/superadmin/audit-logs", { params }).then((r) => r.data),
   },
 };

@@ -16,6 +16,7 @@ const LINKS = [
 const SUPER_ADMIN_LINKS = [
   { href: "/admin/gamification", label: "Gamification Config" },
   { href: "/admin/feature-flags", label: "Feature Flags" },
+  { href: "/admin/logs", label: "Logs" },
 ];
 
 export default function AdminNav() {
