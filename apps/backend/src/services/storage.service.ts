@@ -1,3 +1,5 @@
+import type { Readable } from "node:stream";
+
 import {
   DeleteObjectCommand,
   GetObjectCommand,
@@ -97,6 +99,18 @@ class StorageService {
     });
 
     return getSignedUrl(r2, command, { expiresIn: PLAY_URL_EXPIRY_SECONDS });
+  }
+
+  /**
+   * Raw object body stream (not a presigned URL) -- used server-side to fold
+   * several audio files into one zip without round-tripping them through the
+   * browser first. The SDK types Body as Readable | ReadableStream | Blob,
+   * but running in Node it's always a Readable at runtime.
+   */
+  async getAudioObjectStream(storageKey: string): Promise<Readable> {
+    const command = new GetObjectCommand({ Bucket: AUDIO_BUCKET, Key: storageKey });
+    const response = await r2.send(command);
+    return response.Body as Readable;
   }
 
   async deleteAudioFile(storageKey: string): Promise<void> {

@@ -291,21 +291,29 @@ export default function AdminContributionsPage() {
   async function handleBulkDownload() {
     const selectedItems = items.filter((i) => selected.has(i.contributionId) && i.detail.audioFileId);
     if (selectedItems.length === 0) return;
+
+    // A single file downloads directly; two or more get bundled into one
+    // zip server-side instead of firing off several separate browser
+    // downloads (which most browsers throttle or block past the first few).
+    if (selectedItems.length === 1) {
+      await handleDownload(selectedItems[0]);
+      return;
+    }
+
     setIsBulkActing(true);
     try {
-      for (const item of selectedItems) {
-        try {
-          const { url } = await api.admin.getAudioDownloadUrl(item.detail.audioFileId as string);
-          const link = document.createElement("a");
-          link.href = url;
-          link.rel = "noopener";
-          document.body.appendChild(link);
-          link.click();
-          link.remove();
-        } catch {
-          // Skip a single failed download rather than aborting the whole batch.
-        }
-      }
+      const blob = await api.admin.bulkDownloadZip(selectedItems.map((i) => i.contributionId));
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `contributions-${Date.now()}.zip`;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to download zip");
     } finally {
       setIsBulkActing(false);
     }

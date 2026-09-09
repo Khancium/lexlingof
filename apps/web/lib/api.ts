@@ -982,6 +982,10 @@ export const api = {
 
     getAudioDownloadUrl: (audioFileId: string) =>
       apiClient.get<{ url: string }>(`/api/v1/admin/audio/${audioFileId}/download-url`).then((r) => r.data),
+    bulkDownloadZip: (ids: string[]) =>
+      apiClient
+        .post("/api/v1/admin/contributions/bulk-download-zip", { ids }, { responseType: "blob" })
+        .then((r) => r.data as Blob),
     bulkUpdateContributionStatus: (ids: string[], status: ContributionStatusValue, reason?: string) =>
       apiClient.post<{ updated: number }>("/api/v1/admin/contributions/bulk-status", { ids, status, reason }).then((r) => r.data),
     bulkDeleteContributions: (ids: string[]) =>

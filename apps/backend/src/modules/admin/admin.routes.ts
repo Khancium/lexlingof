@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { parse as csvParse } from "csv-parse/sync";
+import { ZipArchive } from "archiver";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -682,6 +683,85 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const url = await storageService.generateAudioDownloadUrl(audioFile.storageKey, `${id}.${audioFile.format}`);
     return { url };
+  });
+
+  // Bulk download as a single zip -- used when 2+ rows are selected on the
+  // admin contributions page, instead of triggering N separate browser
+  // downloads (which several browsers throttle/block past the first few).
+  // Streams straight from R2 through archiver into the response instead of
+  // buffering the whole zip in memory first.
+  fastify.post("/admin/contributions/bulk-download-zip", { preHandler: requirePermission("contributions.manage") }, async (request, reply) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    const rows = await db
+      .select({
+        contributionId: contributions.id,
+        moduleType: contributions.moduleType,
+        contributorDisplayName: users.displayName,
+        wordAudioFileId: wordRecordings.audioFileId,
+        audioAudioFileId: audioUploads.audioFileId,
+        translationAudioFileId: translations.audioFileId,
+        sceneAudioFileId: sceneContributions.audioFileId,
+      })
+      .from(contributions)
+      .innerJoin(users, eq(users.id, contributions.userId))
+      .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
+      .leftJoin(audioUploads, eq(audioUploads.id, contributions.audioUploadId))
+      .leftJoin(translations, eq(translations.id, contributions.translationId))
+      .leftJoin(sceneContributions, eq(sceneContributions.id, contributions.sceneContributionId))
+      .where(inArray(contributions.id, ids));
+
+    const targets = rows
+      .map((row) => {
+        const audioFileId =
+          row.moduleType === "WORD"
+            ? row.wordAudioFileId
+            : row.moduleType === "TRANSCRIPTION"
+              ? row.audioAudioFileId
+              : row.moduleType === "TRANSLATION"
+                ? row.translationAudioFileId
+                : row.sceneAudioFileId;
+        return { contributionId: row.contributionId, moduleType: row.moduleType, contributorDisplayName: row.contributorDisplayName, audioFileId };
+      })
+      .filter((t): t is typeof t & { audioFileId: string } => !!t.audioFileId);
+
+    if (targets.length === 0) {
+      throw new HttpError(404, "NOT_FOUND", "None of the selected contributions have audio to download");
+    }
+
+    const audioRows = await db
+      .select({ id: audioFiles.id, storageKey: audioFiles.storageKey, format: audioFiles.format })
+      .from(audioFiles)
+      .where(inArray(audioFiles.id, targets.map((t) => t.audioFileId)));
+    const audioById = new Map(audioRows.map((a) => [a.id, a]));
+
+    reply.header("Content-Type", "application/zip");
+    reply.header("Content-Disposition", `attachment; filename="contributions-${Date.now()}.zip"`);
+
+    const archive = new ZipArchive({ zlib: { level: 6 } });
+    archive.on("warning", (err: Error) => console.error("[admin] zip warning:", err));
+    archive.on("error", (err: Error) => console.error("[admin] zip error:", err));
+
+    const usedNames = new Set<string>();
+    for (const target of targets) {
+      const audio = audioById.get(target.audioFileId);
+      if (!audio) continue;
+      const stream = await storageService.getAudioObjectStream(audio.storageKey);
+      const safeName = `${target.moduleType}_${target.contributorDisplayName}_${target.contributionId.slice(0, 8)}.${audio.format}`.replace(
+        /[^a-zA-Z0-9_.-]/g,
+        "_",
+      );
+      let name = safeName;
+      let suffix = 1;
+      while (usedNames.has(name)) {
+        name = `${safeName}_${++suffix}`;
+      }
+      usedNames.add(name);
+      archive.append(stream, { name });
+    }
+
+    archive.finalize();
+    return reply.send(archive);
   });
 
   /* ---------------------------------- Users ---------------------------------- */
