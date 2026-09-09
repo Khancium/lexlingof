@@ -23,9 +23,9 @@ const submitSchema = z.object({
 });
 
 export default async function sceneRoutes(fastify: FastifyInstance) {
-  fastify.get("/", async (request) => {
+  fastify.get("/", { preHandler: verifyToken }, async (request) => {
     const { search, limit, offset } = listQuerySchema.parse(request.query);
-    return getScenes(limit, offset, search);
+    return getScenes(limit, offset, request.user!.id, search);
   });
 
   fastify.get("/daily", { preHandler: verifyToken }, async () => getDailyScene());

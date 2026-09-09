@@ -60,6 +60,12 @@ export default function ContributionsPage() {
   // contribution so replaying something already fetched doesn't re-hit the
   // network either.
   const audioRef = useRef<HTMLAudioElement>(null);
+  // Which contribution's audio is currently loaded into the shared element
+  // -- kept distinct from playingId so re-clicking Play after a Pause just
+  // resumes (loadedId unchanged), instead of reassigning .src and
+  // restarting from 0 the way it would if "paused" were represented only
+  // by playingId briefly going null.
+  const [loadedId, setLoadedId] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [playUrlCache, setPlayUrlCache] = useState<Record<string, string>>({});
@@ -109,6 +115,7 @@ export default function ContributionsPage() {
     setOffset(0);
     audioRef.current?.pause();
     setPlayingId(null);
+    setLoadedId(null);
   }
 
   async function togglePlay(item: ContributionListItem) {
@@ -121,6 +128,14 @@ export default function ContributionsPage() {
       return;
     }
 
+    // Already loaded (just paused) -- resume in place rather than
+    // reassigning .src, which would reload the media and jump back to 0.
+    if (loadedId === item.id) {
+      setPlayingId(item.id);
+      audioEl.play().catch(() => {});
+      return;
+    }
+
     const audioFileId = item.detail?.audioFileId;
     if (!audioFileId) return;
     setPlayError(null);
@@ -130,6 +145,7 @@ export default function ContributionsPage() {
     const cachedUrl = playUrlCache[item.id];
     if (cachedUrl) {
       audioEl.src = cachedUrl;
+      setLoadedId(item.id);
       setPlayingId(item.id);
       audioEl.play().catch(() => {});
       return;
@@ -140,6 +156,7 @@ export default function ContributionsPage() {
       const { url } = await api.audio.getPlayUrl(audioFileId);
       setPlayUrlCache((prev) => ({ ...prev, [item.id]: url }));
       audioEl.src = url;
+      setLoadedId(item.id);
       setPlayingId(item.id);
       await audioEl.play();
     } catch (err) {
@@ -167,7 +184,10 @@ export default function ContributionsPage() {
          race the very setPlayingId(item.id) that follows it. */}
       <audio
         ref={audioRef}
-        onEnded={() => setPlayingId(null)}
+        onEnded={() => {
+          setPlayingId(null);
+          setCurrentTime(0);
+        }}
         onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
         onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
         className="hidden"
@@ -244,7 +264,7 @@ export default function ContributionsPage() {
                       disabled={loadingId === item.id}
                       className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
                     >
-                      {loadingId === item.id ? "Loading..." : playingId === item.id ? "■ Stop" : "▶ Play"}
+                      {loadingId === item.id ? "Loading..." : playingId === item.id ? "⏸ Pause" : "▶ Play"}
                     </button>
                   ) : null}
                   <span className="text-sm font-semibold text-emerald-600">

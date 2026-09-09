@@ -5,8 +5,16 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
-import { api, getErrorMessage, type UserStatsResponse, type UserBadgesResponse, type ContributorDemographics } from "@/lib/api";
+import {
+  api,
+  getErrorMessage,
+  type EducationLevel,
+  type UserStatsResponse,
+  type UserBadgesResponse,
+  type ContributorDemographics,
+} from "@/lib/api";
 import { LEVEL_COLOR, LEVEL_THRESHOLDS, NEXT_LEVEL } from "@/lib/level";
+import { EDUCATION_LEVEL_OPTIONS } from "@/lib/demographics-constants";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
 export default function ProfilePage() {
@@ -39,6 +47,46 @@ export default function ProfilePage() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const [subTribeInput, setSubTribeInput] = useState("");
+  const [quarterInput, setQuarterInput] = useState("");
+  const [dialectInput, setDialectInput] = useState("");
+  const [educationLevelInput, setEducationLevelInput] = useState<EducationLevel | "">("");
+  const [professionInput, setProfessionInput] = useState("");
+  const [isSavingOptional, setIsSavingOptional] = useState(false);
+  const [optionalError, setOptionalError] = useState<string | null>(null);
+  const [optionalSuccess, setOptionalSuccess] = useState<string | null>(null);
+
+  async function saveOptionalFields() {
+    setIsSavingOptional(true);
+    setOptionalError(null);
+    setOptionalSuccess(null);
+    try {
+      const updated = await api.demographics.fillOptional({
+        subTribes: subTribeInput.trim()
+          ? subTribeInput
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : undefined,
+        quarter: quarterInput.trim() || undefined,
+        dialect: dialectInput.trim() || undefined,
+        educationLevel: educationLevelInput || undefined,
+        profession: professionInput.trim() || undefined,
+      });
+      setDemographics(updated);
+      setSubTribeInput("");
+      setQuarterInput("");
+      setDialectInput("");
+      setEducationLevelInput("");
+      setProfessionInput("");
+      setOptionalSuccess("Saved.");
+    } catch (err) {
+      setOptionalError(getErrorMessage(err, "Failed to save"));
+    } finally {
+      setIsSavingOptional(false);
+    }
+  }
 
   async function handleDeleteAccount() {
     setConfirmingDelete(false);
@@ -231,6 +279,80 @@ export default function ProfilePage() {
             />
             <DetailField label="Profession" value={demographics.profession} />
           </div>
+
+          {!demographics.subTribeName ||
+          !demographics.quarterName ||
+          !demographics.dialect ||
+          !demographics.educationLevel ||
+          !demographics.profession ? (
+            <div className="card-duo mt-3 space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+              <p className="text-sm font-semibold text-ink">Complete your profile</p>
+              <p className="text-xs text-ink-muted">
+                Fill in whichever of these you skipped during sign-up. Once saved, each one is permanent and can&apos;t
+                be changed here.
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {!demographics.subTribeName ? (
+                  <input
+                    value={subTribeInput}
+                    onChange={(e) => setSubTribeInput(e.target.value)}
+                    placeholder="Sub-tribe (comma-separated for nested, e.g. Yousafzai, Akozai)"
+                    className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                  />
+                ) : null}
+                {!demographics.quarterName ? (
+                  <input
+                    value={quarterInput}
+                    onChange={(e) => setQuarterInput(e.target.value)}
+                    placeholder="Quarter"
+                    className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                  />
+                ) : null}
+                {!demographics.dialect ? (
+                  <input
+                    value={dialectInput}
+                    onChange={(e) => setDialectInput(e.target.value)}
+                    placeholder="Dialect"
+                    className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                  />
+                ) : null}
+                {!demographics.educationLevel ? (
+                  <select
+                    value={educationLevelInput}
+                    onChange={(e) => setEducationLevelInput(e.target.value as EducationLevel | "")}
+                    className="rounded-lg bg-surface-card px-4 py-3 text-ink ring-1 ring-border"
+                  >
+                    <option value="">Select education level</option>
+                    {EDUCATION_LEVEL_OPTIONS.map((e) => (
+                      <option key={e.value} value={e.value}>
+                        {e.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                {!demographics.profession ? (
+                  <input
+                    value={professionInput}
+                    onChange={(e) => setProfessionInput(e.target.value)}
+                    placeholder="Profession"
+                    className="rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+                  />
+                ) : null}
+              </div>
+              {optionalError ? <p className="text-sm text-red-600">{optionalError}</p> : null}
+              {optionalSuccess ? <p className="text-sm text-emerald-600">{optionalSuccess}</p> : null}
+              <button
+                onClick={saveOptionalFields}
+                disabled={
+                  isSavingOptional ||
+                  (!subTribeInput.trim() && !quarterInput.trim() && !dialectInput.trim() && !educationLevelInput && !professionInput.trim())
+                }
+                className="btn-duo bg-brand px-5 py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+              >
+                {isSavingOptional ? "Saving..." : "Save"}
+              </button>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -314,7 +436,10 @@ export default function ProfilePage() {
       <div>
         <h2 className="mb-3 text-lg font-bold text-red-600">Danger Zone</h2>
         <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-red-200">
-          <p className="text-sm text-ink-muted">Deleting your account will remove login access.</p>
+          <p className="text-sm text-ink-muted">
+            Once you delete your account, you will lose access to all of your data and will not be able to login to
+            this account and sign up again with the same email.
+          </p>
           {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
           <button
             onClick={() => setConfirmingDelete(true)}
@@ -329,7 +454,7 @@ export default function ProfilePage() {
       <ConfirmDialog
         open={confirmingDelete}
         title="Delete your account?"
-        message="This permanently removes your personal information and signs you out. Your past contributions stay in the corpus, but this cannot be undone for your account."
+        message="Once you delete your account, you will lose access to all of your data and will not be able to login to this account and sign up again with the same email."
         confirmLabel="Delete Account"
         danger
         onConfirm={handleDeleteAccount}

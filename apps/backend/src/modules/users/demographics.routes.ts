@@ -210,6 +210,14 @@ const submitDemographicsSchema = z.object({
   profession: z.string().trim().min(1).optional(),
 });
 
+const fillOptionalDemographicsSchema = z.object({
+  subTribes: z.array(z.string().trim().min(1)).optional(),
+  quarter: z.string().trim().min(1).optional(),
+  dialect: z.string().trim().min(1).optional(),
+  educationLevel: z.enum(EDUCATION_LEVEL_OPTIONS).optional(),
+  profession: z.string().trim().min(1).optional(),
+});
+
 /* -------------------------------------------------------------------------- */
 /*                                    Routes                                  */
 /* -------------------------------------------------------------------------- */
@@ -291,6 +299,80 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       .where(eq(contributorDemographics.userId, request.user!.id))
       .limit(1);
     return row ?? null;
+  });
+
+  // Fills in whichever optional demographics fields (sub-tribe, quarter,
+  // dialect, education level, profession) were skipped at signup -- each
+  // one, once set (here or during the original onboarding submit), becomes
+  // permanently locked: any field that already has a value is silently left
+  // untouched rather than overwritten, since these are meant to be provided
+  // once, not edited.
+  fastify.put("/me/demographics/optional", { preHandler: verifyToken }, async (request) => {
+    const body = fillOptionalDemographicsSchema.parse(request.body);
+    const userId = request.user!.id;
+
+    const [current] = await db
+      .select({
+        tribeId: contributorDemographics.tribeId,
+        subTribeId: contributorDemographics.subTribeId,
+        villageId: contributorDemographics.villageId,
+        quarterId: contributorDemographics.quarterId,
+        dialect: contributorDemographics.dialect,
+        educationLevel: contributorDemographics.educationLevel,
+        profession: contributorDemographics.profession,
+      })
+      .from(contributorDemographics)
+      .where(eq(contributorDemographics.userId, userId))
+      .limit(1);
+
+    if (!current) {
+      throw new HttpError(404, "NOT_FOUND", "Complete the sign-up demographics form first");
+    }
+
+    const [subTribeId, quarterId] = await Promise.all([
+      !current.subTribeId && body.subTribes && body.subTribes.length > 0
+        ? resolveSubTribeChain(current.tribeId, body.subTribes)
+        : Promise.resolve(undefined),
+      !current.quarterId && body.quarter ? getOrCreateQuarter(current.villageId, body.quarter) : Promise.resolve(undefined),
+    ]);
+
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+    if (subTribeId !== undefined) updates.subTribeId = subTribeId;
+    if (quarterId !== undefined) updates.quarterId = quarterId;
+    if (!current.dialect && body.dialect) updates.dialect = body.dialect;
+    if (!current.educationLevel && body.educationLevel) updates.educationLevel = body.educationLevel;
+    if (!current.profession && body.profession) updates.profession = body.profession;
+
+    if (Object.keys(updates).length > 1) {
+      await db.update(contributorDemographics).set(updates).where(eq(contributorDemographics.userId, userId));
+    }
+
+    const [updated] = await db
+      .select({
+        fullName: contributorDemographics.fullName,
+        age: contributorDemographics.age,
+        dateOfBirth: contributorDemographics.dateOfBirth,
+        gender: contributorDemographics.gender,
+        motherTongue: contributorDemographics.motherTongue,
+        country: contributorDemographics.country,
+        city: contributorDemographics.city,
+        dialect: contributorDemographics.dialect,
+        educationLevel: contributorDemographics.educationLevel,
+        profession: contributorDemographics.profession,
+        tribeName: tribes.name,
+        subTribeName: subTribes.name,
+        villageName: villages.name,
+        quarterName: quarters.name,
+      })
+      .from(contributorDemographics)
+      .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+      .leftJoin(subTribes, eq(subTribes.id, contributorDemographics.subTribeId))
+      .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+      .leftJoin(quarters, eq(quarters.id, contributorDemographics.quarterId))
+      .where(eq(contributorDemographics.userId, userId))
+      .limit(1);
+
+    return updated;
   });
 
   fastify.post("/me/demographics", { preHandler: verifyToken }, async (request) => {

@@ -72,6 +72,7 @@ export default function AdminScenesPage() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
@@ -115,16 +116,22 @@ export default function AdminScenesPage() {
 
   async function load() {
     setLoading(true);
-    const [sceneRes, conceptRes, allSceneRes] = await Promise.all([
-      api.scenes.getAll({ limit: PAGE_SIZE, offset }),
-      api.concepts.getAll({ limit: 200 }),
-      api.scenes.getAll({ limit: 1000 }),
-    ]);
-    setScenes(sceneRes.items);
-    setTotal(sceneRes.total);
-    setConcepts(conceptRes.items);
-    setAllScenes(allSceneRes.items);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const [sceneRes, conceptRes, allSceneRes] = await Promise.all([
+        api.scenes.getAll({ limit: PAGE_SIZE, offset }),
+        api.concepts.getAll({ limit: 200 }),
+        api.scenes.getAll({ limit: 1000 }),
+      ]);
+      setScenes(sceneRes.items);
+      setTotal(sceneRes.total);
+      setConcepts(conceptRes.items);
+      setAllScenes(allSceneRes.items);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load scenes");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -554,6 +561,8 @@ export default function AdminScenesPage() {
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
+      ) : loadError ? (
+        <p className="text-red-600">{loadError}</p>
       ) : (
         <div className="space-y-3">
           {scenes.length > 0 && (

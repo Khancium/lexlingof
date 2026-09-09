@@ -232,6 +232,14 @@ export type SubmitDemographicsInput = {
   profession?: string;
 };
 
+export type FillOptionalDemographicsInput = {
+  subTribes?: string[];
+  quarter?: string;
+  dialect?: string;
+  educationLevel?: EducationLevel;
+  profession?: string;
+};
+
 export type UserStatsResponse = {
   stats: {
     totalContributions: number;
@@ -467,6 +475,7 @@ export type Scene = {
   estimatedDurationSeconds: number | null;
   isDaily: boolean;
   imageUrl: string | null;
+  hasContributed?: boolean;
 };
 export type ScenesResponse = { items: Scene[]; limit: number; offset: number; total: number };
 
@@ -814,6 +823,8 @@ export const api = {
       apiClient.get<ContributorDemographics | null>("/api/v1/users/me/demographics").then((r) => r.data),
     submit: (data: SubmitDemographicsInput) =>
       apiClient.post<ContributorDemographics>("/api/v1/users/me/demographics", data).then((r) => r.data),
+    fillOptional: (data: FillOptionalDemographicsInput) =>
+      apiClient.put<ContributorDemographics>("/api/v1/users/me/demographics/optional", data).then((r) => r.data),
   },
 
   categories: {

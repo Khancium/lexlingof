@@ -18,6 +18,7 @@ export default function AdminConceptsPage() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [newCategoryId, setNewCategoryId] = useState("");
   const [newLabel, setNewLabel] = useState("");
@@ -44,16 +45,22 @@ export default function AdminConceptsPage() {
 
   async function load() {
     setLoading(true);
-    const [cats, res, allRes] = await Promise.all([
-      api.categories.getAll(),
-      api.concepts.getAll({ limit: PAGE_SIZE, offset }),
-      api.concepts.getAll({ limit: 1000 }),
-    ]);
-    setCategories(cats);
-    setConcepts(res.items);
-    setTotal(res.total);
-    setAllConcepts(allRes.items);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const [cats, res, allRes] = await Promise.all([
+        api.categories.getAll(),
+        api.concepts.getAll({ limit: PAGE_SIZE, offset }),
+        api.concepts.getAll({ limit: 1000 }),
+      ]);
+      setCategories(cats);
+      setConcepts(res.items);
+      setTotal(res.total);
+      setAllConcepts(allRes.items);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load concepts");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -262,6 +269,8 @@ export default function AdminConceptsPage() {
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
+      ) : loadError ? (
+        <p className="text-red-600">{loadError}</p>
       ) : (
         <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">

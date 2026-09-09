@@ -62,14 +62,26 @@ function sceneSelection() {
   };
 }
 
-export async function getScenes(limit: number, offset: number, search?: string) {
+export async function getScenes(limit: number, offset: number, userId: string, search?: string) {
   const whereClause = search
     ? and(eq(scenes.isActive, true), isNull(scenes.deletedAt), ilike(scenes.title, `%${search}%`))
     : and(eq(scenes.isActive, true), isNull(scenes.deletedAt));
 
   const [items, [totalRow]] = await Promise.all([
     db
-      .select(sceneSelection())
+      .select({
+        ...sceneSelection(),
+        // Tile shading on the browse grid needs a per-user "have I already
+        // described this scene" signal, computed here so the grid doesn't
+        // need N follow-up requests to find out.
+        hasContributed: sql<boolean>`exists (
+          select 1 from ${contributions}
+          inner join ${sceneContributions} on ${sceneContributions.id} = ${contributions.sceneContributionId}
+          where ${sceneContributions.sceneId} = ${scenes.id}
+            and ${contributions.userId} = ${userId}
+            and ${contributions.deletedAt} is null
+        )`,
+      })
       .from(scenes)
       .leftJoin(sceneMedia, and(eq(sceneMedia.sceneId, scenes.id), eq(sceneMedia.isPrimary, true)))
       .where(whereClause)

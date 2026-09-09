@@ -5,20 +5,16 @@ import Image from "next/image";
 import Link from "next/link";
 import { api, getErrorMessage, type Scene } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
+import { useAuthStore } from "@/lib/store";
+import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "browse" | "record";
 
-const DIFFICULTY_COLOR: Record<Scene["difficulty"], string> = {
-  easy: "bg-emerald-600",
-  medium: "bg-yellow-600",
-  hard: "bg-orange-600",
-  expert: "bg-red-600",
-};
-
 export default function ScenePage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+  const userId = useAuthStore((state) => state.user?.id);
 
   const [step, setStep] = useState<Step>("browse");
 
@@ -43,14 +39,15 @@ export default function ScenePage() {
     setScenesError(null);
     api.scenes
       .getAll({ search: searchText.trim() || undefined, limit: 100 })
-      .then((res) => setScenes(res.items))
+      .then((res) => setScenes(userId ? seededShuffle(res.items, userId) : res.items))
       .catch((err) => setScenesError(err instanceof Error ? err.message : "Failed to load scenes"))
       .finally(() => setLoadingScenes(false));
   }
 
   useEffect(() => {
     loadScenes("");
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   // Re-query as the admin types, rather than filtering the already-fetched
   // page client-side, since a search can match scenes outside the first 100.
@@ -156,7 +153,9 @@ export default function ScenePage() {
               <button
                 key={s.id}
                 onClick={() => openScene(s)}
-                className="card-duo relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl bg-surface p-3 text-center shadow-sm transition hover:shadow-md"
+                className={`card-duo relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl p-3 text-center shadow-sm transition hover:shadow-md ${
+                  s.hasContributed ? "bg-brand-light/40" : "bg-surface"
+                }`}
               >
                 {s.imageUrl ? (
                   <Image src={s.imageUrl} alt="" width={96} height={96} className="h-24 w-24 rounded-lg object-cover" />
@@ -164,9 +163,7 @@ export default function ScenePage() {
                   <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-surface-card text-3xl">🖼️</div>
                 )}
                 <span className="text-sm font-semibold text-ink">{s.title}</span>
-                <span className={`rounded px-2 py-0.5 text-[10px] font-bold capitalize text-white ${DIFFICULTY_COLOR[s.difficulty]}`}>
-                  {s.difficulty}
-                </span>
+                {s.hasContributed ? <span className="text-xs text-brand-dark">✓ Contributed</span> : null}
               </button>
             ))}
           </div>
@@ -196,11 +193,6 @@ export default function ScenePage() {
             ) : (
               <div className="flex h-80 w-full items-center justify-center text-5xl">🖼️</div>
             )}
-            <span
-              className={`absolute bottom-3 left-3 rounded px-2 py-1 text-xs font-bold capitalize text-white ${DIFFICULTY_COLOR[scene.difficulty]}`}
-            >
-              {scene.difficulty}
-            </span>
             <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
               {scene.title}
             </span>

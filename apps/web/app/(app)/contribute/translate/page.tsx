@@ -4,19 +4,22 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
+import { useAuthStore } from "@/lib/store";
+import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
-type Draft = { translation: string; romanization: string; ipa: string; recording: Recording | null };
+type Draft = { transcription: string; romanization: string; ipa: string; recording: Recording | null };
 
 // The backend enforces no duration cap for Module 3, but the spec calls for
 // a soft ceiling here ("no 3-second limit, can go up to 60 seconds").
 const MAX_DURATION_MS = 60000;
 
-const emptyDraft: Draft = { translation: "", romanization: "", ipa: "", recording: null };
+const emptyDraft: Draft = { transcription: "", romanization: "", ipa: "", recording: null };
 
 export default function TranslatePage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+  const userId = useAuthStore((state) => state.user?.id);
 
   // History of sentences visited this session, so Previous/Next can move
   // back and forth without re-fetching or losing in-progress drafts.
@@ -81,11 +84,11 @@ export default function TranslatePage() {
     const timeout = setTimeout(() => {
       api.contributions
         .searchSentences({ search: search.trim(), limit: 10 })
-        .then((res) => setSearchResults(res.items))
+        .then((res) => setSearchResults(userId ? seededShuffle(res.items, userId) : res.items))
         .finally(() => setSearching(false));
     }, 250);
     return () => clearTimeout(timeout);
-  }, [search]);
+  }, [search, userId]);
 
   function openSearchResult(result: RandomSentence) {
     setSearch("");
@@ -127,7 +130,7 @@ export default function TranslatePage() {
       await api.buffer.submitTranslation(
         {
           sentenceId: sentence.id,
-          nativeText: draft.translation.trim() || undefined,
+          nativeText: draft.transcription.trim() || undefined,
           romanization: draft.romanization.trim() || undefined,
           ipa: draft.ipa.trim() || undefined,
           languageId,
@@ -228,15 +231,15 @@ export default function TranslatePage() {
               onClick={() => setDetailsOpen((v) => !v)}
               className="flex w-full items-center justify-between px-5 py-4 text-left"
             >
-              <span className="font-medium text-ink">Add translation text (optional)</span>
+              <span className="font-medium text-ink">Add transcription (optional)</span>
               <span className={`text-ink-muted transition-transform ${detailsOpen ? "rotate-180" : ""}`}>▾</span>
             </button>
             {detailsOpen && (
               <div className="space-y-3 px-5 pb-5">
                 <textarea
-                  value={draft.translation}
-                  onChange={(e) => updateDraft({ translation: e.target.value })}
-                  placeholder="Translation"
+                  value={draft.transcription}
+                  onChange={(e) => updateDraft({ transcription: e.target.value })}
+                  placeholder="Transcription (Pashto native script)"
                   rows={3}
                   className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
                 />
