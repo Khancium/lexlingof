@@ -230,15 +230,20 @@ export default async function usersRoutes(fastify: FastifyInstance) {
   });
 
   // Self-service account deletion. This is a soft delete that scrubs PII
-  // (email, password, display name, avatar, biography, demographics) and
-  // revokes sessions -- it deliberately does NOT touch contributions,
-  // wordRecordings, translations, audioUploads, sceneContributions, or
-  // reviews, since those rows carry no PII themselves and FK-restrict back
-  // to users.id (a hard delete would either fail on those constraints or,
-  // on the tables that do cascade, wipe stats/badges/notifications that
-  // aren't "contributed data"). Keeping the same users.id row alive (rather
-  // than hard-deleting it) is what keeps every one of those references
-  // valid, so the corpus data this user contributed survives intact.
+  // (password, display name, avatar, biography, demographics) and revokes
+  // sessions -- it deliberately does NOT touch contributions, wordRecordings,
+  // translations, audioUploads, sceneContributions, or reviews, since those
+  // rows carry no PII themselves and FK-restrict back to users.id (a hard
+  // delete would either fail on those constraints or, on the tables that do
+  // cascade, wipe stats/badges/notifications that aren't "contributed
+  // data"). Keeping the same users.id row alive (rather than hard-deleting
+  // it) is what keeps every one of those references valid, so the corpus
+  // data this user contributed survives intact.
+  //
+  // The email is deliberately NOT scrubbed/freed here -- auth.service.ts's
+  // register() checks for this email across ALL rows (not just non-deleted
+  // ones), so keeping it on this row is what permanently blocks the same
+  // email from registering a new account.
   fastify.delete("/me", { preHandler: verifyToken }, async (request) => {
     const userId = request.user!.id;
 
@@ -246,7 +251,6 @@ export default async function usersRoutes(fastify: FastifyInstance) {
       db
         .update(users)
         .set({
-          email: `deleted-${userId}@lexlingo.invalid`,
           passwordHash: null,
           displayName: "Deleted User",
           avatarUrl: null,

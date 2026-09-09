@@ -3,7 +3,8 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { categories, conceptMedia, concepts } from "../../db/schema.js";
+import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
+import { verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const LIST_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -35,14 +36,36 @@ async function loadActiveCategoriesWithCounts() {
   }));
 }
 
+/**
+ * How many distinct concepts this user has at least one live recording for,
+ * per category -- for the category tiles' progress bars. Kept as its own
+ * lightweight per-request query rather than folded into the cached
+ * category+conceptCount list above, since that cache is shared across every
+ * user and must stay user-agnostic.
+ */
+async function loadContributedCountsByCategory(userId: string): Promise<Map<string, number>> {
+  const rows = await db
+    .selectDistinct({ categoryId: concepts.categoryId, conceptId: wordRecordings.conceptId })
+    .from(wordRecordings)
+    .innerJoin(concepts, eq(concepts.id, wordRecordings.conceptId))
+    .where(and(eq(wordRecordings.userId, userId), isNull(wordRecordings.deletedAt)));
+
+  const countByCategory = new Map<string, number>();
+  for (const row of rows) {
+    countByCategory.set(row.categoryId, (countByCategory.get(row.categoryId) ?? 0) + 1);
+  }
+  return countByCategory;
+}
+
 const idParamSchema = z.object({ id: z.string().uuid() });
 
 export default async function categoriesRoutes(fastify: FastifyInstance) {
-  fastify.get("/categories", async () => {
+  fastify.get("/categories", { preHandler: verifyToken }, async (request) => {
     if (!listCache || listCache.expiresAt <= Date.now()) {
       listCache = { data: await loadActiveCategoriesWithCounts(), expiresAt: Date.now() + LIST_CACHE_TTL_MS };
     }
-    return listCache.data;
+    const contributedByCategory = await loadContributedCountsByCategory(request.user!.id);
+    return listCache.data.map((c) => ({ ...c, contributedCount: contributedByCategory.get(c.id) ?? 0 }));
   });
 
   fastify.get("/categories/:id", async (request) => {

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   api,
   getErrorMessage,
@@ -26,6 +27,7 @@ export default function ConceptPage() {
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [category, setCategory] = useState<Category | null>(null);
+  const [lastVisitedCategory, setLastVisitedCategory] = useState<Category | null>(null);
 
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
@@ -66,6 +68,7 @@ export default function ConceptPage() {
 
   function openCategory(c: Category) {
     setCategory(c);
+    setLastVisitedCategory(c);
     setStep("concepts");
     setConceptSearch("");
     loadConcepts(c.id, "");
@@ -107,6 +110,14 @@ export default function ConceptPage() {
       setLoadingConcept(false);
     }
   }, []);
+
+  const conceptIndex = concept ? concepts.findIndex((c) => c.id === concept.id) : -1;
+
+  function goToAdjacentConcept(direction: 1 | -1) {
+    if (conceptIndex === -1) return;
+    const nextItem = concepts[conceptIndex + direction];
+    if (nextItem) openConcept(nextItem);
+  }
 
   function selectSynonym(idx: 1 | 2 | 3) {
     if (idx === synonymIndex) return;
@@ -158,7 +169,14 @@ export default function ConceptPage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center gap-3">
-        {step !== "categories" && (
+        {step === "categories" ? (
+          <Link
+            href="/contribute"
+            className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+          >
+            ← Back to Contribute
+          </Link>
+        ) : (
           <button
             onClick={() => (step === "record" ? setStep("concepts") : setStep("categories"))}
             className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
@@ -166,23 +184,38 @@ export default function ConceptPage() {
             ← Back
           </button>
         )}
-        <h1 className="text-2xl font-bold text-ink">{category ? category.nameEnglish : "Record a Word"}</h1>
+        <h1 className="text-2xl font-bold text-ink">
+          {step === "categories" ? "Record a Word" : category ? category.nameEnglish : "Record a Word"}
+        </h1>
       </div>
 
       {step === "categories" && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-          {categories.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => openCategory(c)}
-              className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
-            >
-              <span className="text-4xl">{c.icon ?? "📦"}</span>
-              <span className="font-semibold text-ink">{c.nameEnglish}</span>
-              <span className="text-xs text-ink-muted">{c.conceptCount} objects</span>
-            </button>
-          ))}
-        </div>
+        <>
+          <p className="text-sm font-semibold text-ink-muted">
+            {lastVisitedCategory ? `Recently visited: ${lastVisitedCategory.nameEnglish}` : "Categories"}
+          </p>
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {categories.map((c) => {
+              const pct = c.conceptCount > 0 ? Math.min(100, Math.round((c.contributedCount / c.conceptCount) * 100)) : 0;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => openCategory(c)}
+                  className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
+                >
+                  <span className="text-4xl">{c.icon ?? "📦"}</span>
+                  <span className="font-semibold text-ink">{c.nameEnglish}</span>
+                  <span className="text-xs text-ink-muted">
+                    {c.contributedCount} / {c.conceptCount} objects
+                  </span>
+                  <div className="progress-duo-track h-1.5 w-full">
+                    <div className="progress-duo-fill bg-brand" style={{ width: `${pct}%` }} />
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {step === "concepts" && (
@@ -329,6 +362,23 @@ export default function ConceptPage() {
                 <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
               ) : null}
               {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => goToAdjacentConcept(-1)}
+                  disabled={conceptIndex <= 0}
+                  className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
+                >
+                  ← Previous
+                </button>
+                <button
+                  onClick={() => goToAdjacentConcept(1)}
+                  disabled={conceptIndex === -1 || conceptIndex >= concepts.length - 1}
+                  className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
+                >
+                  Next →
+                </button>
+              </div>
 
               <button
                 onClick={handleSubmit}

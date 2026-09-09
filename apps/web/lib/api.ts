@@ -279,7 +279,14 @@ export type Language = {
   dialects: Dialect[];
 };
 
-export type Category = { id: string; slug: string; nameEnglish: string; icon: string | null; conceptCount: number };
+export type Category = {
+  id: string;
+  slug: string;
+  nameEnglish: string;
+  icon: string | null;
+  conceptCount: number;
+  contributedCount: number;
+};
 
 export type ConceptsQuery = { categoryId?: string; search?: string; limit?: number; offset?: number };
 export type ConceptListItem = {

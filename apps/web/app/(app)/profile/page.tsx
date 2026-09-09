@@ -314,10 +314,7 @@ export default function ProfilePage() {
       <div>
         <h2 className="mb-3 text-lg font-bold text-red-600">Danger Zone</h2>
         <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm ring-1 ring-red-200">
-          <p className="text-sm text-ink-muted">
-            Deleting your account removes your personal information and login access. Your contributions to the corpus
-            (recordings, translations, and descriptions) stay in the dataset and are not deleted.
-          </p>
+          <p className="text-sm text-ink-muted">Deleting your account will remove login access.</p>
           {deleteError ? <p className="text-sm text-red-600">{deleteError}</p> : null}
           <button
             onClick={() => setConfirmingDelete(true)}

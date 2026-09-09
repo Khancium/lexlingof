@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
@@ -158,7 +159,15 @@ export default function TranslatePage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <h1 className="text-2xl font-bold text-ink">Translate a Sentence</h1>
+      <div className="flex items-center gap-3">
+        <Link
+          href="/contribute"
+          className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+        >
+          ← Back to Contribute
+        </Link>
+        <h1 className="text-2xl font-bold text-ink">Translate a Sentence</h1>
+      </div>
 
       <div className="relative">
         <input

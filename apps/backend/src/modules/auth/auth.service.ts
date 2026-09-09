@@ -25,11 +25,11 @@ class AuthService {
     password: string,
     displayName: string,
   ): Promise<{ user: AuthUser } & TokenPair> {
-    const [existing] = await db
-      .select({ id: users.id })
-      .from(users)
-      .where(and(eq(users.email, email), isNull(users.deletedAt)))
-      .limit(1);
+    // Deliberately NOT scoped to isNull(deletedAt) -- a deleted account's row
+    // keeps its original email (see users.routes.ts DELETE /me, which no
+    // longer scrubs it) specifically so that email can never be used to
+    // register again, active or not.
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
 
     if (existing) {
       throw new HttpError(409, "EMAIL_TAKEN", "Account on this email already exists");

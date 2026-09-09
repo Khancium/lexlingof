@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { api, getErrorMessage, type Scene } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
@@ -108,11 +109,26 @@ export default function ScenePage() {
   }
 
   const canSubmit = !!recording && recording !== lastSubmittedRecording && !!languageId && !isSubmitting;
+  const sceneIndex = scene ? scenes.findIndex((s) => s.id === scene.id) : -1;
+
+  function goToAdjacentScene(direction: 1 | -1) {
+    if (sceneIndex === -1) return;
+    const nextItem = scenes[sceneIndex + direction];
+    if (nextItem) openScene(nextItem);
+  }
 
   if (step === "browse") {
     return (
       <div className="mx-auto max-w-4xl space-y-6">
-        <h1 className="text-2xl font-bold text-ink">Describe a Scene</h1>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/contribute"
+            className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+          >
+            ← Back to Contribute
+          </Link>
+          <h1 className="text-2xl font-bold text-ink">Describe a Scene</h1>
+        </div>
 
         <input
           value={search}
@@ -211,6 +227,25 @@ export default function ScenePage() {
             <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
           ) : null}
           {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+
+          {sceneIndex !== -1 ? (
+            <div className="flex gap-3">
+              <button
+                onClick={() => goToAdjacentScene(-1)}
+                disabled={sceneIndex <= 0}
+                className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
+              >
+                ← Previous
+              </button>
+              <button
+                onClick={() => goToAdjacentScene(1)}
+                disabled={sceneIndex >= scenes.length - 1}
+                className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
+              >
+                Next →
+              </button>
+            </div>
+          ) : null}
 
           <button
             onClick={handleSubmit}

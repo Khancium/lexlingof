@@ -22,6 +22,13 @@ const FILTERS: { label: string; value: ModuleType | undefined }[] = [
 
 const PAGE_SIZE = 20;
 
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 function contributionTitle(item: ContributionListItem): string {
   const d = item.detail;
   if (!d) return MODULE_LABEL[item.moduleType];
@@ -57,6 +64,8 @@ export default function ContributionsPage() {
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [playUrlCache, setPlayUrlCache] = useState<Record<string, string>>({});
   const [playError, setPlayError] = useState<{ id: string; message: string } | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   const [pending, setPending] = useState<PendingSubmissionItem[]>([]);
 
@@ -115,6 +124,8 @@ export default function ContributionsPage() {
     const audioFileId = item.detail?.audioFileId;
     if (!audioFileId) return;
     setPlayError(null);
+    setCurrentTime(0);
+    setDuration(0);
 
     const cachedUrl = playUrlCache[item.id];
     if (cachedUrl) {
@@ -138,6 +149,15 @@ export default function ContributionsPage() {
     }
   }
 
+  function seek(e: React.MouseEvent<HTMLDivElement>) {
+    const audioEl = audioRef.current;
+    if (!audioEl || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    audioEl.currentTime = fraction * duration;
+    setCurrentTime(fraction * duration);
+  }
+
   return (
     <div className="space-y-6">
       {/* Hidden -- playback is driven entirely by the Play/Stop buttons below,
@@ -145,7 +165,13 @@ export default function ContributionsPage() {
          wired to clear playingId: swapping .src on this same element to
          switch tracks fires a pause event first, which would otherwise
          race the very setPlayingId(item.id) that follows it. */}
-      <audio ref={audioRef} onEnded={() => setPlayingId(null)} className="hidden" />
+      <audio
+        ref={audioRef}
+        onEnded={() => setPlayingId(null)}
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        className="hidden"
+      />
 
       <h1 className="text-2xl font-bold text-ink">My Contributions</h1>
 
@@ -188,42 +214,57 @@ export default function ContributionsPage() {
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <div key={item.id} className="card-duo flex items-center gap-4 rounded-2xl bg-surface p-4 shadow-sm">
-              {item.detail?.imageUrl ? (
-                <Image
-                  src={item.detail.imageUrl}
-                  alt=""
-                  width={56}
-                  height={56}
-                  className="h-14 w-14 flex-shrink-0 rounded-lg object-cover"
-                />
-              ) : (
-                <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-surface-card text-xl">
-                  {item.moduleType === "SCENE" ? "🖼️" : item.moduleType === "TRANSLATION" ? "🌐" : "🎙️"}
+            <div key={item.id} className="card-duo flex flex-col gap-2 rounded-2xl bg-surface p-4 shadow-sm">
+              <div className="flex items-center gap-4">
+                {item.detail?.imageUrl ? (
+                  <Image
+                    src={item.detail.imageUrl}
+                    alt=""
+                    width={56}
+                    height={56}
+                    className="h-14 w-14 flex-shrink-0 rounded-lg object-cover"
+                  />
+                ) : (
+                  <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-surface-card text-xl">
+                    {item.moduleType === "SCENE" ? "🖼️" : item.moduleType === "TRANSLATION" ? "🌐" : "🎙️"}
+                  </div>
+                )}
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{MODULE_LABEL[item.moduleType]}</p>
+                  <p className="truncate font-medium text-ink">{contributionTitle(item)}</p>
+                  <p className="text-xs text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</p>
+                  {playError?.id === item.id ? <p className="mt-1 text-xs text-red-600">{playError.message}</p> : null}
                 </div>
-              )}
 
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold uppercase tracking-wide text-ink-muted">{MODULE_LABEL[item.moduleType]}</p>
-                <p className="truncate font-medium text-ink">{contributionTitle(item)}</p>
-                <p className="text-xs text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</p>
-                {playError?.id === item.id ? <p className="mt-1 text-xs text-red-600">{playError.message}</p> : null}
+                <div className="flex flex-shrink-0 items-center gap-4">
+                  {item.detail?.audioFileId ? (
+                    <button
+                      onClick={() => togglePlay(item)}
+                      disabled={loadingId === item.id}
+                      className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+                    >
+                      {loadingId === item.id ? "Loading..." : playingId === item.id ? "■ Stop" : "▶ Play"}
+                    </button>
+                  ) : null}
+                  <span className="text-sm font-semibold text-emerald-600">
+                    {item.totalPoints != null ? `+${item.totalPoints}` : "--"}
+                  </span>
+                </div>
               </div>
 
-              <div className="flex flex-shrink-0 items-center gap-4">
-                {item.detail?.audioFileId ? (
-                  <button
-                    onClick={() => togglePlay(item)}
-                    disabled={loadingId === item.id}
-                    className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
-                  >
-                    {loadingId === item.id ? "Loading..." : playingId === item.id ? "■ Stop" : "▶ Play"}
-                  </button>
-                ) : null}
-                <span className="text-sm font-semibold text-emerald-600">
-                  {item.totalPoints != null ? `+${item.totalPoints}` : "--"}
-                </span>
-              </div>
+              {playingId === item.id ? (
+                <div className="flex items-center gap-2 pl-[72px]">
+                  <span className="w-9 flex-shrink-0 text-xs tabular-nums text-ink-muted">{formatTime(currentTime)}</span>
+                  <div onClick={seek} className="h-1.5 flex-1 cursor-pointer rounded-full bg-surface-card">
+                    <div
+                      className="h-full rounded-full bg-brand"
+                      style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <span className="w-9 flex-shrink-0 text-xs tabular-nums text-ink-muted">{formatTime(duration)}</span>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
