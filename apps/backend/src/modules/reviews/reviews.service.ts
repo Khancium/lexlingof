@@ -7,6 +7,7 @@ import {
   conceptMedia,
   contributionModule,
   contributions,
+  contributorDemographics,
   gamificationConfig,
   languages,
   pointsTransactions,
@@ -17,6 +18,7 @@ import {
   sentences,
   transcriptions,
   translations,
+  userRole,
   userStats,
   users,
   wordRecordings,
@@ -26,6 +28,7 @@ import { HttpError } from "../../utils/http-error.js";
 
 type Module = (typeof contributionModule.enumValues)[number];
 type Decision = "valid" | "needs_correction" | "invalid";
+type Role = (typeof userRole.enumValues)[number];
 
 export type SubmitReviewInput = {
   contributionId: string;
@@ -65,10 +68,36 @@ async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[
   return (config.configValue as { value: number }).value;
 }
 
-export async function getQueue(reviewerId: string, moduleType?: Module) {
+async function getDemographics(userId: string): Promise<{ tribeId: string; city: string } | null> {
+  const [row] = await db
+    .select({ tribeId: contributorDemographics.tribeId, city: contributorDemographics.city })
+    .from(contributorDemographics)
+    .where(eq(contributorDemographics.userId, userId))
+    .limit(1);
+
+  return row ?? null;
+}
+
+export async function getQueue(reviewerId: string, reviewerRole: Role, moduleType?: Module) {
   const conditions = [eq(contributions.status, "pending"), ne(contributions.userId, reviewerId), isNull(contributions.deletedAt)];
   if (moduleType) {
     conditions.push(eq(contributions.moduleType, moduleType));
+  }
+
+  // Peer review is scoped to the reviewer's own tribe + city -- admins and
+  // super_admins are moderators rather than peers, and keep the old
+  // unrestricted queue (mirrors requireReviewerEligibility's level-gating
+  // exemption for those roles).
+  if (reviewerRole === "contributor") {
+    const reviewerDemo = await getDemographics(reviewerId);
+    if (!reviewerDemo) {
+      // No tribe/city on file -- nothing can match, so there's nothing to review.
+      return [];
+    }
+    conditions.push(
+      eq(contributorDemographics.tribeId, reviewerDemo.tribeId),
+      eq(contributorDemographics.city, reviewerDemo.city),
+    );
   }
 
   // One wide left-join across every module's payload table: each row only
@@ -110,6 +139,7 @@ export async function getQueue(reviewerId: string, moduleType?: Module) {
     })
     .from(contributions)
     .innerJoin(users, eq(users.id, contributions.userId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, contributions.userId))
     .leftJoin(languages, eq(languages.id, contributions.languageId))
     .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
     .leftJoin(
@@ -177,7 +207,7 @@ export async function getQueue(reviewerId: string, moduleType?: Module) {
   });
 }
 
-export async function submitReview(reviewerId: string, data: SubmitReviewInput) {
+export async function submitReview(reviewerId: string, reviewerRole: Role, data: SubmitReviewInput) {
   // 1. Find contribution.
   const [contribution] = await db
     .select({
@@ -199,12 +229,29 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
     throw new HttpError(403, "SELF_REVIEW_FORBIDDEN", "You cannot review your own contributions");
   }
 
+  // 2b. CRITICAL: tribe + city guard. The queue already filters to matches,
+  // but that's only a hint -- this is the authoritative check, since a
+  // client could POST any contributionId directly. Admins/super_admins are
+  // moderators, not peers, and are exempt (mirrors the queue's exemption).
+  if (reviewerRole === "contributor") {
+    const [reviewerDemo, submitterDemo] = await Promise.all([
+      getDemographics(reviewerId),
+      getDemographics(contribution.userId),
+    ]);
+    if (
+      !reviewerDemo ||
+      !submitterDemo ||
+      reviewerDemo.tribeId !== submitterDemo.tribeId ||
+      reviewerDemo.city !== submitterDemo.city
+    ) {
+      throw new HttpError(403, "TRIBE_CITY_MISMATCH", "You can only review contributions from your own tribe and city");
+    }
+  }
+
   // 3. Must still be pending.
   if (contribution.status !== "pending") {
     throw new HttpError(409, "CONTRIBUTION_NOT_PENDING", `Contribution status is '${contribution.status}', not 'pending'`);
   }
-
-  const [reviewer] = await db.select({ role: users.role }).from(users).where(eq(users.id, reviewerId)).limit(1);
 
   const result = await db.transaction(async (tx) => {
     // 4. Status before the review.
@@ -316,7 +363,7 @@ export async function submitReview(reviewerId: string, data: SubmitReviewInput) 
     // 11. Audit trail.
     await tx.insert(auditLogs).values({
       actorId: reviewerId,
-      actorRole: reviewer?.role ?? null,
+      actorRole: reviewerRole,
       action: "contribution_review",
       resourceType: "contribution",
       resourceId: contribution.id,

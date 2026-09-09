@@ -19,12 +19,12 @@ export default async function reviewsRoutes(fastify: FastifyInstance) {
 
   fastify.get("/queue", { preHandler: reviewerOnly }, async (request) => {
     const { moduleType } = queueQuerySchema.parse(request.query);
-    return getQueue(request.user!.id, moduleType);
+    return getQueue(request.user!.id, request.user!.role, moduleType);
   });
 
   fastify.post("/", { preHandler: reviewerOnly }, async (request, reply) => {
     const body = submitReviewSchema.parse(request.body);
-    const result = await submitReview(request.user!.id, body);
+    const result = await submitReview(request.user!.id, request.user!.role, body);
     reply.code(201).send(result);
   });
 }
