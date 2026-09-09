@@ -74,7 +74,10 @@ export default function NotificationBell() {
   function handleView(item: NotificationItem) {
     markRead(item);
     setOpen(false);
-    router.push("/contributions");
+    const pendingSubmissionId = item.data.pendingSubmissionId;
+    router.push(
+      typeof pendingSubmissionId === "string" ? `/contributions?failed=${pendingSubmissionId}` : "/contributions",
+    );
   }
 
   return (

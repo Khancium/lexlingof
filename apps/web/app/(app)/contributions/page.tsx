@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import { api, type ContributionListItem, type ModuleType, type PendingSubmissionItem } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
@@ -47,6 +48,23 @@ function contributionTitle(item: ContributionListItem): string {
 }
 
 export default function ContributionsPage() {
+  return (
+    <Suspense fallback={<p className="text-ink-muted">Loading...</p>}>
+      <ContributionsPageInner />
+    </Suspense>
+  );
+}
+
+function ContributionsPageInner() {
+  // Set when arriving from a notification's "View" button on a failed
+  // submission (?failed=<pendingSubmissionId>) -- used to scroll to and
+  // highlight that exact pending item below instead of just landing on a
+  // generic list the user has to hunt through.
+  const searchParams = useSearchParams();
+  const highlightId = searchParams.get("failed");
+  const highlightRef = useRef<HTMLDivElement>(null);
+  const [hasScrolledToHighlight, setHasScrolledToHighlight] = useState(false);
+
   const [filter, setFilter] = useState<ModuleType | undefined>(undefined);
   const [items, setItems] = useState<ContributionListItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -97,6 +115,14 @@ export default function ContributionsPage() {
   useEffect(() => {
     loadPending();
   }, [loadPending]);
+
+  useEffect(() => {
+    if (!highlightId || hasScrolledToHighlight) return;
+    if (highlightRef.current) {
+      highlightRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHasScrolledToHighlight(true);
+    }
+  }, [highlightId, hasScrolledToHighlight, pending]);
 
   // While a buffered submission is still pending/processing, poll for it to
   // resolve into a real contribution -- then refresh both lists so it moves
@@ -208,19 +234,28 @@ export default function ContributionsPage() {
 
       {pending.length > 0 && (
         <div className="space-y-2">
-          {pending.map((p) => (
-            <div key={p.id} className="card-duo flex items-center gap-3 rounded-2xl bg-surface-card p-3 text-sm">
-              <span
-                className={`h-2 w-2 flex-shrink-0 rounded-full ${
-                  p.status === "failed" ? "bg-danger" : "animate-pulse bg-secondary"
+          {pending.map((p) => {
+            const isHighlighted = p.id === highlightId;
+            return (
+              <div
+                key={p.id}
+                ref={isHighlighted ? highlightRef : undefined}
+                className={`card-duo flex items-center gap-3 rounded-2xl p-3 text-sm transition-colors ${
+                  isHighlighted ? "bg-red-50 ring-2 ring-red-400" : "bg-surface-card"
                 }`}
-              />
-              <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
-              <span className={p.status === "failed" ? "text-danger" : "text-ink-muted"}>
-                {p.status === "failed" ? "Failed -- please record and submit again." : "Submitted, processing..."}
-              </span>
-            </div>
-          ))}
+              >
+                <span
+                  className={`h-2 w-2 flex-shrink-0 rounded-full ${
+                    p.status === "failed" ? "bg-danger" : "animate-pulse bg-secondary"
+                  }`}
+                />
+                <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
+                <span className={p.status === "failed" ? "text-danger" : "text-ink-muted"}>
+                  {p.status === "failed" ? "Failed -- please record and submit again." : "Submitted, processing..."}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
 
