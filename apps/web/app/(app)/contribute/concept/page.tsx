@@ -162,6 +162,10 @@ export default function ConceptPage() {
 
       setLastSubmittedRecording(recording);
       setRecordedSynonyms((prev) => (prev ? { ...prev, [synonymIndex]: true } : prev));
+      // Same auto-advance the translate module already does on submit --
+      // Previous/Next stay fully functional, this just saves the extra
+      // click to move on when there's a next object in the current list.
+      goToAdjacentConcept(1);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit recording"));
     } finally {

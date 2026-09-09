@@ -401,6 +401,7 @@ export type RandomSentence = {
   id: string;
   englishText: string;
   category: { id: string; name: string; slug: string } | null;
+  hasTranslated?: boolean;
 };
 export type SentencesResponse = { items: RandomSentence[]; limit: number; offset: number; total: number };
 
@@ -901,7 +902,7 @@ export const api = {
       apiClient.post<AddTranscriptionResponse>(`/api/v1/contributions/audio/${id}/transcription`, data).then((r) => r.data),
     addSegment: (id: string, data: AddSegmentInput) =>
       apiClient.post<AddSegmentResponse>(`/api/v1/contributions/audio/${id}/segments`, data).then((r) => r.data),
-    searchSentences: (params?: { search?: string; limit?: number; offset?: number }) =>
+    searchSentences: (params?: { search?: string; filter?: "translated" | "untranslated"; limit?: number; offset?: number }) =>
       apiClient.get<SentencesResponse>("/api/v1/sentences", { params }).then((r) => r.data),
     getSentenceById: (id: string) => apiClient.get<RandomSentence>(`/api/v1/sentences/${id}`).then((r) => r.data),
     getRandomSentence: (languageId: string) =>
@@ -933,6 +934,13 @@ export const api = {
   leaderboard: {
     getGlobal: (params?: LeaderboardQuery) =>
       apiClient.get<LeaderboardRow[]>("/api/v1/leaderboard", { params }).then((r) => r.data),
+  },
+
+  levels: {
+    getThresholds: () =>
+      apiClient
+        .get<Record<ContributorLevel, number>>("/api/v1/levels/thresholds")
+        .then((r) => r.data),
   },
 
   corpus: {

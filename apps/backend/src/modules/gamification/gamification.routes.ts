@@ -22,6 +22,7 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
+import { getLevelThresholds } from "../../services/level.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 /* -------------------------------------------------------------------------- */
@@ -148,6 +149,16 @@ async function loadCorpusStats() {
 const userIdParamSchema = z.object({ userId: z.string().uuid() });
 
 export default async function gamificationRoutes(fastify: FastifyInstance) {
+  // Public and unauthenticated on purpose (same as /leaderboard, /badges
+  // below) -- these are read from gamification_config so an admin editing
+  // levels.silver.min etc. actually shows up everywhere that renders a
+  // "points to next level" progress bar, instead of the frontend keeping
+  // its own hardcoded copy that a config change can never reach.
+  fastify.get("/levels/thresholds", async () => {
+    const t = await getLevelThresholds();
+    return { BRONZE: 0, ...t };
+  });
+
   fastify.get("/leaderboard", async (request) => {
     const { limit, offset, period } = leaderboardQuerySchema.parse(request.query);
     const pointsColumn = PERIOD_POINTS_COLUMN[period];

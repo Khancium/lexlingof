@@ -13,7 +13,7 @@ import {
   type UserBadgesResponse,
   type ContributorDemographics,
 } from "@/lib/api";
-import { LEVEL_COLOR, LEVEL_THRESHOLDS, NEXT_LEVEL } from "@/lib/level";
+import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
 import { EDUCATION_LEVEL_OPTIONS } from "@/lib/demographics-constants";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 
@@ -22,6 +22,7 @@ export default function ProfilePage() {
   const setUser = useAuthStore((state) => state.setUser);
   const { logout } = useAuth();
   const router = useRouter();
+  const levelThresholds = useLevelThresholds();
 
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
@@ -118,7 +119,7 @@ export default function ProfilePage() {
   const totalContributions = stats?.totalContributions ?? user.totalContributions;
   const verified = stats?.verifiedContributions ?? user.verifiedContributions;
   const nextLevel = NEXT_LEVEL[level];
-  const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
+  const nextThreshold = nextLevel ? levelThresholds[nextLevel] : null;
 
   function startEditingBio() {
     setBiography(user!.biography ?? "");

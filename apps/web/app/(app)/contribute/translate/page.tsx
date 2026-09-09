@@ -4,22 +4,35 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
-import { useAuthStore } from "@/lib/store";
-import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Draft = { transcription: string; romanization: string; ipa: string; recording: Recording | null };
+type Step = "browse" | "record";
+type TranslatedFilter = "" | "translated" | "untranslated";
 
 // The backend enforces no duration cap for Module 3, but the spec calls for
 // a soft ceiling here ("no 3-second limit, can go up to 60 seconds").
 const MAX_DURATION_MS = 60000;
+const PAGE_SIZE = 50;
 
 const emptyDraft: Draft = { transcription: "", romanization: "", ipa: "", recording: null };
 
 export default function TranslatePage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
-  const userId = useAuthStore((state) => state.user?.id);
+
+  const [step, setStep] = useState<Step>("browse");
+
+  // Browse step: a real paginated list (mirroring the concept/scene modules'
+  // browse-tiles-with-search pattern) instead of only a small
+  // search-and-jump dropdown -- the backend already sorts untranslated
+  // sentences first and marks each with hasTranslated.
+  const [browseItems, setBrowseItems] = useState<RandomSentence[]>([]);
+  const [browseTotal, setBrowseTotal] = useState(0);
+  const [browseSearch, setBrowseSearch] = useState("");
+  const [browseFilter, setBrowseFilter] = useState<TranslatedFilter>("");
+  const [loadingBrowse, setLoadingBrowse] = useState(true);
+  const [browseError, setBrowseError] = useState<string | null>(null);
 
   // History of sentences visited this session, so Previous/Next can move
   // back and forth without re-fetching or losing in-progress drafts.
@@ -27,12 +40,8 @@ export default function TranslatePage() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
-  const [loadingSentence, setLoadingSentence] = useState(true);
+  const [loadingSentence, setLoadingSentence] = useState(false);
   const [sentenceError, setSentenceError] = useState<string | null>(null);
-
-  const [search, setSearch] = useState("");
-  const [searchResults, setSearchResults] = useState<RandomSentence[]>([]);
-  const [searching, setSearching] = useState(false);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Tracks which recording (by object identity) was last successfully
@@ -50,6 +59,25 @@ export default function TranslatePage() {
     setDrafts((prev) => ({ ...prev, [sentence.id]: { ...(prev[sentence.id] ?? emptyDraft), ...patch } }));
   }
 
+  const loadBrowseList = useCallback(() => {
+    setLoadingBrowse(true);
+    setBrowseError(null);
+    api.contributions
+      .searchSentences({ search: browseSearch.trim() || undefined, filter: browseFilter || undefined, limit: PAGE_SIZE })
+      .then((res) => {
+        setBrowseItems(res.items);
+        setBrowseTotal(res.total);
+      })
+      .catch((err) => setBrowseError(getErrorMessage(err, "Failed to load sentences")))
+      .finally(() => setLoadingBrowse(false));
+  }, [browseSearch, browseFilter]);
+
+  useEffect(() => {
+    if (step !== "browse") return;
+    const timeout = setTimeout(loadBrowseList, 250);
+    return () => clearTimeout(timeout);
+  }, [step, loadBrowseList]);
+
   const fetchNewSentence = useCallback(
     async (forLanguageId: string) => {
       setLoadingSentence(true);
@@ -62,6 +90,7 @@ export default function TranslatePage() {
           setHistoryIndex(updated.length - 1);
           return updated;
         });
+        setStep("record");
       } catch (err) {
         setSentenceError(getErrorMessage(err, "No sentences available"));
       } finally {
@@ -71,28 +100,7 @@ export default function TranslatePage() {
     [],
   );
 
-  useEffect(() => {
-    if (languageId && history.length === 0) fetchNewSentence(languageId);
-  }, [languageId, history.length, fetchNewSentence]);
-
-  useEffect(() => {
-    if (!search.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    setSearching(true);
-    const timeout = setTimeout(() => {
-      api.contributions
-        .searchSentences({ search: search.trim(), limit: 10 })
-        .then((res) => setSearchResults(userId ? seededShuffle(res.items, userId) : res.items))
-        .finally(() => setSearching(false));
-    }, 250);
-    return () => clearTimeout(timeout);
-  }, [search, userId]);
-
-  function openSearchResult(result: RandomSentence) {
-    setSearch("");
-    setSearchResults([]);
+  function openSentence(result: RandomSentence) {
     setSubmitError(null);
     setDetailsOpen(false);
     setHistory((prev) => {
@@ -100,6 +108,7 @@ export default function TranslatePage() {
       setHistoryIndex(updated.length - 1);
       return updated;
     });
+    setStep("record");
   }
 
   function goPrevious() {
@@ -161,45 +170,98 @@ export default function TranslatePage() {
   const canSubmit =
     !!sentence && !!languageId && !!draft.recording && draft.recording !== lastSubmittedRecording && !isSubmitting;
 
+  if (step === "browse") {
+    return (
+      <div className="mx-auto max-w-2xl space-y-6">
+        <div className="flex items-center gap-3">
+          <Link
+            href="/contribute"
+            className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+          >
+            ← Back to Contribute
+          </Link>
+          <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-ink">Translate a Sentence</h1>
+        </div>
+
+        <button
+          onClick={() => languageId && fetchNewSentence(languageId)}
+          disabled={!languageId || loadingSentence}
+          className="text-sm font-semibold text-brand hover:underline disabled:opacity-50"
+        >
+          🎲 Translate randomly
+        </button>
+
+        <div className="flex flex-wrap gap-3">
+          <input
+            value={browseSearch}
+            onChange={(e) => setBrowseSearch(e.target.value)}
+            placeholder="Search sentences..."
+            className="min-w-0 flex-1 rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+          />
+          <select
+            value={browseFilter}
+            onChange={(e) => setBrowseFilter(e.target.value as TranslatedFilter)}
+            className="rounded-lg bg-surface-card px-4 py-3 text-sm text-ink ring-1 ring-border"
+          >
+            <option value="">All sentences</option>
+            <option value="untranslated">Untranslated only</option>
+            <option value="translated">Translated only</option>
+          </select>
+        </div>
+
+        {!languageId && !languageLoading ? (
+          <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
+        ) : null}
+        {sentenceError ? <p className="text-center text-red-600">{sentenceError}</p> : null}
+
+        {loadingBrowse ? (
+          <p className="text-ink-muted">Loading...</p>
+        ) : browseError ? (
+          <p className="text-red-600">{browseError}</p>
+        ) : browseItems.length === 0 ? (
+          <p className="text-ink-muted">No sentences found.</p>
+        ) : (
+          <>
+            <p className="text-xs text-ink-muted">
+              {browseTotal} sentence{browseTotal === 1 ? "" : "s"}
+            </p>
+            <div className="space-y-2">
+              {browseItems.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => openSentence(item)}
+                  className={`card-duo flex w-full items-center justify-between gap-3 rounded-2xl p-4 text-left shadow-sm transition hover:shadow-md ${
+                    item.hasTranslated ? "bg-brand-light/40" : "bg-surface"
+                  }`}
+                >
+                  <div className="min-w-0 flex-1">
+                    {item.category ? (
+                      <span className="mb-1 inline-block rounded-full bg-surface-card px-2 py-0.5 text-xs font-semibold text-ink">
+                        {item.category.name}
+                      </span>
+                    ) : null}
+                    <p className="truncate font-medium text-ink">{item.englishText}</p>
+                  </div>
+                  {item.hasTranslated ? (
+                    <span className="flex-shrink-0 text-xs font-semibold text-brand-dark">✓ Translated</span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="flex items-center gap-3">
-        <Link
-          href="/contribute"
-          className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
-        >
-          ← Back to Contribute
-        </Link>
-        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-ink">Translate a Sentence</h1>
-      </div>
-
-      <div className="relative">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search sentences..."
-          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-        />
-        {search.trim() ? (
-          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-surface shadow-lg ring-1 ring-border">
-            {searching ? (
-              <p className="px-4 py-3 text-sm text-ink-muted">Searching...</p>
-            ) : searchResults.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-ink-muted">No matching sentences.</p>
-            ) : (
-              searchResults.map((result) => (
-                <button
-                  key={result.id}
-                  onClick={() => openSearchResult(result)}
-                  className="block w-full px-4 py-2.5 text-left text-sm text-ink hover:bg-surface-card"
-                >
-                  {result.englishText}
-                </button>
-              ))
-            )}
-          </div>
-        ) : null}
-      </div>
+      <button
+        onClick={() => setStep("browse")}
+        className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+      >
+        ← Back to sentences
+      </button>
 
       {loadingSentence ? (
         <p className="text-ink-muted">Loading...</p>

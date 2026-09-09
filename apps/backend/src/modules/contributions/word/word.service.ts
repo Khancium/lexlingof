@@ -148,6 +148,12 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       .set({ contributionId: contribution.id, updatedAt: new Date() })
       .where(eq(wordRecordings.id, wordRecording.id));
 
+    // Resolved before the batch below (it reads gamification_config, cached
+    // for 5 minutes) rather than inside it, since it needs to be a plain
+    // value by the time it's used as a .set() field, not a pending promise
+    // racing the other independent writes in the Promise.all.
+    const levelExpr = await levelUpdateExpr(1);
+
     // 4, 5, 6: the points ledger insert, user_stats counters, and streak
     // bookkeeping are all independent of each other (none reads a value the
     // others write) -- issued together instead of as three sequential round
@@ -173,7 +179,7 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
           wordContributions: sql`${userStats.wordContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
           totalPoints: sql`${userStats.totalPoints} + ${basePoints}`,
-          level: levelUpdateExpr(1),
+          level: levelExpr,
           lastContributionAt: new Date(),
           lastContributionModule: "WORD",
           updatedAt: new Date(),

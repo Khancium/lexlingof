@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store";
 import { api, type ContributionListItem, type ModuleType, type UserStatsResponse } from "@/lib/api";
-import { LEVEL_COLOR, LEVEL_THRESHOLDS, NEXT_LEVEL } from "@/lib/level";
+import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
 
 const MODULE_ICON: Record<ModuleType, string> = {
   WORD: "🎙️",
@@ -34,10 +34,11 @@ export default function DashboardPage() {
     api.users.getContributions({ limit: 5 }).then((res) => setRecent(res.items));
   }, []);
 
+  const levelThresholds = useLevelThresholds();
   const level = stats?.level ?? user?.level ?? "BRONZE";
   const totalContributions = stats?.totalContributions ?? user?.totalContributions ?? 0;
   const nextLevel = NEXT_LEVEL[level];
-  const nextThreshold = nextLevel ? LEVEL_THRESHOLDS[nextLevel] : null;
+  const nextThreshold = nextLevel ? levelThresholds[nextLevel] : null;
   const progressPct = nextThreshold ? Math.min(100, Math.round((totalContributions / nextThreshold) * 100)) : 100;
 
   return (

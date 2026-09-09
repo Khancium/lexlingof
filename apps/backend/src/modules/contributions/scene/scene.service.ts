@@ -218,6 +218,9 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
     const bonusBreakdown = { base, longBonus, dailyBonus, expertBonus };
     const pointsAwarded = base + longBonus + dailyBonus + expertBonus;
 
+    // Resolved before the batch below -- see word.service.ts's identical comment.
+    const levelExpr = await levelUpdateExpr(1);
+
     // e, f, g: independent of each other -- issued together instead of as
     // three sequential round trips.
     const [, [updatedStats]] = await Promise.all([
@@ -238,7 +241,7 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
           totalContributions: sql`${userStats.totalContributions} + 1`,
           sceneContributionsCount: sql`${userStats.sceneContributionsCount} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
-          level: levelUpdateExpr(1),
+          level: levelExpr,
           lastContributionAt: new Date(),
           lastContributionModule: "SCENE",
           updatedAt: new Date(),

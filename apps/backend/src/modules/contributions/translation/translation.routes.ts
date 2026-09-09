@@ -12,6 +12,7 @@ const randomQuerySchema = z.object({ languageId: z.string().uuid() });
 const idParamSchema = z.object({ id: z.string().uuid() });
 const listQuerySchema = z.object({
   search: z.string().min(1).optional(),
+  filter: z.enum(["translated", "untranslated"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -31,8 +32,8 @@ const submitTranslationSchema = z.object({
 
 export default async function translationRoutes(fastify: FastifyInstance) {
   fastify.get("/sentences", { preHandler: verifyToken }, async (request) => {
-    const { search, limit, offset } = listQuerySchema.parse(request.query);
-    return searchSentences(search, limit, offset);
+    const { search, filter, limit, offset } = listQuerySchema.parse(request.query);
+    return searchSentences(request.user!.id, search, filter, limit, offset);
   });
 
   fastify.get("/sentences/random", { preHandler: verifyToken }, async (request) => {

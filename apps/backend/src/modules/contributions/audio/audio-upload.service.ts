@@ -151,6 +151,9 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
     // word.service's submitWordRecording, there is no explicit step
     // incrementing user_stats.totalPoints for audio uploads or for
     // addTranscription/addSegment below; see the module-level note.)
+    // Resolved before the batch below -- see word.service.ts's identical comment.
+    const levelExpr = await levelUpdateExpr(1);
+
     const [, [updatedStats]] = await Promise.all([
       tx
         .insert(pointsTransactions)
@@ -169,7 +172,7 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
           totalContributions: sql`${userStats.totalContributions} + 1`,
           audioContributions: sql`${userStats.audioContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
-          level: levelUpdateExpr(1),
+          level: levelExpr,
           lastContributionAt: new Date(),
           lastContributionModule: "TRANSCRIPTION",
           updatedAt: new Date(),

@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
+import { loadLevelThresholds } from "@/lib/level";
 import Nav from "@/components/nav";
 
 // The root layout's AuthProvider already blocks rendering (full-screen
@@ -18,6 +19,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       router.replace("/login");
     }
   }, [user, router]);
+
+  useEffect(() => {
+    loadLevelThresholds();
+  }, []);
 
   if (!user) {
     return null;

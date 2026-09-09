@@ -45,6 +45,7 @@ import {
 } from "../../db/schema.js";
 import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
+import { invalidateLevelThresholdsCache } from "../../services/level.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -1745,6 +1746,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .set({ configValue: { value: body.value }, updatedBy: request.user!.id, updatedAt: new Date() })
       .where(eq(gamificationConfig.configKey, key))
       .returning();
+
+    // Without this, a level threshold edit wouldn't take effect anywhere
+    // (backend leveling logic or the frontend's progress-bar display) until
+    // the 5-minute cache TTL happened to expire on its own.
+    if (key.startsWith("levels.")) {
+      invalidateLevelThresholdsCache();
+    }
 
     const actorRole = request.user!.role;
     await writeAuditLog({

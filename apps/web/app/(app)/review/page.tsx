@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { useAuthStore } from "@/lib/store";
 import { api, type ModuleType, type ReviewDecision, type ReviewQueueItem } from "@/lib/api";
-import { canReview, LEVEL_THRESHOLDS } from "@/lib/level";
+import { canReview, useLevelThresholds } from "@/lib/level";
 
 const TABS: { label: string; value: ModuleType | undefined }[] = [
   { label: "ALL", value: undefined },
@@ -16,6 +16,7 @@ const TABS: { label: string; value: ModuleType | undefined }[] = [
 
 export default function ReviewPage() {
   const user = useAuthStore((state) => state.user);
+  const levelThresholds = useLevelThresholds();
   const [filter, setFilter] = useState<ModuleType | undefined>(undefined);
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,13 +40,13 @@ export default function ReviewPage() {
 
   if (!canReview(user?.level)) {
     const totalContributions = user?.totalContributions ?? 0;
-    const threshold = LEVEL_THRESHOLDS.SILVER;
+    const threshold = levelThresholds.SILVER;
     const progressPct = Math.min(100, Math.round((totalContributions / threshold) * 100));
     return (
       <div className="mx-auto max-w-md space-y-4 py-16 text-center">
         <div className="text-6xl">🏆</div>
         <h1 className="text-2xl font-bold text-ink">Unlock Review Access</h1>
-        <p className="text-ink-muted">Review access requires SILVER level (100 contributions)</p>
+        <p className="text-ink-muted">Review access requires SILVER level ({threshold} contributions)</p>
         <div className="progress-duo-track">
           <div className="progress-duo-fill bg-yellow-500" style={{ width: `${progressPct}%` }} />
         </div>

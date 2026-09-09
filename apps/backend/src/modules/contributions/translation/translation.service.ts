@@ -47,11 +47,36 @@ async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[
   return (config.configValue as { value: number }).value;
 }
 
-/** Search-by-text list, used by the translate page's search bar to jump straight to a sentence instead of only cycling randomly. */
-export async function searchSentences(search: string | undefined, limit: number, offset: number) {
+/**
+ * Search/browse list, used both by the translate page's quick search-and-jump
+ * and the Browse Sentences screen (mirroring the concept/scene modules'
+ * browse-tiles-with-search pattern). Computes hasTranslated per row (has
+ * this user already translated this sentence) the same way concepts/scenes
+ * compute hasContributed, and pushes translated sentences to the bottom via
+ * ORDER BY on that same boolean (false/untranslated sorts first).
+ */
+export async function searchSentences(
+  userId: string,
+  search: string | undefined,
+  filter: "translated" | "untranslated" | undefined,
+  limit: number,
+  offset: number,
+) {
+  const hasTranslatedExpr = sql<boolean>`exists (
+    select 1 from ${translations}
+    where ${translations.sentenceId} = ${sentences.id}
+      and ${translations.userId} = ${userId}
+      and ${translations.deletedAt} is null
+  )`;
+
   const conditions = [eq(sentences.isActive, true), isNull(sentences.deletedAt)];
   if (search) {
     conditions.push(ilike(sentences.englishText, `%${search}%`));
+  }
+  if (filter === "translated") {
+    conditions.push(hasTranslatedExpr);
+  } else if (filter === "untranslated") {
+    conditions.push(sql`not (${hasTranslatedExpr})`);
   }
 
   const [rows, [totalRow]] = await Promise.all([
@@ -62,11 +87,12 @@ export async function searchSentences(search: string | undefined, limit: number,
         categoryId: categories.id,
         categoryName: categories.nameEnglish,
         categorySlug: categories.slug,
+        hasTranslated: hasTranslatedExpr,
       })
       .from(sentences)
       .leftJoin(categories, eq(categories.id, sentences.categoryId))
       .where(and(...conditions))
-      .orderBy(sentences.englishText)
+      .orderBy(hasTranslatedExpr, sentences.englishText)
       .limit(limit)
       .offset(offset),
     db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(and(...conditions)),
@@ -76,6 +102,7 @@ export async function searchSentences(search: string | undefined, limit: number,
     id: row.id,
     englishText: row.englishText,
     category: row.categoryId ? { id: row.categoryId, name: row.categoryName, slug: row.categorySlug } : null,
+    hasTranslated: row.hasTranslated,
   }));
 
   return { items, limit, offset, total: totalRow?.value ?? 0 };
@@ -204,6 +231,9 @@ export async function submitTranslation(userId: string, sentenceId: string, data
     ]);
     const pointsAwarded = base + audioBonus + romanBonus + ipaBonus;
 
+    // Resolved before the batch below -- see word.service.ts's identical comment.
+    const levelExpr = await levelUpdateExpr(1);
+
     // 5, 6, 7: independent of each other -- issued together instead of as
     // three sequential round trips. (Spec lists only two user_stats
     // counters here; see the module-level note on totalPoints.)
@@ -225,7 +255,7 @@ export async function submitTranslation(userId: string, sentenceId: string, data
           totalContributions: sql`${userStats.totalContributions} + 1`,
           translationContributions: sql`${userStats.translationContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
-          level: levelUpdateExpr(1),
+          level: levelExpr,
           lastContributionAt: new Date(),
           lastContributionModule: "TRANSLATION",
           updatedAt: new Date(),

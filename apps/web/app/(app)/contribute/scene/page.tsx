@@ -98,6 +98,16 @@ export default function ScenePage() {
       );
 
       setLastSubmittedRecording(recording);
+      // Same auto-advance the translate module already does on submit --
+      // Previous/Next stay fully functional, this just moves on to the next
+      // scene in the current list automatically, or a fresh random one once
+      // the list runs out.
+      const nextItem = scenes[sceneIndex + 1];
+      if (nextItem) {
+        openScene(nextItem);
+      } else {
+        loadDifferentScene(scene.id);
+      }
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit scene description"));
     } finally {
