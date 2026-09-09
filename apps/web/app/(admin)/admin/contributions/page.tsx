@@ -125,7 +125,11 @@ function MultiSelect<T extends string>({
         <span className="text-ink-muted">▾</span>
       </button>
       {open ? (
-        <div className="absolute z-10 mt-1 max-h-64 min-w-48 overflow-y-auto rounded-lg bg-surface p-2 shadow-lg ring-1 ring-border">
+        // Anchored to the button's right edge and grown leftward (rather than
+        // the default left:0 growing rightward) so filters near the right
+        // edge of a narrow/mobile viewport don't open off-screen with no way
+        // to reach their far options.
+        <div className="absolute right-0 z-10 mt-1 max-h-64 w-max min-w-48 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg bg-surface p-2 shadow-lg ring-1 ring-border">
           {options.length === 0 ? (
             <p className="px-2 py-1 text-xs text-ink-muted">No options</p>
           ) : (
@@ -217,8 +221,13 @@ export default function AdminContributionsPage() {
     }
   }, [filters, offset]);
 
+  // Debounced so typing in the search/profession/country/city text filters
+  // doesn't fire a full contribution query (with its demographics joins) on
+  // every keystroke -- a rapid run of filter/offset changes collapses into
+  // one request 300ms after things settle instead of one per change.
   useEffect(() => {
-    load();
+    const timer = setTimeout(load, 300);
+    return () => clearTimeout(timer);
   }, [load]);
 
   useEffect(() => {
@@ -425,7 +434,10 @@ export default function AdminContributionsPage() {
     if (cachedUrl) {
       audioEl.src = cachedUrl;
       setPlayingId(item.contributionId);
-      audioEl.play().catch(() => {});
+      audioEl.play().catch((err) => {
+        setPlayingId(null);
+        alert(err instanceof Error ? err.message : "Failed to play audio");
+      });
       return;
     }
 
@@ -436,6 +448,9 @@ export default function AdminContributionsPage() {
       audioEl.src = url;
       setPlayingId(item.contributionId);
       await audioEl.play();
+    } catch (err) {
+      setPlayingId(null);
+      alert(err instanceof Error ? err.message : "Failed to play audio");
     } finally {
       setLoadingAudioId(null);
     }

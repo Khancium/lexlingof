@@ -8,7 +8,7 @@ import { auditLogs, userRole } from "../db/schema.js";
  * auth/registration/submission code so the page reflects real app activity,
  * not just moderation actions.
  */
-export async function writeAuditLog(params: {
+type AuditLogParams = {
   actorId: string | null;
   actorRole: (typeof userRole.enumValues)[number] | null;
   action: string;
@@ -16,8 +16,20 @@ export async function writeAuditLog(params: {
   resourceId?: string | null;
   beforeState?: Record<string, unknown> | null;
   afterState?: Record<string, unknown> | null;
-}): Promise<void> {
-  await db.insert(auditLogs).values({
+};
+
+export async function writeAuditLog(params: AuditLogParams): Promise<void> {
+  await db.insert(auditLogs).values(toRow(params));
+}
+
+/** Same as writeAuditLog, but for a bulk admin action over N rows -- one insert instead of N. */
+export async function writeAuditLogs(entries: AuditLogParams[]): Promise<void> {
+  if (entries.length === 0) return;
+  await db.insert(auditLogs).values(entries.map(toRow));
+}
+
+function toRow(params: AuditLogParams) {
+  return {
     actorId: params.actorId,
     actorRole: params.actorRole,
     action: params.action,
@@ -25,5 +37,5 @@ export async function writeAuditLog(params: {
     resourceId: params.resourceId ?? null,
     beforeState: params.beforeState ?? null,
     afterState: params.afterState ?? null,
-  });
+  };
 }

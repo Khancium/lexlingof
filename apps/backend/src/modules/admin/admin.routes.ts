@@ -45,7 +45,7 @@ import {
 } from "../../db/schema.js";
 import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
-import { writeAuditLog } from "../../services/audit-log.service.js";
+import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache } from "../../services/level.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -179,6 +179,38 @@ async function readBulkRows(request: FastifyRequest): Promise<Record<string, str
 }
 
 type BulkResult = { created: number; errors: { row: number; message: string }[] };
+
+/**
+ * CSV bulk-import rows were previously inserted one `await db.insert(...)`
+ * at a time -- correct, but a few-thousand-row upload became a few thousand
+ * sequential round trips to a remote Postgres instance. This inserts a
+ * whole chunk in one statement, and only falls back to one insert per row
+ * (to attribute the error to the exact offending row) if the chunk insert
+ * throws -- e.g. a duplicate slug collides with an existing row.
+ */
+async function insertBulkInChunks<V extends Record<string, unknown>>(
+  table: Parameters<typeof db.insert>[0],
+  items: { rowNum: number; value: V }[],
+  result: BulkResult,
+  chunkSize = 500,
+): Promise<void> {
+  for (let start = 0; start < items.length; start += chunkSize) {
+    const chunk = items.slice(start, start + chunkSize);
+    try {
+      await db.insert(table).values(chunk.map((c) => c.value));
+      result.created += chunk.length;
+    } catch {
+      for (const { rowNum, value } of chunk) {
+        try {
+          await db.insert(table).values(value);
+          result.created++;
+        } catch (err) {
+          result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
+        }
+      }
+    }
+  }
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                   Schemas                                  */
@@ -534,18 +566,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     await db.update(contributions).set(updates).where(inArray(contributions.id, rows.map((r) => r.id)));
 
     const actorRole = request.user!.role;
-    await Promise.all(
-      rows.map((row) =>
-        writeAuditLog({
-          actorId: request.user!.id,
-          actorRole,
-          action: "admin_contribution_status_change",
-          resourceType: "contribution",
-          resourceId: row.id,
-          beforeState: { status: row.status },
-          afterState: { status, reason: reason ?? null },
-        }),
-      ),
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole,
+        action: "admin_contribution_status_change",
+        resourceType: "contribution",
+        resourceId: row.id,
+        beforeState: { status: row.status },
+        afterState: { status, reason: reason ?? null },
+      })),
     );
 
     return { updated: rows.length };
@@ -563,16 +593,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     await db.update(contributions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(inArray(contributions.id, rows.map((r) => r.id)));
 
     const actorRole = request.user!.role;
-    await Promise.all(
-      rows.map((row) =>
-        writeAuditLog({
-          actorId: request.user!.id,
-          actorRole,
-          action: "admin_contribution_delete",
-          resourceType: "contribution",
-          resourceId: row.id,
-        }),
-      ),
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole,
+        action: "admin_contribution_delete",
+        resourceType: "contribution",
+        resourceId: row.id,
+      })),
     );
 
     return { deleted: rows.length };
@@ -1039,6 +1067,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     );
 
     const result: BulkResult = { created: 0, errors: [] };
+    const toInsert: { rowNum: number; value: typeof concepts.$inferInsert }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
@@ -1056,19 +1085,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         continue;
       }
 
-      try {
-        await db.insert(concepts).values({
+      toInsert.push({
+        rowNum,
+        value: {
           categoryId: category.id,
           slug: `${category.slug}-${slugify(labelEnglish)}`,
           labelEnglish,
           description: row.description?.trim() || null,
-        });
-        result.created++;
-      } catch (err) {
-        result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
-      }
+        },
+      });
     }
 
+    await insertBulkInChunks(concepts, toInsert, result);
     return result;
   });
 
@@ -1207,6 +1235,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes/bulk", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const rows = await readBulkRows(request);
     const result: BulkResult = { created: 0, errors: [] };
+    const toInsert: { rowNum: number; value: typeof scenes.$inferInsert }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
@@ -1236,20 +1265,19 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         continue;
       }
 
-      try {
-        await db.insert(scenes).values({
+      toInsert.push({
+        rowNum,
+        value: {
           slug,
           title,
           description: row.description?.trim() || null,
           difficulty: difficultyRaw as (typeof sceneDifficulty.enumValues)[number],
           estimatedDurationSeconds,
-        });
-        result.created++;
-      } catch (err) {
-        result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
-      }
+        },
+      });
     }
 
+    await insertBulkInChunks(scenes, toInsert, result);
     return result;
   });
 
@@ -1549,6 +1577,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     );
 
     const result: BulkResult = { created: 0, errors: [] };
+    const toInsert: { rowNum: number; value: typeof sentences.$inferInsert }[] = [];
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
@@ -1570,14 +1599,10 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         categoryId = category.id;
       }
 
-      try {
-        await db.insert(sentences).values({ englishText, categoryId });
-        result.created++;
-      } catch (err) {
-        result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
-      }
+      toInsert.push({ rowNum, value: { englishText, categoryId } });
     }
 
+    await insertBulkInChunks(sentences, toInsert, result);
     return result;
   });
 

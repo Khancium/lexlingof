@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import axios from "axios";
 import { useAuthStore } from "@/lib/store";
-import { api, type ModuleType, type ReviewDecision, type ReviewQueueItem } from "@/lib/api";
+import { api, getErrorMessage, type ModuleType, type ReviewDecision, type ReviewQueueItem } from "@/lib/api";
 import { canReview, useLevelThresholds } from "@/lib/level";
 
 const TABS: { label: string; value: ModuleType | undefined }[] = [
@@ -130,7 +131,14 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
       await api.reviews.submitReview({ contributionId: item.contributionId, decision, notes: notes.trim() || undefined });
       onReviewed(item.contributionId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to submit review");
+      // Another reviewer already resolved this one between page load and
+      // this submit -- it's stale, not a real failure, so drop it from the
+      // list instead of leaving a card whose buttons will just 409 again.
+      if (axios.isAxiosError(err) && (err.response?.data as { code?: string } | undefined)?.code === "CONTRIBUTION_NOT_PENDING") {
+        onReviewed(item.contributionId);
+        return;
+      }
+      setError(getErrorMessage(err, "Failed to submit review"));
       setPendingDecision(null);
     }
   }
