@@ -622,21 +622,24 @@ export type AdminContributionsResponse = {
   total: number;
 };
 
+// Every filter below accepts either one value or an array (multi-select) --
+// arrays are joined into a comma-separated query param, matching the
+// backend's csvOf()/csvOfUuid() parsing in admin.routes.ts.
 export type AdminContributionsQuery = {
-  status?: ContributionStatusValue;
-  module_type?: ModuleType;
-  language_id?: string;
-  dialect_id?: string;
+  status?: ContributionStatusValue | ContributionStatusValue[];
+  module_type?: ModuleType | ModuleType[];
+  language_id?: string | string[];
+  dialect_id?: string | string[];
   user_id?: string;
   search?: string;
-  tribe_id?: string;
-  sub_tribe_id?: string;
+  tribe_id?: string | string[];
+  sub_tribe_id?: string | string[];
   country?: string;
   city?: string;
-  village_id?: string;
-  quarter_id?: string;
-  gender?: GenderOption;
-  education_level?: EducationLevel;
+  village_id?: string | string[];
+  quarter_id?: string | string[];
+  gender?: GenderOption | GenderOption[];
+  education_level?: EducationLevel | EducationLevel[];
   profession?: string;
   limit?: number;
   offset?: number;
@@ -971,8 +974,14 @@ export const api = {
   },
 
   admin: {
-    getContributions: (params?: AdminContributionsQuery) =>
-      apiClient.get<AdminContributionsResponse>("/api/v1/admin/contributions", { params }).then((r) => r.data),
+    getContributions: (params?: AdminContributionsQuery) => {
+      const flat = params
+        ? Object.fromEntries(
+            Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : v]),
+          )
+        : undefined;
+      return apiClient.get<AdminContributionsResponse>("/api/v1/admin/contributions", { params: flat }).then((r) => r.data);
+    },
     updateContributionStatus: (id: string, data: UpdateContributionStatusInput) =>
       apiClient.put<{ id: string; status: ContributionStatusValue }>(`/api/v1/admin/contributions/${id}/status`, data).then((r) => r.data),
     updateContributionRemarks: (id: string, remarks: string) =>

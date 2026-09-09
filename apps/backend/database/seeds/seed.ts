@@ -399,12 +399,6 @@ async function main() {
       })
       .returning({ id: languages.id });
 
-    await tx.insert(languages).values({
-      code: "en",
-      nameEnglish: "English",
-      nameNative: "English",
-    });
-
     return { pashtoId: pashto.id };
   });
 

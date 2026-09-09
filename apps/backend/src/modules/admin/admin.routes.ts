@@ -187,23 +187,41 @@ type BulkResult = { created: number; errors: { row: number; message: string }[] 
 const idParamSchema = z.object({ id: z.string().uuid() });
 const keyParamSchema = z.object({ key: z.string().min(1) });
 
+// Lets a single query param carry more than one value as a comma-separated
+// list (e.g. "?status=pending,verified") so the admin contributions filters
+// can multi-select within one dropdown instead of being stuck to one value
+// at a time. Absent/empty stays undefined so existing single-value callers
+// (and the "no filter applied" case) are unaffected.
+function csvOf<T extends [string, ...string[]]>(values: T) {
+  return z.preprocess(
+    (v) => (typeof v === "string" && v.length > 0 ? v.split(",") : undefined),
+    z.array(z.enum(values)).min(1).optional(),
+  );
+}
+function csvOfUuid() {
+  return z.preprocess(
+    (v) => (typeof v === "string" && v.length > 0 ? v.split(",") : undefined),
+    z.array(z.string().uuid()).min(1).optional(),
+  );
+}
+
 const contributionsQuerySchema = z.object({
-  status: z.enum(contributionStatus.enumValues).optional(),
-  module_type: z.enum(contributionModule.enumValues).optional(),
-  language_id: z.string().uuid().optional(),
-  dialect_id: z.string().uuid().optional(),
+  status: csvOf(contributionStatus.enumValues),
+  module_type: csvOf(contributionModule.enumValues),
+  language_id: csvOfUuid(),
+  dialect_id: csvOfUuid(),
   user_id: z.string().uuid().optional(),
   // Contributor display name or email -- distinct from a module's own text
   // content, which isn't searched here.
   search: z.string().min(1).optional(),
-  tribe_id: z.string().uuid().optional(),
-  sub_tribe_id: z.string().uuid().optional(),
+  tribe_id: csvOfUuid(),
+  sub_tribe_id: csvOfUuid(),
   country: z.string().min(1).optional(),
   city: z.string().min(1).optional(),
-  village_id: z.string().uuid().optional(),
-  quarter_id: z.string().uuid().optional(),
-  gender: z.enum(genderEnum.enumValues).optional(),
-  education_level: z.enum(educationLevelEnum.enumValues).optional(),
+  village_id: csvOfUuid(),
+  quarter_id: csvOfUuid(),
+  gender: csvOf(genderEnum.enumValues),
+  education_level: csvOf(educationLevelEnum.enumValues),
   profession: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
@@ -361,20 +379,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const q = contributionsQuerySchema.parse(request.query);
 
     const conditions = [isNull(contributions.deletedAt)];
-    if (q.status) conditions.push(eq(contributions.status, q.status));
-    if (q.module_type) conditions.push(eq(contributions.moduleType, q.module_type));
-    if (q.language_id) conditions.push(eq(contributions.languageId, q.language_id));
-    if (q.dialect_id) conditions.push(eq(contributions.dialectId, q.dialect_id));
+    if (q.status) conditions.push(inArray(contributions.status, q.status));
+    if (q.module_type) conditions.push(inArray(contributions.moduleType, q.module_type));
+    if (q.language_id) conditions.push(inArray(contributions.languageId, q.language_id));
+    if (q.dialect_id) conditions.push(inArray(contributions.dialectId, q.dialect_id));
     if (q.user_id) conditions.push(eq(contributions.userId, q.user_id));
     if (q.search) conditions.push(or(ilike(users.displayName, `%${q.search}%`), ilike(users.email, `%${q.search}%`))!);
-    if (q.tribe_id) conditions.push(eq(contributorDemographics.tribeId, q.tribe_id));
-    if (q.sub_tribe_id) conditions.push(eq(contributorDemographics.subTribeId, q.sub_tribe_id));
+    if (q.tribe_id) conditions.push(inArray(contributorDemographics.tribeId, q.tribe_id));
+    if (q.sub_tribe_id) conditions.push(inArray(contributorDemographics.subTribeId, q.sub_tribe_id));
     if (q.country) conditions.push(eq(contributorDemographics.country, q.country));
     if (q.city) conditions.push(eq(contributorDemographics.city, q.city));
-    if (q.village_id) conditions.push(eq(contributorDemographics.villageId, q.village_id));
-    if (q.quarter_id) conditions.push(eq(contributorDemographics.quarterId, q.quarter_id));
-    if (q.gender) conditions.push(eq(contributorDemographics.gender, q.gender));
-    if (q.education_level) conditions.push(eq(contributorDemographics.educationLevel, q.education_level));
+    if (q.village_id) conditions.push(inArray(contributorDemographics.villageId, q.village_id));
+    if (q.quarter_id) conditions.push(inArray(contributorDemographics.quarterId, q.quarter_id));
+    if (q.gender) conditions.push(inArray(contributorDemographics.gender, q.gender));
+    if (q.education_level) conditions.push(inArray(contributorDemographics.educationLevel, q.education_level));
     if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
     const whereClause = and(...conditions);
 

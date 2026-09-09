@@ -41,40 +41,115 @@ const selectClass = "rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-
 const inputClass = "rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border";
 
 type Filters = {
-  status: ContributionStatusValue | "";
-  moduleType: ModuleType | "";
+  status: ContributionStatusValue[];
+  moduleType: ModuleType[];
   search: string;
   userId: string;
-  languageId: string;
-  dialectId: string;
-  tribeId: string;
-  subTribeId: string;
+  languageId: string[];
+  dialectId: string[];
+  tribeId: string[];
+  subTribeId: string[];
   country: string;
   city: string;
-  villageId: string;
-  quarterId: string;
-  gender: GenderOption | "";
-  educationLevel: EducationLevel | "";
+  villageId: string[];
+  quarterId: string[];
+  gender: GenderOption[];
+  educationLevel: EducationLevel[];
   profession: string;
 };
 
 const EMPTY_FILTERS: Filters = {
-  status: "",
-  moduleType: "",
+  status: [],
+  moduleType: [],
   search: "",
   userId: "",
-  languageId: "",
-  dialectId: "",
-  tribeId: "",
-  subTribeId: "",
+  languageId: [],
+  dialectId: [],
+  tribeId: [],
+  subTribeId: [],
   country: "",
   city: "",
-  villageId: "",
-  quarterId: "",
-  gender: "",
-  educationLevel: "",
+  villageId: [],
+  quarterId: [],
+  gender: [],
+  educationLevel: [],
   profession: "",
 };
+
+/** A dropdown that lets more than one option be picked from the same filter at once (e.g. status: pending + verified). */
+function MultiSelect<T extends string>({
+  label,
+  options,
+  selected,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  options: { value: T; label: string }[];
+  selected: T[];
+  onChange: (values: T[]) => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  function toggle(value: T) {
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
+  }
+
+  const buttonLabel =
+    selected.length === 0
+      ? `All ${label}`
+      : selected.length === 1
+        ? (options.find((o) => o.value === selected[0])?.label ?? selected[0])
+        : `${selected.length} ${label} selected`;
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className={`${selectClass} flex items-center gap-2 text-left disabled:opacity-50`}
+      >
+        {buttonLabel}
+        <span className="text-ink-muted">▾</span>
+      </button>
+      {open ? (
+        <div className="absolute z-10 mt-1 max-h-64 min-w-48 overflow-y-auto rounded-lg bg-surface p-2 shadow-lg ring-1 ring-border">
+          {options.length === 0 ? (
+            <p className="px-2 py-1 text-xs text-ink-muted">No options</p>
+          ) : (
+            options.map((o) => (
+              <label key={o.value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-ink hover:bg-surface-card">
+                <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
+                {o.label}
+              </label>
+            ))
+          )}
+          {selected.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="mt-1 w-full rounded px-2 py-1 text-left text-xs font-semibold text-brand hover:bg-surface-card"
+            >
+              Clear
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 export default function AdminContributionsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
@@ -117,20 +192,20 @@ export default function AdminContributionsPage() {
     setSelected(new Set());
     try {
       const res = await api.admin.getContributions({
-        status: filters.status || undefined,
-        module_type: filters.moduleType || undefined,
+        status: filters.status.length ? filters.status : undefined,
+        module_type: filters.moduleType.length ? filters.moduleType : undefined,
         search: filters.search.trim() || undefined,
         user_id: filters.userId || undefined,
-        language_id: filters.languageId || undefined,
-        dialect_id: filters.dialectId || undefined,
-        tribe_id: filters.tribeId || undefined,
-        sub_tribe_id: filters.subTribeId || undefined,
+        language_id: filters.languageId.length ? filters.languageId : undefined,
+        dialect_id: filters.dialectId.length ? filters.dialectId : undefined,
+        tribe_id: filters.tribeId.length ? filters.tribeId : undefined,
+        sub_tribe_id: filters.subTribeId.length ? filters.subTribeId : undefined,
         country: filters.country.trim() || undefined,
         city: filters.city.trim() || undefined,
-        village_id: filters.villageId || undefined,
-        quarter_id: filters.quarterId || undefined,
-        gender: filters.gender || undefined,
-        education_level: filters.educationLevel || undefined,
+        village_id: filters.villageId.length ? filters.villageId : undefined,
+        quarter_id: filters.quarterId.length ? filters.quarterId : undefined,
+        gender: filters.gender.length ? filters.gender : undefined,
+        education_level: filters.educationLevel.length ? filters.educationLevel : undefined,
         profession: filters.profession.trim() || undefined,
         limit: PAGE_SIZE,
         offset,
@@ -152,9 +227,20 @@ export default function AdminContributionsPage() {
     api.demographics.getTribes().then(setTribes).catch(() => setTribes([]));
   }, []);
 
+  // With multi-select, a filter can now have several parents (e.g. two
+  // tribes picked at once) -- fetch each parent's children in parallel and
+  // union the results by id instead of only supporting a single parent.
+  function dedupeById<T extends { id: string }>(lists: T[][]): T[] {
+    const map = new Map<string, T>();
+    for (const list of lists) for (const item of list) map.set(item.id, item);
+    return Array.from(map.values());
+  }
+
   useEffect(() => {
-    if (filters.tribeId) {
-      api.demographics.getSubTribes(filters.tribeId).then(setSubTribes).catch(() => setSubTribes([]));
+    if (filters.tribeId.length) {
+      Promise.all(filters.tribeId.map((id) => api.demographics.getSubTribes(id)))
+        .then((lists) => setSubTribes(dedupeById(lists)))
+        .catch(() => setSubTribes([]));
     } else {
       setSubTribes([]);
     }
@@ -169,27 +255,32 @@ export default function AdminContributionsPage() {
   }, [filters.country, filters.city]);
 
   useEffect(() => {
-    if (filters.villageId) {
-      api.demographics.getQuarters(filters.villageId).then(setQuarters).catch(() => setQuarters([]));
+    if (filters.villageId.length) {
+      Promise.all(filters.villageId.map((id) => api.demographics.getQuarters(id)))
+        .then((lists) => setQuarters(dedupeById(lists)))
+        .catch(() => setQuarters([]));
     } else {
       setQuarters([]);
     }
   }, [filters.villageId]);
 
-  const selectedLanguage = languages.find((l) => l.id === filters.languageId);
+  // Dialects are shown as the union of every selected language's dialects.
+  const availableDialects = dedupeById(
+    languages.filter((l) => filters.languageId.includes(l.id)).map((l) => l.dialects),
+  );
 
   function setFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setOffset(0);
     setFilters((prev) => {
       const next = { ...prev, [key]: value };
       // Downstream selections become meaningless once their parent changes.
-      if (key === "languageId") next.dialectId = "";
-      if (key === "tribeId") next.subTribeId = "";
+      if (key === "languageId") next.dialectId = [];
+      if (key === "tribeId") next.subTribeId = [];
       if (key === "country" || key === "city") {
-        next.villageId = "";
-        next.quarterId = "";
+        next.villageId = [];
+        next.quarterId = [];
       }
-      if (key === "villageId") next.quarterId = "";
+      if (key === "villageId") next.quarterId = [];
       return next;
     });
   }
@@ -428,66 +519,46 @@ export default function AdminContributionsPage() {
               </option>
             ))}
           </select>
-          <select value={filters.status} onChange={(e) => setFilter("status", e.target.value as ContributionStatusValue | "")} className={selectClass}>
-            <option value="">All statuses</option>
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s.replace("_", " ")}
-              </option>
-            ))}
-          </select>
-          <select value={filters.moduleType} onChange={(e) => setFilter("moduleType", e.target.value as ModuleType | "")} className={selectClass}>
-            <option value="">All modules</option>
-            {MODULE_OPTIONS.map((m) => (
-              <option key={m} value={m}>
-                {MODULE_LABEL[m]}
-              </option>
-            ))}
-          </select>
+          <MultiSelect
+            label="statuses"
+            options={STATUS_OPTIONS.map((s) => ({ value: s, label: s.replace("_", " ") }))}
+            selected={filters.status}
+            onChange={(v) => setFilter("status", v)}
+          />
+          <MultiSelect
+            label="modules"
+            options={MODULE_OPTIONS.map((m) => ({ value: m, label: MODULE_LABEL[m] }))}
+            selected={filters.moduleType}
+            onChange={(v) => setFilter("moduleType", v)}
+          />
         </div>
 
         <div className="flex flex-wrap gap-3 border-t border-border pt-3">
-          <select value={filters.languageId} onChange={(e) => setFilter("languageId", e.target.value)} className={selectClass}>
-            <option value="">All languages</option>
-            {languages.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.nameEnglish}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.dialectId}
-            onChange={(e) => setFilter("dialectId", e.target.value)}
-            disabled={!selectedLanguage}
-            className={`${selectClass} disabled:opacity-50`}
-          >
-            <option value="">All dialects</option>
-            {selectedLanguage?.dialects.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.nameEnglish}
-              </option>
-            ))}
-          </select>
-          <select value={filters.gender} onChange={(e) => setFilter("gender", e.target.value as GenderOption | "")} className={selectClass}>
-            <option value="">All genders</option>
-            {GENDER_OPTIONS.map((g) => (
-              <option key={g.value} value={g.value}>
-                {g.label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.educationLevel}
-            onChange={(e) => setFilter("educationLevel", e.target.value as EducationLevel | "")}
-            className={selectClass}
-          >
-            <option value="">All education levels</option>
-            {EDUCATION_LEVEL_OPTIONS.map((e) => (
-              <option key={e.value} value={e.value}>
-                {e.label}
-              </option>
-            ))}
-          </select>
+          <MultiSelect
+            label="languages"
+            options={languages.map((l) => ({ value: l.id, label: l.nameEnglish }))}
+            selected={filters.languageId}
+            onChange={(v) => setFilter("languageId", v)}
+          />
+          <MultiSelect
+            label="dialects"
+            options={availableDialects.map((d) => ({ value: d.id, label: d.nameEnglish }))}
+            selected={filters.dialectId}
+            onChange={(v) => setFilter("dialectId", v)}
+            disabled={filters.languageId.length === 0}
+          />
+          <MultiSelect
+            label="genders"
+            options={GENDER_OPTIONS.map((g) => ({ value: g.value, label: g.label }))}
+            selected={filters.gender}
+            onChange={(v) => setFilter("gender", v)}
+          />
+          <MultiSelect
+            label="education levels"
+            options={EDUCATION_LEVEL_OPTIONS.map((e) => ({ value: e.value, label: e.label }))}
+            selected={filters.educationLevel}
+            onChange={(v) => setFilter("educationLevel", v)}
+          />
           <input
             value={filters.profession}
             onChange={(e) => setFilter("profession", e.target.value)}
@@ -497,55 +568,35 @@ export default function AdminContributionsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
-          <select value={filters.tribeId} onChange={(e) => setFilter("tribeId", e.target.value)} className={selectClass}>
-            <option value="">All tribes</option>
-            {tribes.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.subTribeId}
-            onChange={(e) => setFilter("subTribeId", e.target.value)}
-            disabled={!filters.tribeId}
-            className={`${selectClass} disabled:opacity-50`}
-          >
-            <option value="">All sub-tribes</option>
-            {subTribes.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <MultiSelect
+            label="tribes"
+            options={tribes.map((t) => ({ value: t.id, label: t.name }))}
+            selected={filters.tribeId}
+            onChange={(v) => setFilter("tribeId", v)}
+          />
+          <MultiSelect
+            label="sub-tribes"
+            options={subTribes.map((s) => ({ value: s.id, label: s.name }))}
+            selected={filters.subTribeId}
+            onChange={(v) => setFilter("subTribeId", v)}
+            disabled={filters.tribeId.length === 0}
+          />
           <input value={filters.country} onChange={(e) => setFilter("country", e.target.value)} placeholder="Country" className={inputClass} />
           <input value={filters.city} onChange={(e) => setFilter("city", e.target.value)} placeholder="City" className={inputClass} />
-          <select
-            value={filters.villageId}
-            onChange={(e) => setFilter("villageId", e.target.value)}
+          <MultiSelect
+            label="villages"
+            options={villages.map((v) => ({ value: v.id, label: v.name }))}
+            selected={filters.villageId}
+            onChange={(v) => setFilter("villageId", v)}
             disabled={villages.length === 0}
-            className={`${selectClass} disabled:opacity-50`}
-          >
-            <option value="">All villages</option>
-            {villages.map((v) => (
-              <option key={v.id} value={v.id}>
-                {v.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filters.quarterId}
-            onChange={(e) => setFilter("quarterId", e.target.value)}
-            disabled={!filters.villageId}
-            className={`${selectClass} disabled:opacity-50`}
-          >
-            <option value="">All quarters</option>
-            {quarters.map((q) => (
-              <option key={q.id} value={q.id}>
-                {q.name}
-              </option>
-            ))}
-          </select>
+          />
+          <MultiSelect
+            label="quarters"
+            options={quarters.map((q) => ({ value: q.id, label: q.name }))}
+            selected={filters.quarterId}
+            onChange={(v) => setFilter("quarterId", v)}
+            disabled={filters.villageId.length === 0}
+          />
           <button onClick={clearFilters} className="text-sm font-semibold text-brand hover:underline">
             Clear filters
           </button>
