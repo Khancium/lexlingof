@@ -50,7 +50,10 @@ export const contributionStatus = pgEnum("contribution_status", [
   "withdrawn",
 ]);
 
-export const reviewDecision = pgEnum("review_decision", ["valid", "needs_correction", "invalid"]);
+// "cannot_decide" is the reviewer abstaining -- the contribution's status is
+// left untouched (still "pending") so it goes back into the queue for
+// someone else to make a real call, rather than being treated as a verdict.
+export const reviewDecision = pgEnum("review_decision", ["valid", "needs_correction", "invalid", "cannot_decide"]);
 
 export const audioProcessingStatus = pgEnum("audio_processing_status", [
   "pending_upload",

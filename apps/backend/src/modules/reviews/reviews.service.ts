@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, not, sql } from "drizzle-orm";
 
 import { db } from "../../db/index.js";
 import {
@@ -27,7 +27,7 @@ import { sendContributionVerifiedNotification } from "../notifications/push.serv
 import { HttpError } from "../../utils/http-error.js";
 
 type Module = (typeof contributionModule.enumValues)[number];
-type Decision = "valid" | "needs_correction" | "invalid";
+type Decision = "valid" | "needs_correction" | "invalid" | "cannot_decide";
 type Role = (typeof userRole.enumValues)[number];
 
 export type SubmitReviewInput = {
@@ -79,7 +79,19 @@ async function getDemographics(userId: string): Promise<{ tribeId: string; city:
 }
 
 export async function getQueue(reviewerId: string, reviewerRole: Role, moduleType?: Module) {
-  const conditions = [eq(contributions.status, "pending"), ne(contributions.userId, reviewerId), isNull(contributions.deletedAt)];
+  // A "cannot_decide" review leaves the contribution's status at "pending"
+  // (see submitReview) so a different reviewer can make a real call -- this
+  // exclusion is what stops it from reappearing in the SAME reviewer's own
+  // queue and letting them dither on it indefinitely instead of it actually
+  // reaching someone else.
+  const alreadyReviewedByThisReviewer = db.select({ contributionId: reviews.contributionId }).from(reviews).where(eq(reviews.reviewerId, reviewerId));
+
+  const conditions = [
+    eq(contributions.status, "pending"),
+    ne(contributions.userId, reviewerId),
+    isNull(contributions.deletedAt),
+    not(inArray(contributions.id, alreadyReviewedByThisReviewer)),
+  ];
   if (moduleType) {
     conditions.push(eq(contributions.moduleType, moduleType));
   }
@@ -268,6 +280,12 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
     } else if (data.decision === "needs_correction") {
       statusAfter = "needs_correction";
       await tx.update(contributions).set({ status: statusAfter, updatedAt: new Date() }).where(eq(contributions.id, contribution.id));
+    } else if (data.decision === "cannot_decide") {
+      // Abstaining is not a verdict -- leave the contribution exactly as it
+      // was (still "pending") so it goes back into the queue for a different
+      // reviewer to make a real call, instead of silently stalling it or
+      // treating indecision as if it were a rejection.
+      statusAfter = contribution.status;
     } else {
       statusAfter = "rejected";
       await tx

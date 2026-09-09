@@ -146,7 +146,7 @@ apiClient.interceptors.response.use(
 export type ContributorLevel = "BRONZE" | "SILVER" | "GOLD" | "PLATINUM";
 export type ModuleType = "WORD" | "TRANSCRIPTION" | "TRANSLATION" | "SCENE";
 export type SceneDifficulty = "easy" | "medium" | "hard" | "expert";
-export type ReviewDecision = "valid" | "needs_correction" | "invalid";
+export type ReviewDecision = "valid" | "needs_correction" | "invalid" | "cannot_decide";
 
 type TokenPair = { accessToken: string; refreshToken: string };
 

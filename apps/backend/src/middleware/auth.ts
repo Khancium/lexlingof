@@ -209,8 +209,13 @@ export function requireReviewerEligibility() {
 
     const level = stats?.level ?? "BRONZE";
 
-    if (level === "BRONZE" || level === "SILVER") {
-      reply.code(403).send({ code: "INSUFFICIENT_LEVEL", currentLevel: level, required: "GOLD" });
+    // Peer review unlocks at SILVER -- this used to require GOLD, which
+    // silently contradicted the frontend's canReview() gate and copy (both
+    // already said SILVER), so a SILVER contributor got "Unlock Review
+    // Access" showing 100%/threshold met and then a 403 the moment they
+    // actually tried to load the queue.
+    if (level === "BRONZE") {
+      reply.code(403).send({ code: "INSUFFICIENT_LEVEL", currentLevel: level, required: "SILVER" });
       return;
     }
   };

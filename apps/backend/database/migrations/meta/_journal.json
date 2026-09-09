@@ -162,6 +162,13 @@
       "when": 1788977178828,
       "tag": "0022_flowery_xavin",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1788978890381,
+      "tag": "0023_tidy_praxagora",
+      "breakpoints": true
     }
   ]
 }

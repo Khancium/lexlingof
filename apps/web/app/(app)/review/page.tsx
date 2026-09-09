@@ -220,21 +220,21 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
           disabled={pendingDecision !== null}
           className="btn-duo flex-1 bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
         >
-          ✓ Valid
-        </button>
-        <button
-          onClick={() => submitDecision("needs_correction")}
-          disabled={pendingDecision !== null}
-          className="btn-duo flex-1 bg-yellow-500 py-2.5 font-semibold text-ink hover:bg-yellow-400 disabled:opacity-50"
-        >
-          ⚠ Needs Correction
+          ✓ Correct
         </button>
         <button
           onClick={() => submitDecision("invalid")}
           disabled={pendingDecision !== null}
           className="btn-duo btn-duo-danger flex-1 bg-red-600 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
         >
-          ✕ Invalid
+          ✕ Incorrect
+        </button>
+        <button
+          onClick={() => submitDecision("cannot_decide")}
+          disabled={pendingDecision !== null}
+          className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-2.5 font-semibold text-ink hover:bg-border disabled:opacity-50"
+        >
+          ? Cannot Decide
         </button>
       </div>
     </div>

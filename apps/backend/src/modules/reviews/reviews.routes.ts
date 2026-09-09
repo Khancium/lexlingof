@@ -9,7 +9,7 @@ const queueQuerySchema = z.object({ moduleType: z.enum(contributionModule.enumVa
 
 const submitReviewSchema = z.object({
   contributionId: z.string().uuid(),
-  decision: z.enum(["valid", "needs_correction", "invalid"]),
+  decision: z.enum(["valid", "needs_correction", "invalid", "cannot_decide"]),
   reason: z.string().optional(),
   notes: z.string().optional(),
 });
