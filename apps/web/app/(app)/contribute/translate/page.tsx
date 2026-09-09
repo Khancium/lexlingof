@@ -186,9 +186,9 @@ export default function TranslatePage() {
         <button
           onClick={() => languageId && fetchNewSentence(languageId)}
           disabled={!languageId || loadingSentence}
-          className="text-sm font-semibold text-brand hover:underline disabled:opacity-50"
+          className="btn-duo w-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
         >
-          🎲 Translate randomly
+          🎲 Translate Randomly
         </button>
 
         <div className="flex flex-wrap gap-3">
@@ -235,11 +235,6 @@ export default function TranslatePage() {
                   }`}
                 >
                   <div className="min-w-0 flex-1">
-                    {item.category ? (
-                      <span className="mb-1 inline-block rounded-full bg-surface-card px-2 py-0.5 text-xs font-semibold text-ink">
-                        {item.category.name}
-                      </span>
-                    ) : null}
                     <p className="truncate font-medium text-ink">{item.englishText}</p>
                   </div>
                   {item.hasTranslated ? (
@@ -270,11 +265,6 @@ export default function TranslatePage() {
       ) : (
         <>
           <div className="card-duo rounded-2xl bg-surface p-8 shadow-sm">
-            {sentence.category ? (
-              <span className="mb-3 inline-block rounded-full bg-surface-card px-2 py-1 text-xs font-semibold text-ink">
-                {sentence.category.name}
-              </span>
-            ) : null}
             <p className="text-2xl font-bold text-ink">{sentence.englishText}</p>
           </div>
 

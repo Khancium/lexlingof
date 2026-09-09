@@ -3,15 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store";
-import { api, type ContributionListItem, type ModuleType, type UserStatsResponse } from "@/lib/api";
+import { api, type UserStatsResponse } from "@/lib/api";
 import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
-
-const MODULE_ICON: Record<ModuleType, string> = {
-  WORD: "🎙️",
-  TRANSCRIPTION: "📤",
-  TRANSLATION: "🌐",
-  SCENE: "🖼️",
-};
 
 const QUICK_ACTIONS = [
   { href: "/contribute/concept", title: "Record a Word", color: "border-brand" },
@@ -24,14 +17,12 @@ export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
-  const [recent, setRecent] = useState<ContributionListItem[]>([]);
 
   useEffect(() => {
     api.users.getStats().then((res) => {
       setStats(res.stats);
       setStreak(res.streak?.currentStreak ?? 0);
     });
-    api.users.getContributions({ limit: 5 }).then((res) => setRecent(res.items));
   }, []);
 
   const levelThresholds = useLevelThresholds();
@@ -85,25 +76,6 @@ export default function DashboardPage() {
             </Link>
           ))}
         </div>
-      </div>
-
-      <div>
-        <h2 className="mb-4 text-xl font-bold text-ink">Recent Contributions</h2>
-        {recent.length === 0 ? (
-          <p className="text-sm text-ink-muted">No contributions yet -- get started above.</p>
-        ) : (
-          <div className="space-y-2">
-            {recent.map((item) => (
-              <div key={item.id} className="card-duo flex items-center justify-between rounded-xl bg-surface p-4 shadow-sm">
-                <div className="flex items-center gap-3">
-                  <span>{MODULE_ICON[item.moduleType]}</span>
-                  <span className="text-sm text-ink-muted">{new Date(item.submittedAt).toLocaleDateString()}</span>
-                </div>
-                <span className="font-semibold text-emerald-600">+{item.totalPoints ?? 0}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
