@@ -9,12 +9,9 @@ import {
   concepts,
   contributionModule,
   contributions,
-  contributorDemographics,
   contributorProfiles,
-  deviceTokens,
   dialects,
   languages,
-  refreshTokens,
   scenes,
   sceneContributions,
   sceneMedia,
@@ -24,7 +21,8 @@ import {
   users,
   wordRecordings,
 } from "../../db/schema.js";
-import { invalidateUserCache, verifyToken } from "../../middleware/auth.js";
+import { verifyToken } from "../../middleware/auth.js";
+import { deleteUserAccount } from "../../services/account.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -245,29 +243,7 @@ export default async function usersRoutes(fastify: FastifyInstance) {
   // ones), so keeping it on this row is what permanently blocks the same
   // email from registering a new account.
   fastify.delete("/me", { preHandler: verifyToken }, async (request) => {
-    const userId = request.user!.id;
-
-    await Promise.all([
-      db
-        .update(users)
-        .set({
-          passwordHash: null,
-          displayName: "Deleted User",
-          avatarUrl: null,
-          biography: null,
-          isActive: false,
-          deletedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId)),
-      db.delete(contributorDemographics).where(eq(contributorDemographics.userId, userId)),
-      db.delete(contributorProfiles).where(eq(contributorProfiles.userId, userId)),
-      db.delete(refreshTokens).where(eq(refreshTokens.userId, userId)),
-      db.delete(deviceTokens).where(eq(deviceTokens.userId, userId)),
-    ]);
-
-    invalidateUserCache(userId);
-
+    await deleteUserAccount(request.user!.id);
     return { deleted: true };
   });
 

@@ -88,6 +88,17 @@ class StorageService {
     return getSignedUrl(r2, command, { expiresIn: PLAY_URL_EXPIRY_SECONDS });
   }
 
+  /** Same object as generateAudioPlayUrl, but forces a browser download (via Content-Disposition) instead of inline playback -- used by the admin contributions download button. */
+  async generateAudioDownloadUrl(storageKey: string, filename: string): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: AUDIO_BUCKET,
+      Key: storageKey,
+      ResponseContentDisposition: `attachment; filename="${filename.replace(/"/g, "")}"`,
+    });
+
+    return getSignedUrl(r2, command, { expiresIn: PLAY_URL_EXPIRY_SECONDS });
+  }
+
   async deleteAudioFile(storageKey: string): Promise<void> {
     const command = new DeleteObjectCommand({
       Bucket: AUDIO_BUCKET,

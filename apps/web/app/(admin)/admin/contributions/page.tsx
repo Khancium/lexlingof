@@ -83,6 +83,8 @@ export default function AdminContributionsPage() {
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [isBulkActing, setIsBulkActing] = useState(false);
 
   // Filter dropdown data sources.
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -112,6 +114,7 @@ export default function AdminContributionsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setSelected(new Set());
     try {
       const res = await api.admin.getContributions({
         status: filters.status || undefined,
@@ -144,7 +147,7 @@ export default function AdminContributionsPage() {
   }, [load]);
 
   useEffect(() => {
-    api.admin.getUsers({ limit: 500 }).then(setUsers).catch(() => setUsers([]));
+    api.admin.getUsers({ limit: 500 }).then((res) => setUsers(res.items)).catch(() => setUsers([]));
     api.languages.getAll().then(setLanguages).catch(() => setLanguages([]));
     api.demographics.getTribes().then(setTribes).catch(() => setTribes([]));
   }, []);
@@ -215,6 +218,96 @@ export default function AdminContributionsPage() {
       setTotal((prev) => prev - 1);
     } finally {
       setActioningId(null);
+    }
+  }
+
+  async function handleDownload(item: AdminContributionListItem) {
+    const audioFileId = item.detail.audioFileId as string | undefined;
+    if (!audioFileId) return;
+    setActioningId(item.contributionId);
+    try {
+      const { url } = await api.admin.getAudioDownloadUrl(audioFileId);
+      // A real <a download> click (not window.open) so the browser saves the
+      // file directly instead of navigating/opening a tab -- the presigned
+      // URL's Content-Disposition: attachment header does the rest.
+      const link = document.createElement("a");
+      link.href = url;
+      link.rel = "noopener";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to get download link");
+    } finally {
+      setActioningId(null);
+    }
+  }
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === items.length ? new Set() : new Set(items.map((i) => i.contributionId))));
+  }
+
+  async function handleBulkStatus(newStatus: "verified" | "rejected") {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    setIsBulkActing(true);
+    try {
+      await api.admin.bulkUpdateContributionStatus(ids, newStatus);
+      setItems((prev) => prev.map((item) => (selected.has(item.contributionId) ? { ...item, status: newStatus } : item)));
+      setSelected(new Set());
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Bulk action failed");
+    } finally {
+      setIsBulkActing(false);
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    if (!confirm(`Delete ${ids.length} selected contribution(s)? This cannot be undone.`)) return;
+    setIsBulkActing(true);
+    try {
+      await api.admin.bulkDeleteContributions(ids);
+      setItems((prev) => prev.filter((i) => !selected.has(i.contributionId)));
+      setTotal((prev) => prev - ids.length);
+      setSelected(new Set());
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Bulk delete failed");
+    } finally {
+      setIsBulkActing(false);
+    }
+  }
+
+  async function handleBulkDownload() {
+    const selectedItems = items.filter((i) => selected.has(i.contributionId) && i.detail.audioFileId);
+    if (selectedItems.length === 0) return;
+    setIsBulkActing(true);
+    try {
+      for (const item of selectedItems) {
+        try {
+          const { url } = await api.admin.getAudioDownloadUrl(item.detail.audioFileId as string);
+          const link = document.createElement("a");
+          link.href = url;
+          link.rel = "noopener";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        } catch {
+          // Skip a single failed download rather than aborting the whole batch.
+        }
+      }
+    } finally {
+      setIsBulkActing(false);
     }
   }
 
@@ -451,6 +544,43 @@ export default function AdminContributionsPage() {
         </div>
       </div>
 
+      {selected.size > 0 ? (
+        <div className="card-duo flex flex-wrap items-center gap-3 rounded-2xl bg-surface p-4 shadow-sm ring-1 ring-brand/40">
+          <span className="text-sm font-semibold text-ink">{selected.size} selected</span>
+          <button
+            onClick={() => handleBulkStatus("verified")}
+            disabled={isBulkActing}
+            className="btn-duo bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            Verify
+          </button>
+          <button
+            onClick={() => handleBulkStatus("rejected")}
+            disabled={isBulkActing}
+            className="btn-duo bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50"
+          >
+            Reject
+          </button>
+          <button
+            onClick={handleBulkDownload}
+            disabled={isBulkActing}
+            className="btn-duo bg-brand px-3 py-1.5 text-xs font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+          >
+            Download
+          </button>
+          <button
+            onClick={handleBulkDelete}
+            disabled={isBulkActing}
+            className="px-2 py-1.5 text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+          >
+            Delete
+          </button>
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs font-semibold text-ink-muted hover:text-ink">
+            Clear selection
+          </button>
+        </div>
+      ) : null}
+
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : (
@@ -458,6 +588,14 @@ export default function AdminContributionsPage() {
           <table className="w-full text-left text-sm">
             <thead className="border-b border-border text-ink-muted">
               <tr>
+                <th className="px-4 py-3">
+                  <input
+                    type="checkbox"
+                    checked={items.length > 0 && selected.size === items.length}
+                    onChange={toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                </th>
                 <th className="px-4 py-3">Contributor</th>
                 <th className="px-4 py-3">Module</th>
                 <th className="px-4 py-3">Status</th>
@@ -469,6 +607,14 @@ export default function AdminContributionsPage() {
               {items.map((item) => (
                 <Fragment key={item.contributionId}>
                   <tr className="border-b border-border last:border-0">
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(item.contributionId)}
+                        onChange={() => toggleSelected(item.contributionId)}
+                        aria-label={`Select contribution from ${item.contributor.displayName}`}
+                      />
+                    </td>
                     <td className="px-4 py-3 text-ink">
                       {item.contributor.displayName}
                       <div className="text-xs text-ink-muted">{item.contributor.email}</div>
@@ -495,6 +641,15 @@ export default function AdminContributionsPage() {
                               : playingId === item.contributionId
                                 ? "■ Stop"
                                 : "▶ Play"}
+                          </button>
+                        ) : null}
+                        {item.detail.audioFileId ? (
+                          <button
+                            onClick={() => handleDownload(item)}
+                            disabled={actioningId === item.contributionId}
+                            className="btn-duo btn-duo-secondary bg-surface-card px-3 py-1.5 text-xs font-semibold text-ink hover:bg-border disabled:opacity-50"
+                          >
+                            ⬇ Download
                           </button>
                         ) : null}
                         <button
@@ -529,7 +684,7 @@ export default function AdminContributionsPage() {
                   </tr>
                   {expandedId === item.contributionId ? (
                     <tr className="border-b border-border bg-surface-card/50 last:border-0">
-                      <td colSpan={5} className="px-4 py-4">
+                      <td colSpan={6} className="px-4 py-4">
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div>
                             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">Content</p>

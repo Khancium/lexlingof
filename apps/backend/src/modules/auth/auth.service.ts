@@ -75,6 +75,7 @@ class AuthService {
         passwordHash: users.passwordHash,
         isSuspended: users.isSuspended,
         suspendedReason: users.suspendedReason,
+        suspendedUntil: users.suspendedUntil,
       })
       .from(users)
       .where(and(eq(users.email, email), isNull(users.deletedAt)))
@@ -84,8 +85,22 @@ class AuthService {
       throw new HttpError(401, "INVALID_CREDENTIALS", "Invalid email/password");
     }
 
+    // A cool-off ban whose expiry has passed lifts right here instead of
+    // needing a cron job -- the very next login attempt after it lapses just
+    // works, same auto-lift verifyToken does for an already-active session.
+    if (user.isSuspended && user.suspendedUntil && user.suspendedUntil <= new Date()) {
+      await db
+        .update(users)
+        .set({ isSuspended: false, suspendedUntil: null, suspendedReason: null, updatedAt: new Date() })
+        .where(eq(users.id, user.id));
+      user.isSuspended = false;
+    }
+
     if (user.isSuspended) {
-      throw new HttpError(403, "ACCOUNT_SUSPENDED", undefined, { reason: user.suspendedReason });
+      throw new HttpError(403, "ACCOUNT_SUSPENDED", undefined, {
+        reason: user.suspendedReason,
+        until: user.suspendedUntil,
+      });
     }
 
     const passwordMatches = user.passwordHash ? await bcrypt.compare(password, user.passwordHash) : false;

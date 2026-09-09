@@ -6,6 +6,7 @@ import { useAuthStore } from "@/lib/store";
 
 const LINKS = [
   { href: "/admin/dashboard", label: "Dashboard" },
+  { href: "/admin/users", label: "Users" },
   { href: "/admin/contributions", label: "Contributions" },
   { href: "/admin/concepts", label: "Concepts" },
   { href: "/admin/scenes", label: "Scenes" },

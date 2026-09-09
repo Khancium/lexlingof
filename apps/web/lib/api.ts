@@ -663,9 +663,18 @@ export type AdminUser = {
   isActive: boolean;
   isSuspended: boolean;
   suspendedReason: string | null;
+  suspendedUntil: string | null;
+  isRestricted: boolean;
+  restrictedReason: string | null;
   createdAt: string;
   lastSeenAt: string | null;
+  totalContributions: number | null;
+  verifiedContributions: number | null;
+  totalPoints: number | null;
+  level: ContributorLevel | null;
 };
+
+export type AdminUsersResponse = { items: AdminUser[]; limit: number; offset: number; total: number };
 
 export type AdminConceptInput = { categoryId: string; labelEnglish: string; description?: string };
 export type AdminConceptUpdateInput = Partial<{
@@ -955,10 +964,28 @@ export const api = {
 
     getAnalytics: () => apiClient.get<AdminAnalytics>("/api/v1/admin/analytics").then((r) => r.data),
 
-    getUsers: (params?: { role?: string; search?: string; limit?: number; offset?: number }) =>
-      apiClient.get<AdminUser[]>("/api/v1/admin/users", { params }).then((r) => r.data),
+    getUsers: (params?: { role?: string; search?: string; status?: "active" | "restricted" | "suspended"; limit?: number; offset?: number }) =>
+      apiClient.get<AdminUsersResponse>("/api/v1/admin/users", { params }).then((r) => r.data),
+    restrictUser: (id: string, reason: string) =>
+      apiClient.post<{ id: string; isRestricted: boolean }>(`/api/v1/admin/users/${id}/restrict`, { reason }).then((r) => r.data),
+    unrestrictUser: (id: string) =>
+      apiClient.post<{ id: string; isRestricted: boolean }>(`/api/v1/admin/users/${id}/unrestrict`).then((r) => r.data),
+    cooloffUser: (id: string, reason: string, days: number) =>
+      apiClient
+        .post<{ id: string; isSuspended: boolean; suspendedUntil: string }>(`/api/v1/admin/users/${id}/cooloff`, { reason, days })
+        .then((r) => r.data),
     suspendUser: (id: string, reason: string) =>
       apiClient.post<{ id: string; isSuspended: boolean }>(`/api/v1/admin/users/${id}/suspend`, { reason }).then((r) => r.data),
+    unsuspendUser: (id: string) =>
+      apiClient.post<{ id: string; isSuspended: boolean }>(`/api/v1/admin/users/${id}/unsuspend`).then((r) => r.data),
+    banUser: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/users/${id}`).then((r) => r.data),
+
+    getAudioDownloadUrl: (audioFileId: string) =>
+      apiClient.get<{ url: string }>(`/api/v1/admin/audio/${audioFileId}/download-url`).then((r) => r.data),
+    bulkUpdateContributionStatus: (ids: string[], status: ContributionStatusValue, reason?: string) =>
+      apiClient.post<{ updated: number }>("/api/v1/admin/contributions/bulk-status", { ids, status, reason }).then((r) => r.data),
+    bulkDeleteContributions: (ids: string[]) =>
+      apiClient.post<{ deleted: number }>("/api/v1/admin/contributions/bulk-delete", { ids }).then((r) => r.data),
 
     // No admin-specific list endpoints exist for concepts/scenes -- the
     // public GET /concepts and GET /scenes routes have no auth requirement

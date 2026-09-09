@@ -147,6 +147,12 @@ export const users = pgTable(
     isSuspended: boolean("is_suspended").default(false).notNull(),
     suspendedAt: timestamp("suspended_at", { withTimezone: true }),
     suspendedReason: text("suspended_reason"),
+    /** Null while isSuspended means an indefinite suspension; a past timestamp means the cool-off has lapsed and verifyToken/login auto-lift it. */
+    suspendedUntil: timestamp("suspended_until", { withTimezone: true }),
+    /** Lighter than isSuspended: still lets the user log in and browse, but blocks new contribution submissions (see blockIfRestricted). */
+    isRestricted: boolean("is_restricted").default(false).notNull(),
+    restrictedAt: timestamp("restricted_at", { withTimezone: true }),
+    restrictedReason: text("restricted_reason"),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     timezone: text("timezone").default("UTC").notNull(),
     locale: text("locale").default("en").notNull(),

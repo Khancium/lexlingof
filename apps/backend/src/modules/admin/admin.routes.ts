@@ -43,6 +43,7 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
+import { deleteUserAccount } from "../../services/account.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -237,11 +238,14 @@ const updateContributionStatusSchema = z.object({
 const usersQuerySchema = z.object({
   role: z.enum(userRole.enumValues).optional(),
   search: z.string().optional(),
+  status: z.enum(["active", "restricted", "suspended"]).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
 const suspendUserSchema = z.object({ reason: z.string().min(1) });
+const cooloffUserSchema = z.object({ reason: z.string().min(1), days: z.coerce.number().int().min(1).max(365) });
+const restrictUserSchema = z.object({ reason: z.string().min(1) });
 
 const createConceptSchema = z.object({
   categoryId: z.string().uuid(),
@@ -509,6 +513,69 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { id, deleted: true };
   });
 
+  // Bulk versions of the single-row status/delete actions above, for the
+  // admin contributions page's checkbox multi-select. Each id is processed
+  // independently (skipping ones that don't exist or are already deleted)
+  // rather than failing the whole batch on one bad id, and gets its own
+  // audit log entry -- same as if an admin had clicked each row by hand.
+  fastify.post("/admin/contributions/bulk-status", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { ids, status, reason } = z
+      .object({ ids: z.array(z.string().uuid()).min(1), status: z.enum(contributionStatus.enumValues), reason: z.string().optional() })
+      .parse(request.body);
+
+    const rows = await db.select({ id: contributions.id, status: contributions.status }).from(contributions).where(inArray(contributions.id, ids));
+    if (rows.length === 0) return { updated: 0 };
+
+    const updates: Record<string, unknown> = { status, updatedAt: new Date() };
+    if (status === "rejected") updates.rejectionReason = reason ?? null;
+
+    await db.update(contributions).set(updates).where(inArray(contributions.id, rows.map((r) => r.id)));
+
+    const actorRole = request.user!.role;
+    await Promise.all(
+      rows.map((row) =>
+        writeAuditLog({
+          actorId: request.user!.id,
+          actorRole,
+          action: "admin_contribution_status_change",
+          resourceType: "contribution",
+          resourceId: row.id,
+          beforeState: { status: row.status },
+          afterState: { status, reason: reason ?? null },
+        }),
+      ),
+    );
+
+    return { updated: rows.length };
+  });
+
+  fastify.post("/admin/contributions/bulk-delete", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    const rows = await db
+      .select({ id: contributions.id })
+      .from(contributions)
+      .where(and(inArray(contributions.id, ids), isNull(contributions.deletedAt)));
+    if (rows.length === 0) return { deleted: 0 };
+
+    await db.update(contributions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(inArray(contributions.id, rows.map((r) => r.id)));
+
+    const actorRole = request.user!.role;
+    await Promise.all(
+      rows.map((row) =>
+        writeAuditLog({
+          actorId: request.user!.id,
+          actorRole,
+          action: "admin_contribution_delete",
+          resourceType: "contribution",
+          resourceId: row.id,
+        }),
+      ),
+    );
+
+    return { deleted: rows.length };
+  });
+
   /* --------------------------- Contribution keywords -------------------------- */
   // ADMIN ONLY: free-text training-data labels for any of the four modules'
   // contributions. Never exposed to contributors.
@@ -596,33 +663,154 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { id, status: body.status };
   });
 
+  // Admin-only download variant of the regular /audio/:id/play-url -- same
+  // presigned GET, but with a Content-Disposition that forces a save-as
+  // instead of inline playback. Kept separate from the general audio module
+  // (rather than adding a query param there) so this stays gated behind
+  // contributions.manage specifically.
+  fastify.get("/admin/audio/:id/download-url", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [audioFile] = await db
+      .select({ storageKey: audioFiles.storageKey, format: audioFiles.format })
+      .from(audioFiles)
+      .where(eq(audioFiles.id, id))
+      .limit(1);
+    if (!audioFile) {
+      throw new HttpError(404, "NOT_FOUND", "Audio file not found");
+    }
+
+    const url = await storageService.generateAudioDownloadUrl(audioFile.storageKey, `${id}.${audioFile.format}`);
+    return { url };
+  });
+
   /* ---------------------------------- Users ---------------------------------- */
 
   fastify.get("/admin/users", { preHandler: requirePermission("users.manage") }, async (request) => {
-    const { role, search, limit, offset } = usersQuerySchema.parse(request.query);
+    const { role, search, status, limit, offset } = usersQuerySchema.parse(request.query);
 
-    const conditions = [];
+    const conditions = [isNull(users.deletedAt)];
     if (role) conditions.push(eq(users.role, role));
-    if (search) conditions.push(or(ilike(users.displayName, `%${search}%`), ilike(users.email, `%${search}%`)));
-    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+    if (search) conditions.push(or(ilike(users.displayName, `%${search}%`), ilike(users.email, `%${search}%`))!);
+    if (status === "suspended") conditions.push(eq(users.isSuspended, true));
+    if (status === "restricted") conditions.push(and(eq(users.isRestricted, true), eq(users.isSuspended, false))!);
+    if (status === "active") conditions.push(and(eq(users.isSuspended, false), eq(users.isRestricted, false))!);
+    const whereClause = and(...conditions);
 
-    return db
-      .select({
-        id: users.id,
-        email: users.email,
-        displayName: users.displayName,
-        role: users.role,
-        isActive: users.isActive,
-        isSuspended: users.isSuspended,
-        suspendedReason: users.suspendedReason,
-        createdAt: users.createdAt,
-        lastSeenAt: users.lastSeenAt,
-      })
-      .from(users)
-      .where(whereClause)
-      .orderBy(desc(users.createdAt))
-      .limit(limit)
-      .offset(offset);
+    const selection = {
+      id: users.id,
+      email: users.email,
+      displayName: users.displayName,
+      role: users.role,
+      isActive: users.isActive,
+      isSuspended: users.isSuspended,
+      suspendedReason: users.suspendedReason,
+      suspendedUntil: users.suspendedUntil,
+      isRestricted: users.isRestricted,
+      restrictedReason: users.restrictedReason,
+      createdAt: users.createdAt,
+      lastSeenAt: users.lastSeenAt,
+      totalContributions: userStats.totalContributions,
+      verifiedContributions: userStats.verifiedContributions,
+      totalPoints: userStats.totalPoints,
+      level: userStats.level,
+    };
+
+    const [items, [totalRow]] = await Promise.all([
+      db
+        .select(selection)
+        .from(users)
+        .leftJoin(userStats, eq(userStats.userId, users.id))
+        .where(whereClause)
+        .orderBy(desc(users.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(users).where(whereClause),
+    ]);
+
+    return { items, limit, offset, total: totalRow?.value ?? 0 };
+  });
+
+  fastify.post("/admin/users/:id/restrict", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const body = restrictUserSchema.parse(request.body);
+
+    const [user] = await db.select({ isRestricted: users.isRestricted }).from(users).where(eq(users.id, id)).limit(1);
+    if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
+
+    await db
+      .update(users)
+      .set({ isRestricted: true, restrictedAt: new Date(), restrictedReason: body.reason, updatedAt: new Date() })
+      .where(eq(users.id, id));
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_user_restrict",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { isRestricted: user.isRestricted },
+      afterState: { isRestricted: true, reason: body.reason },
+    });
+
+    return { id, isRestricted: true };
+  });
+
+  fastify.post("/admin/users/:id/unrestrict", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [user] = await db.select({ isRestricted: users.isRestricted }).from(users).where(eq(users.id, id)).limit(1);
+    if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
+
+    await db
+      .update(users)
+      .set({ isRestricted: false, restrictedAt: null, restrictedReason: null, updatedAt: new Date() })
+      .where(eq(users.id, id));
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_user_unrestrict",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { isRestricted: user.isRestricted },
+      afterState: { isRestricted: false },
+    });
+
+    return { id, isRestricted: false };
+  });
+
+  // A cool-off ban is just users.isSuspended with an expiry -- verifyToken
+  // and login both already auto-lift it once suspendedUntil passes (see
+  // middleware/auth.ts and auth.service.ts), so this route only needs to set
+  // the expiry, not schedule anything.
+  fastify.post("/admin/users/:id/cooloff", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const body = cooloffUserSchema.parse(request.body);
+    const until = new Date(Date.now() + body.days * 24 * 60 * 60 * 1000);
+
+    const [user] = await db.select({ isSuspended: users.isSuspended }).from(users).where(eq(users.id, id)).limit(1);
+    if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
+
+    await db
+      .update(users)
+      .set({ isSuspended: true, suspendedAt: new Date(), suspendedReason: body.reason, suspendedUntil: until, updatedAt: new Date() })
+      .where(eq(users.id, id));
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_user_cooloff",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { isSuspended: user.isSuspended },
+      afterState: { isSuspended: true, reason: body.reason, until: until.toISOString(), days: body.days },
+    });
+
+    return { id, isSuspended: true, suspendedUntil: until };
   });
 
   fastify.post("/admin/users/:id/suspend", { preHandler: requirePermission("users.manage") }, async (request) => {
@@ -636,7 +824,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     await db
       .update(users)
-      .set({ isSuspended: true, suspendedAt: new Date(), suspendedReason: body.reason, updatedAt: new Date() })
+      .set({ isSuspended: true, suspendedAt: new Date(), suspendedReason: body.reason, suspendedUntil: null, updatedAt: new Date() })
       .where(eq(users.id, id));
     invalidateUserCache(id);
 
@@ -652,6 +840,58 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return { id, isSuspended: true };
+  });
+
+  fastify.post("/admin/users/:id/unsuspend", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [user] = await db.select({ isSuspended: users.isSuspended }).from(users).where(eq(users.id, id)).limit(1);
+    if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
+
+    await db
+      .update(users)
+      .set({ isSuspended: false, suspendedAt: null, suspendedReason: null, suspendedUntil: null, updatedAt: new Date() })
+      .where(eq(users.id, id));
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_user_unsuspend",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { isSuspended: user.isSuspended },
+      afterState: { isSuspended: false },
+    });
+
+    return { id, isSuspended: false };
+  });
+
+  // "Banning" a user IS deleting their account (per product decision) --
+  // there's no separate permanent-suspend state. This reuses the exact same
+  // soft-delete/PII-scrub used by the self-service /users/me DELETE, so an
+  // admin-banned account behaves identically to a self-deleted one (corpus
+  // data survives, email stays permanently blocked from re-registration).
+  fastify.delete("/admin/users/:id", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [user] = await db.select({ email: users.email, deletedAt: users.deletedAt }).from(users).where(eq(users.id, id)).limit(1);
+    if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
+    if (user.deletedAt) throw new HttpError(409, "ALREADY_DELETED", "This account has already been deleted");
+
+    await deleteUserAccount(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_user_ban_delete",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { deletedAt: null },
+      afterState: { deletedAt: new Date().toISOString() },
+    });
+
+    return { id, deleted: true };
   });
 
   /* ------------------------------- Concepts ------------------------------- */

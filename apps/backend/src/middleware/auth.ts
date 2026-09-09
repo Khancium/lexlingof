@@ -9,7 +9,7 @@ type Role = (typeof userRole.enumValues)[number];
 
 declare module "fastify" {
   interface FastifyRequest {
-    user?: { id: string; email: string; role: Role };
+    user?: { id: string; email: string; role: Role; isRestricted: boolean };
     requireOwnershipCheck?: boolean;
   }
 }
@@ -53,7 +53,15 @@ async function getRolePermissionCodes(role: Role): Promise<Set<string>> {
 // status needs to propagate faster than permission changes do.
 const USER_CACHE_TTL_MS = 30 * 1000;
 
-type CachedUserRow = { id: string; email: string; role: Role; isActive: boolean; isSuspended: boolean };
+type CachedUserRow = {
+  id: string;
+  email: string;
+  role: Role;
+  isActive: boolean;
+  isSuspended: boolean;
+  suspendedUntil: Date | null;
+  isRestricted: boolean;
+};
 
 const userCache = new Map<string, { row: CachedUserRow; expiresAt: number }>();
 
@@ -70,12 +78,26 @@ async function getUserForToken(userId: string): Promise<CachedUserRow | null> {
       role: users.role,
       isActive: users.isActive,
       isSuspended: users.isSuspended,
+      suspendedUntil: users.suspendedUntil,
+      isRestricted: users.isRestricted,
     })
     .from(users)
     .where(and(eq(users.id, userId), isNull(users.deletedAt)))
     .limit(1);
 
   if (!row) return null;
+
+  // A cool-off ban that has expired auto-lifts here rather than needing a
+  // cron job -- the next request after suspendedUntil passes just works,
+  // and the lifted state is what gets cached (and returned) below.
+  if (row.isSuspended && row.suspendedUntil && row.suspendedUntil <= new Date()) {
+    await db
+      .update(users)
+      .set({ isSuspended: false, suspendedUntil: null, suspendedReason: null, updatedAt: new Date() })
+      .where(eq(users.id, userId));
+    row.isSuspended = false;
+    row.suspendedUntil = null;
+  }
 
   userCache.set(userId, { row, expiresAt: Date.now() + USER_CACHE_TTL_MS });
   return row;
@@ -120,7 +142,21 @@ export async function verifyToken(request: FastifyRequest, reply: FastifyReply):
     return;
   }
 
-  request.user = { id: row.id, email: row.email, role: row.role };
+  request.user = { id: row.id, email: row.email, role: row.role, isRestricted: row.isRestricted };
+}
+
+/**
+ * Lighter than a suspension: blocks new contribution submissions but leaves
+ * everything else (login, browsing, past contributions) untouched. Apply
+ * only to the submission-buffer POST routes, after verifyToken.
+ */
+export async function blockIfRestricted(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (request.user?.isRestricted) {
+    reply.code(403).send({
+      code: "ACCOUNT_RESTRICTED",
+      message: "Your account is restricted from submitting new contributions. Contact support if you think this is a mistake.",
+    });
+  }
 }
 
 /* -------------------------------------------------------------------------- */

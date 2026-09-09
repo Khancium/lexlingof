@@ -141,6 +141,13 @@
       "when": 1788958836336,
       "tag": "0019_translations_user_id_override",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788963899080,
+      "tag": "0020_users_restriction_cooloff",
+      "breakpoints": true
     }
   ]
 }

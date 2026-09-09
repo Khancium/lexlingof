@@ -5,7 +5,7 @@ import { z } from "zod";
 
 import { db } from "../../../db/index.js";
 import { pendingSubmissions } from "../../../db/schema.js";
-import { verifyToken } from "../../../middleware/auth.js";
+import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { enqueueSubmission } from "../../../services/submission-buffer.service.js";
 
@@ -110,7 +110,7 @@ async function readMultipartSubmission(request: FastifyRequest): Promise<{ meta:
 }
 
 export default async function bufferRoutes(fastify: FastifyInstance) {
-  fastify.post("/word", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/word", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { meta, audio } = await readMultipartSubmission(request);
     const { durationMs, ...payload } = wordMetaSchema.parse(meta);
 
@@ -124,7 +124,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
     reply.code(202).send({ bufferId: id, status: "pending" });
   });
 
-  fastify.post("/translation", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/translation", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { meta, audio } = await readMultipartSubmission(request);
     const { durationMs, ...payload } = translationMetaSchema.parse(meta);
 
@@ -138,7 +138,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
     reply.code(202).send({ bufferId: id, status: "pending" });
   });
 
-  fastify.post("/audio-upload", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/audio-upload", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { meta, audio } = await readMultipartSubmission(request);
     const { durationMs, ...payload } = audioUploadMetaSchema.parse(meta);
 
@@ -152,7 +152,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
     reply.code(202).send({ bufferId: id, status: "pending" });
   });
 
-  fastify.post("/scene", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/scene", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { meta, audio } = await readMultipartSubmission(request);
     const { durationMs, ...payload } = sceneMetaSchema.parse(meta);
 
