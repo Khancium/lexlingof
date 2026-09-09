@@ -38,3 +38,5 @@ export const MOTHER_TONGUE_LANGUAGES = [
 ] as const;
 
 export const GENDER_OPTIONS = ["male", "female", "other", "prefer_not_to_say"] as const;
+
+export const EDUCATION_LEVEL_OPTIONS = ["none", "high_school", "bachelors", "masters", "phd"] as const;

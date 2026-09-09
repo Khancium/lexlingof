@@ -26,6 +26,10 @@ export default function TranslatePage() {
   const [loadingSentence, setLoadingSentence] = useState(true);
   const [sentenceError, setSentenceError] = useState<string | null>(null);
 
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState<RandomSentence[]>([]);
+  const [searching, setSearching] = useState(false);
+
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Tracks which recording (by object identity) was last successfully
   // submitted, so Submit re-locks after a click instead of staying
@@ -66,6 +70,33 @@ export default function TranslatePage() {
   useEffect(() => {
     if (languageId && history.length === 0) fetchNewSentence(languageId);
   }, [languageId, history.length, fetchNewSentence]);
+
+  useEffect(() => {
+    if (!search.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    setSearching(true);
+    const timeout = setTimeout(() => {
+      api.contributions
+        .searchSentences({ search: search.trim(), limit: 10 })
+        .then((res) => setSearchResults(res.items))
+        .finally(() => setSearching(false));
+    }, 250);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
+  function openSearchResult(result: RandomSentence) {
+    setSearch("");
+    setSearchResults([]);
+    setSubmitError(null);
+    setDetailsOpen(false);
+    setHistory((prev) => {
+      const updated = [...prev, result];
+      setHistoryIndex(updated.length - 1);
+      return updated;
+    });
+  }
 
   function goPrevious() {
     if (historyIndex <= 0) return;
@@ -128,6 +159,34 @@ export default function TranslatePage() {
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <h1 className="text-2xl font-bold text-ink">Translate a Sentence</h1>
+
+      <div className="relative">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search sentences..."
+          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+        />
+        {search.trim() ? (
+          <div className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg bg-surface shadow-lg ring-1 ring-border">
+            {searching ? (
+              <p className="px-4 py-3 text-sm text-ink-muted">Searching...</p>
+            ) : searchResults.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-ink-muted">No matching sentences.</p>
+            ) : (
+              searchResults.map((result) => (
+                <button
+                  key={result.id}
+                  onClick={() => openSearchResult(result)}
+                  className="block w-full px-4 py-2.5 text-left text-sm text-ink hover:bg-surface-card"
+                >
+                  {result.englishText}
+                </button>
+              ))
+            )}
+          </div>
+        ) : null}
+      </div>
 
       {loadingSentence ? (
         <p className="text-ink-muted">Loading...</p>

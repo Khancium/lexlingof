@@ -188,6 +188,10 @@ export default function ProfilePage() {
           <p className="mb-3 text-xs text-ink-muted">These were set during sign-up and can&apos;t be changed here.</p>
           <div className="card-duo grid grid-cols-2 gap-4 rounded-2xl bg-surface p-5 shadow-sm sm:grid-cols-3">
             <DetailField label="Full Name" value={demographics.fullName} />
+            <DetailField
+              label="Date of Birth"
+              value={demographics.dateOfBirth ? new Date(demographics.dateOfBirth).toLocaleDateString() : null}
+            />
             <DetailField label="Age" value={String(demographics.age)} />
             <DetailField label="Gender" value={GENDER_LABELS[demographics.gender]} />
             <DetailField label="Language" value={demographics.motherTongue} />
@@ -198,6 +202,11 @@ export default function ProfilePage() {
             <DetailField label="Village" value={demographics.villageName} />
             <DetailField label="Quarter" value={demographics.quarterName} />
             <DetailField label="Dialect" value={demographics.dialect} />
+            <DetailField
+              label="Education Level"
+              value={demographics.educationLevel ? EDUCATION_LEVEL_LABELS[demographics.educationLevel] : null}
+            />
+            <DetailField label="Profession" value={demographics.profession} />
           </div>
         </div>
       )}
@@ -299,6 +308,14 @@ const GENDER_LABELS: Record<string, string> = {
   female: "Female",
   other: "Other",
   prefer_not_to_say: "Prefer not to say",
+};
+
+const EDUCATION_LEVEL_LABELS: Record<string, string> = {
+  none: "None",
+  high_school: "High School",
+  bachelors: "Bachelors",
+  masters: "Masters",
+  phd: "PhD",
 };
 
 function DetailField({ label, value }: { label: string; value: string | null }) {

@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, ilike, isNull, ne, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
 import {
@@ -62,8 +62,10 @@ function sceneSelection() {
   };
 }
 
-export async function getScenes(limit: number, offset: number) {
-  const whereClause = and(eq(scenes.isActive, true), isNull(scenes.deletedAt));
+export async function getScenes(limit: number, offset: number, search?: string) {
+  const whereClause = search
+    ? and(eq(scenes.isActive, true), isNull(scenes.deletedAt), ilike(scenes.title, `%${search}%`))
+    : and(eq(scenes.isActive, true), isNull(scenes.deletedAt));
 
   const [items, [totalRow]] = await Promise.all([
     db

@@ -197,14 +197,19 @@ export type NamedOption = { id: string; name: string };
 
 export type GenderOption = "male" | "female" | "other" | "prefer_not_to_say";
 
+export type EducationLevel = "none" | "high_school" | "bachelors" | "masters" | "phd";
+
 export type ContributorDemographics = {
   fullName: string;
   age: number;
+  dateOfBirth: string | null;
   gender: GenderOption;
   motherTongue: string;
   country: string;
   city: string;
   dialect: string | null;
+  educationLevel: EducationLevel | null;
+  profession: string | null;
   tribeName: string | null;
   subTribeName: string | null;
   villageName: string | null;
@@ -213,7 +218,7 @@ export type ContributorDemographics = {
 
 export type SubmitDemographicsInput = {
   fullName: string;
-  age: number;
+  dateOfBirth: string;
   gender: GenderOption;
   motherTongue: string;
   tribe: string;
@@ -223,6 +228,8 @@ export type SubmitDemographicsInput = {
   village: string;
   quarter?: string;
   dialect?: string;
+  educationLevel?: EducationLevel;
+  profession?: string;
 };
 
 export type UserStatsResponse = {
@@ -282,6 +289,8 @@ export type ConceptListItem = {
   slug: string;
   labelEnglish: string;
   description: string | null;
+  imageUrl: string | null;
+  hasContributed: boolean;
 };
 export type ConceptsResponse = { items: ConceptListItem[]; limit: number; offset: number; total: number };
 export type ConceptDetail = {
@@ -365,6 +374,7 @@ export type RandomSentence = {
   englishText: string;
   category: { id: string; name: string; slug: string } | null;
 };
+export type SentencesResponse = { items: RandomSentence[]; limit: number; offset: number; total: number };
 
 export type WordBufferMeta = {
   conceptId: string;
@@ -824,6 +834,9 @@ export const api = {
       apiClient.post<AddTranscriptionResponse>(`/api/v1/contributions/audio/${id}/transcription`, data).then((r) => r.data),
     addSegment: (id: string, data: AddSegmentInput) =>
       apiClient.post<AddSegmentResponse>(`/api/v1/contributions/audio/${id}/segments`, data).then((r) => r.data),
+    searchSentences: (params?: { search?: string; limit?: number; offset?: number }) =>
+      apiClient.get<SentencesResponse>("/api/v1/sentences", { params }).then((r) => r.data),
+    getSentenceById: (id: string) => apiClient.get<RandomSentence>(`/api/v1/sentences/${id}`).then((r) => r.data),
     getRandomSentence: (languageId: string) =>
       apiClient.get<RandomSentence>("/api/v1/sentences/random", { params: { languageId } }).then((r) => r.data),
     submitTranslation: (sentenceId: string, data: SubmitTranslationInput) =>
@@ -831,7 +844,7 @@ export const api = {
   },
 
   scenes: {
-    getAll: (params?: { limit?: number; offset?: number }) =>
+    getAll: (params?: { search?: string; limit?: number; offset?: number }) =>
       apiClient.get<ScenesResponse>("/api/v1/scenes", { params }).then((r) => r.data),
     getDaily: () => apiClient.get<Scene>("/api/v1/scenes/daily").then((r) => r.data),
     getRandom: (excludeId?: string) =>

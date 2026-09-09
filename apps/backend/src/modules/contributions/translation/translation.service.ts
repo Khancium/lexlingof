@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, eq, ilike, inArray, isNull, not, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
 import {
@@ -43,6 +43,40 @@ async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[
   }
 
   return (config.configValue as { value: number }).value;
+}
+
+/** Search-by-text list, used by the translate page's search bar to jump straight to a sentence instead of only cycling randomly. */
+export async function searchSentences(search: string | undefined, limit: number, offset: number) {
+  const conditions = [eq(sentences.isActive, true), isNull(sentences.deletedAt)];
+  if (search) {
+    conditions.push(ilike(sentences.englishText, `%${search}%`));
+  }
+
+  const [rows, [totalRow]] = await Promise.all([
+    db
+      .select({
+        id: sentences.id,
+        englishText: sentences.englishText,
+        categoryId: categories.id,
+        categoryName: categories.nameEnglish,
+        categorySlug: categories.slug,
+      })
+      .from(sentences)
+      .leftJoin(categories, eq(categories.id, sentences.categoryId))
+      .where(and(...conditions))
+      .orderBy(sentences.englishText)
+      .limit(limit)
+      .offset(offset),
+    db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(and(...conditions)),
+  ]);
+
+  const items = rows.map((row) => ({
+    id: row.id,
+    englishText: row.englishText,
+    category: row.categoryId ? { id: row.categoryId, name: row.categoryName, slug: row.categorySlug } : null,
+  }));
+
+  return { items, limit, offset, total: totalRow?.value ?? 0 };
 }
 
 export async function getRandomSentence(userId: string, languageId: string) {

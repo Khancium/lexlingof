@@ -39,3 +39,11 @@ export const GENDER_OPTIONS: { value: "male" | "female" | "other" | "prefer_not_
   { value: "other", label: "Other" },
   { value: "prefer_not_to_say", label: "Prefer not to say" },
 ];
+
+export const EDUCATION_LEVEL_OPTIONS: { value: "none" | "high_school" | "bachelors" | "masters" | "phd"; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "high_school", label: "High School" },
+  { value: "bachelors", label: "Bachelors" },
+  { value: "masters", label: "Masters" },
+  { value: "phd", label: "PhD" },
+];

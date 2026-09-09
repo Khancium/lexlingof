@@ -8,11 +8,27 @@ import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
 import { api, getErrorMessage, type NamedOption } from "@/lib/api";
 import { Combobox } from "@/components/combobox";
-import { GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from "@/lib/demographics-constants";
+import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from "@/lib/demographics-constants";
+
+const today = new Date();
+const maxDateOfBirth = today.toISOString().slice(0, 10);
+const minDateOfBirth = new Date(today.getFullYear() - 120, today.getMonth(), today.getDate()).toISOString().slice(0, 10);
+
+function ageFromDateOfBirth(dateOfBirth: string): number {
+  const dob = new Date(dateOfBirth);
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const hasHadBirthdayThisYear = now.getMonth() > dob.getMonth() || (now.getMonth() === dob.getMonth() && now.getDate() >= dob.getDate());
+  if (!hasHadBirthdayThisYear) age -= 1;
+  return age;
+}
 
 const schema = z.object({
   fullName: z.string().min(1, "Full name is required"),
-  age: z.number("Age is required").int().min(1).max(120),
+  dateOfBirth: z
+    .string()
+    .min(1, "Date of birth is required")
+    .refine((v) => ageFromDateOfBirth(v) >= 1 && ageFromDateOfBirth(v) <= 120, "Please enter a valid date of birth"),
   gender: z.enum(["male", "female", "other", "prefer_not_to_say"], "Gender is required"),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES, "Language is required"),
   tribe: z.string().min(1, "Tribe is required"),
@@ -22,6 +38,8 @@ const schema = z.object({
   village: z.string().min(1, "Village is required"),
   quarter: z.string().optional(),
   dialect: z.string().optional(),
+  educationLevel: z.enum(["none", "high_school", "bachelors", "masters", "phd"]).optional(),
+  profession: z.string().optional(),
 });
 type FormValues = z.infer<typeof schema>;
 
@@ -109,7 +127,7 @@ export default function OnboardingPage() {
     try {
       await api.demographics.submit({
         fullName: values.fullName,
-        age: values.age,
+        dateOfBirth: values.dateOfBirth,
         gender: values.gender,
         motherTongue: values.motherTongue,
         tribe: values.tribe,
@@ -119,6 +137,8 @@ export default function OnboardingPage() {
         village: values.village,
         quarter: values.quarter || undefined,
         dialect: values.dialect || undefined,
+        educationLevel: values.educationLevel || undefined,
+        profession: values.profession || undefined,
       });
       // Demographics submission is what sets the user's primary language --
       // refresh the store so it (and dialect) are available immediately to
@@ -150,16 +170,15 @@ export default function OnboardingPage() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>Age</label>
+              <label className={labelClass}>Date of Birth</label>
               <input
-                {...register("age", { valueAsNumber: true })}
-                type="number"
-                min={1}
-                max={120}
+                {...register("dateOfBirth")}
+                type="date"
+                min={minDateOfBirth}
+                max={maxDateOfBirth}
                 className={inputClass}
-                placeholder="Age"
               />
-              {errors.age && <p className="mt-1 text-xs text-red-600">{errors.age.message}</p>}
+              {errors.dateOfBirth && <p className="mt-1 text-xs text-red-600">{errors.dateOfBirth.message}</p>}
             </div>
             <div>
               <label className={labelClass}>Gender</label>
@@ -318,6 +337,24 @@ export default function OnboardingPage() {
           <div>
             <label className={labelClass}>Dialect (optional)</label>
             <input {...register("dialect")} className={inputClass} placeholder="Dialect" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Education Level (optional)</label>
+              <select {...register("educationLevel")} className={inputClass} defaultValue="">
+                <option value="">Select education level</option>
+                {EDUCATION_LEVEL_OPTIONS.map((e) => (
+                  <option key={e.value} value={e.value}>
+                    {e.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>Profession (optional)</label>
+              <input {...register("profession")} className={inputClass} placeholder="Profession" />
+            </div>
           </div>
 
           {serverError && <p className="text-sm text-red-600">{serverError}</p>}

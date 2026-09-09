@@ -1195,6 +1195,14 @@ export const quarters = pgTable(
 
 export const genderEnum = pgEnum("gender", ["male", "female", "other", "prefer_not_to_say"]);
 
+export const educationLevelEnum = pgEnum("education_level", [
+  "none",
+  "high_school",
+  "bachelors",
+  "masters",
+  "phd",
+]);
+
 /**
  * The onboarding form shown right after registration. Kept separate from
  * contributorProfiles (which predates this form and serves the
@@ -1207,7 +1215,16 @@ export const contributorDemographics = pgTable("contributor_demographics", {
     .primaryKey()
     .references(() => users.id, { onDelete: "cascade" }),
   fullName: text("full_name").notNull(),
+  /**
+   * Server-computed from dateOfBirth on every submit (see demographics.routes.ts)
+   * -- the form no longer takes a raw age input. Kept as a real, queryable
+   * column (rather than computed on every read) since it was already NOT
+   * NULL and read in several places; dateOfBirth is nullable because rows
+   * created before this column existed have no birth date on file, only the
+   * age that was directly entered at the time.
+   */
   age: integer("age").notNull(),
+  dateOfBirth: date("date_of_birth"),
   gender: genderEnum("gender").notNull(),
   motherTongue: text("mother_tongue").notNull(),
   tribeId: uuid("tribe_id")
@@ -1221,6 +1238,8 @@ export const contributorDemographics = pgTable("contributor_demographics", {
     .references(() => villages.id),
   quarterId: uuid("quarter_id").references(() => quarters.id),
   dialect: text("dialect"),
+  educationLevel: educationLevelEnum("education_level"),
+  profession: text("profession"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

@@ -3,7 +3,8 @@ import { and, eq, ilike, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { categories, conceptMedia, concepts } from "../../db/schema.js";
+import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
+import { verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const listQuerySchema = z.object({
@@ -16,7 +17,7 @@ const listQuerySchema = z.object({
 const idParamSchema = z.object({ id: z.string().uuid() });
 
 export default async function conceptsRoutes(fastify: FastifyInstance) {
-  fastify.get("/concepts", async (request) => {
+  fastify.get("/concepts", { preHandler: verifyToken }, async (request) => {
     const { categoryId, search, limit, offset } = listQuerySchema.parse(request.query);
 
     const conditions = [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
@@ -36,9 +37,20 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
           slug: concepts.slug,
           labelEnglish: concepts.labelEnglish,
           description: concepts.description,
+          imageUrl: conceptMedia.publicUrl,
+          // Tile shading needs a per-user "have I already recorded this
+          // concept" signal -- computed here in the list query itself so the
+          // tile grid doesn't need N follow-up requests to find out.
+          hasContributed: sql<boolean>`exists (
+            select 1 from ${wordRecordings}
+            where ${wordRecordings.conceptId} = ${concepts.id}
+              and ${wordRecordings.userId} = ${request.user!.id}
+              and ${wordRecordings.deletedAt} is null
+          )`,
         })
         .from(concepts)
         .innerJoin(categories, eq(categories.id, concepts.categoryId))
+        .leftJoin(conceptMedia, and(eq(conceptMedia.conceptId, concepts.id), eq(conceptMedia.isPrimary, true)))
         .where(and(...conditions))
         .limit(limit)
         .offset(offset),

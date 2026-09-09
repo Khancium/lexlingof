@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import { api, getErrorMessage, type Scene } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
+type Step = "browse" | "record";
 
 const DIFFICULTY_COLOR: Record<Scene["difficulty"], string> = {
   easy: "bg-emerald-600",
@@ -18,18 +19,55 @@ const DIFFICULTY_COLOR: Record<Scene["difficulty"], string> = {
 export default function ScenePage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
 
+  const [step, setStep] = useState<Step>("browse");
+
+  const [scenes, setScenes] = useState<Scene[]>([]);
+  const [loadingScenes, setLoadingScenes] = useState(true);
+  const [scenesError, setScenesError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
   const [scene, setScene] = useState<Scene | null>(null);
-  const [loadingScene, setLoadingScene] = useState(true);
+  const [loadingScene, setLoadingScene] = useState(false);
   const [sceneError, setSceneError] = useState<string | null>(null);
   const [recording, setRecording] = useState<Recording | null>(null);
   // Tracks which recording (by object identity) was last successfully
   // submitted, so Submit re-locks after a click instead of staying
-  // clickable -- it only unlocks again once a new recording is made.
+  // clickable during the brief window before the next scene loads.
   const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  const loadScene = useCallback(async (excludeId?: string) => {
+  function loadScenes(searchText: string) {
+    setLoadingScenes(true);
+    setScenesError(null);
+    api.scenes
+      .getAll({ search: searchText.trim() || undefined, limit: 100 })
+      .then((res) => setScenes(res.items))
+      .catch((err) => setScenesError(err instanceof Error ? err.message : "Failed to load scenes"))
+      .finally(() => setLoadingScenes(false));
+  }
+
+  useEffect(() => {
+    loadScenes("");
+  }, []);
+
+  // Re-query as the admin types, rather than filtering the already-fetched
+  // page client-side, since a search can match scenes outside the first 100.
+  useEffect(() => {
+    const timeout = setTimeout(() => loadScenes(search), 250);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  function openScene(s: Scene) {
+    setScene(s);
+    setStep("record");
+    setSceneError(null);
+    setRecording(null);
+    setLastSubmittedRecording(null);
+  }
+
+  async function loadDifferentScene(excludeId?: string) {
     setLoadingScene(true);
     setSceneError(null);
     setRecording(null);
@@ -37,16 +75,11 @@ export default function ScenePage() {
     try {
       setScene(await api.scenes.getRandom(excludeId));
     } catch (err) {
-      setScene(null);
       setSceneError(err instanceof Error ? err.message : "No scenes available");
     } finally {
       setLoadingScene(false);
     }
-  }, []);
-
-  useEffect(() => {
-    loadScene();
-  }, [loadScene]);
+  }
 
   async function handleSubmit() {
     if (!scene || !languageId || !recording) return;
@@ -76,63 +109,125 @@ export default function ScenePage() {
 
   const canSubmit = !!recording && recording !== lastSubmittedRecording && !!languageId && !isSubmitting;
 
-  if (loadingScene) {
-    return <p className="text-ink-muted">Loading...</p>;
-  }
-  if (sceneError || !scene) {
-    return <p className="text-red-600">{sceneError ?? "No scenes available"}</p>;
+  if (step === "browse") {
+    return (
+      <div className="mx-auto max-w-4xl space-y-6">
+        <h1 className="text-2xl font-bold text-ink">Describe a Scene</h1>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search scenes..."
+          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+        />
+
+        <button
+          onClick={() => loadDifferentScene().then(() => setStep("record"))}
+          className="text-sm font-semibold text-brand hover:underline"
+        >
+          🎲 Pick a random scene
+        </button>
+
+        {loadingScenes ? (
+          <p className="text-ink-muted">Loading...</p>
+        ) : scenesError ? (
+          <p className="text-red-600">{scenesError}</p>
+        ) : scenes.length === 0 ? (
+          <p className="text-ink-muted">No scenes found.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {scenes.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => openScene(s)}
+                className="card-duo relative flex flex-col items-center gap-2 overflow-hidden rounded-2xl bg-surface p-3 text-center shadow-sm transition hover:shadow-md"
+              >
+                {s.imageUrl ? (
+                  <Image src={s.imageUrl} alt="" width={96} height={96} className="h-24 w-24 rounded-lg object-cover" />
+                ) : (
+                  <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-surface-card text-3xl">🖼️</div>
+                )}
+                <span className="text-sm font-semibold text-ink">{s.title}</span>
+                <span className={`rounded px-2 py-0.5 text-[10px] font-bold capitalize text-white ${DIFFICULTY_COLOR[s.difficulty]}`}>
+                  {s.difficulty}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   }
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="card-duo relative h-80 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
-        {scene.imageUrl ? (
-          <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" />
-        ) : (
-          <div className="flex h-80 w-full items-center justify-center text-5xl">🖼️</div>
-        )}
-        <span
-          className={`absolute bottom-3 left-3 rounded px-2 py-1 text-xs font-bold capitalize text-white ${DIFFICULTY_COLOR[scene.difficulty]}`}
-        >
-          {scene.difficulty}
-        </span>
-        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
-          {scene.title}
-        </span>
-      </div>
-
-      <p className="text-center text-ink-muted">
-        Describe what you see in this image in your own language. Tell us what is happening. Take as much time as you
-        need.
-      </p>
-
-      <div className="card-duo flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
-        <AudioRecorder
-          onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
-          onError={(message) => setSubmitError(message)}
-        />
-      </div>
-
-      <p className="text-center text-sm text-ink-muted">
-        Base: 20 pts. Bonuses: longer description (60s+), today&apos;s daily scene, expert difficulty.
-      </p>
-
-      {!languageId && !languageLoading ? (
-        <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
-      ) : null}
-      {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-
       <button
-        onClick={handleSubmit}
-        disabled={!canSubmit}
-        className="btn-duo w-full bg-amber-600 py-3 font-semibold text-white transition hover:bg-amber-500 disabled:opacity-50"
+        onClick={() => setStep("browse")}
+        className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
       >
-        {isSubmitting ? "Submitting..." : "Submit"}
+        ← Back to scenes
       </button>
 
-      <button onClick={() => loadScene(scene.id)} className="w-full text-center text-sm text-ink-muted hover:text-ink">
-        Different scene
-      </button>
+      {loadingScene ? (
+        <p className="text-ink-muted">Loading...</p>
+      ) : sceneError || !scene ? (
+        <p className="text-red-600">{sceneError ?? "No scene selected"}</p>
+      ) : (
+        <>
+          <div className="card-duo relative h-80 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
+            {scene.imageUrl ? (
+              <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" />
+            ) : (
+              <div className="flex h-80 w-full items-center justify-center text-5xl">🖼️</div>
+            )}
+            <span
+              className={`absolute bottom-3 left-3 rounded px-2 py-1 text-xs font-bold capitalize text-white ${DIFFICULTY_COLOR[scene.difficulty]}`}
+            >
+              {scene.difficulty}
+            </span>
+            <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
+              {scene.title}
+            </span>
+          </div>
+
+          <p className="text-center text-ink-muted">
+            Describe what you see in this image in your own language. Tell us what is happening. Take as much time as you
+            need.
+          </p>
+
+          <div className="card-duo flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
+            <AudioRecorder
+              key={scene.id}
+              onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
+              onError={(message) => setSubmitError(message)}
+            />
+          </div>
+
+          <p className="text-center text-sm text-ink-muted">
+            Base: 20 pts. Bonuses: longer description (60s+), today&apos;s daily scene, expert difficulty.
+          </p>
+
+          {!languageId && !languageLoading ? (
+            <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
+          ) : null}
+          {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="btn-duo w-full bg-amber-600 py-3 font-semibold text-white transition hover:bg-amber-500 disabled:opacity-50"
+          >
+            {isSubmitting ? "Submitting..." : "Submit"}
+          </button>
+
+          <button
+            onClick={() => loadDifferentScene(scene.id)}
+            className="w-full text-center text-sm text-ink-muted hover:text-ink"
+          >
+            Different scene
+          </button>
+        </>
+      )}
     </div>
   );
 }

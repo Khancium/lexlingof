@@ -6,10 +6,15 @@ import { db } from "../../../db/index.js";
 import { categories, sentences } from "../../../db/schema.js";
 import { verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
-import { getRandomSentence, submitTranslation } from "./translation.service.js";
+import { getRandomSentence, searchSentences, submitTranslation } from "./translation.service.js";
 
 const randomQuerySchema = z.object({ languageId: z.string().uuid() });
 const idParamSchema = z.object({ id: z.string().uuid() });
+const listQuerySchema = z.object({
+  search: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
 
 const submitTranslationSchema = z.object({
   nativeText: z.string().min(1).optional(),
@@ -25,6 +30,11 @@ const submitTranslationSchema = z.object({
 });
 
 export default async function translationRoutes(fastify: FastifyInstance) {
+  fastify.get("/sentences", { preHandler: verifyToken }, async (request) => {
+    const { search, limit, offset } = listQuerySchema.parse(request.query);
+    return searchSentences(search, limit, offset);
+  });
+
   fastify.get("/sentences/random", { preHandler: verifyToken }, async (request) => {
     const { languageId } = randomQuerySchema.parse(request.query);
     return getRandomSentence(request.user!.id, languageId);

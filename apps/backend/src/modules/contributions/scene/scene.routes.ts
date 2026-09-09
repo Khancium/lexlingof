@@ -5,6 +5,7 @@ import { verifyToken } from "../../../middleware/auth.js";
 import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneContribution } from "./scene.service.js";
 
 const listQuerySchema = z.object({
+  search: z.string().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -23,8 +24,8 @@ const submitSchema = z.object({
 
 export default async function sceneRoutes(fastify: FastifyInstance) {
   fastify.get("/", async (request) => {
-    const { limit, offset } = listQuerySchema.parse(request.query);
-    return getScenes(limit, offset);
+    const { search, limit, offset } = listQuerySchema.parse(request.query);
+    return getScenes(limit, offset, search);
   });
 
   fastify.get("/daily", { preHandler: verifyToken }, async () => getDailyScene());

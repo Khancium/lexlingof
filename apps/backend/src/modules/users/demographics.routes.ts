@@ -15,7 +15,7 @@ import {
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
-import { GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from "./demographics.constants.js";
+import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from "./demographics.constants.js";
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -109,6 +109,18 @@ async function getOrCreateQuarter(villageId: string, name: string): Promise<stri
   return row.id;
 }
 
+/** Age in whole years as of today, from a YYYY-MM-DD date of birth. */
+function calculateAge(dateOfBirth: string): number {
+  const dob = new Date(dateOfBirth);
+  const now = new Date();
+  let age = now.getUTCFullYear() - dob.getUTCFullYear();
+  const hasHadBirthdayThisYear =
+    now.getUTCMonth() > dob.getUTCMonth() ||
+    (now.getUTCMonth() === dob.getUTCMonth() && now.getUTCDate() >= dob.getUTCDate());
+  if (!hasHadBirthdayThisYear) age -= 1;
+  return age;
+}
+
 function slugifyLanguageCode(name: string): string {
   return name
     .toLowerCase()
@@ -160,7 +172,11 @@ const villageIdParamSchema = z.object({ villageId: z.string().uuid() });
 
 const submitDemographicsSchema = z.object({
   fullName: z.string().trim().min(1),
-  age: z.coerce.number().int().min(1).max(120),
+  dateOfBirth: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD")
+    .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date of birth")
+    .refine((v) => calculateAge(v) >= 1 && calculateAge(v) <= 120, "Age must be between 1 and 120"),
   gender: z.enum(GENDER_OPTIONS),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES),
   tribe: z.string().trim().min(1),
@@ -170,6 +186,8 @@ const submitDemographicsSchema = z.object({
   village: z.string().trim().min(1),
   quarter: z.string().trim().min(1).optional(),
   dialect: z.string().trim().min(1).optional(),
+  educationLevel: z.enum(EDUCATION_LEVEL_OPTIONS).optional(),
+  profession: z.string().trim().min(1).optional(),
 });
 
 /* -------------------------------------------------------------------------- */
@@ -219,11 +237,14 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       .select({
         fullName: contributorDemographics.fullName,
         age: contributorDemographics.age,
+        dateOfBirth: contributorDemographics.dateOfBirth,
         gender: contributorDemographics.gender,
         motherTongue: contributorDemographics.motherTongue,
         country: contributorDemographics.country,
         city: contributorDemographics.city,
         dialect: contributorDemographics.dialect,
+        educationLevel: contributorDemographics.educationLevel,
+        profession: contributorDemographics.profession,
         tribeName: tribes.name,
         subTribeName: subTribes.name,
         villageName: villages.name,
@@ -261,7 +282,8 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
     const values = {
       userId,
       fullName: body.fullName,
-      age: body.age,
+      age: calculateAge(body.dateOfBirth),
+      dateOfBirth: body.dateOfBirth,
       gender: body.gender,
       motherTongue: body.motherTongue,
       tribeId,
@@ -271,6 +293,8 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       villageId,
       quarterId,
       dialect: body.dialect ?? null,
+      educationLevel: body.educationLevel ?? null,
+      profession: body.profession ?? null,
       updatedAt: new Date(),
     };
 

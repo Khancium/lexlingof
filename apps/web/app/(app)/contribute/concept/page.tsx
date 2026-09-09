@@ -29,6 +29,7 @@ export default function ConceptPage() {
 
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
   const [loadingConcepts, setLoadingConcepts] = useState(false);
+  const [conceptSearch, setConceptSearch] = useState("");
 
   const [concept, setConcept] = useState<ConceptDetail | null>(null);
   const [recordedSynonyms, setRecordedSynonyms] = useState<RecordedSynonyms | null>(null);
@@ -55,15 +56,30 @@ export default function ConceptPage() {
     });
   }, [userId]);
 
-  function openCategory(c: Category) {
-    setCategory(c);
-    setStep("concepts");
+  function loadConcepts(categoryId: string, search: string) {
     setLoadingConcepts(true);
     api.concepts
-      .getAll({ categoryId: c.id, limit: 100 })
+      .getAll({ categoryId, search: search.trim() || undefined, limit: 100 })
       .then((res) => setConcepts(res.items))
       .finally(() => setLoadingConcepts(false));
   }
+
+  function openCategory(c: Category) {
+    setCategory(c);
+    setStep("concepts");
+    setConceptSearch("");
+    loadConcepts(c.id, "");
+  }
+
+  // Re-query as the admin types, rather than filtering the already-fetched
+  // page client-side, since the backend already supports `search` and a
+  // category can hold more concepts than the 100-item page fetched above.
+  useEffect(() => {
+    if (step !== "concepts" || !category) return;
+    const timeout = setTimeout(() => loadConcepts(category.id, conceptSearch), 250);
+    return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conceptSearch]);
 
   const openConcept = useCallback(async (item: ConceptListItem) => {
     setStep("record");
@@ -150,7 +166,7 @@ export default function ConceptPage() {
             ← Back
           </button>
         )}
-        <h1 className="text-2xl font-bold text-ink">Record a Word</h1>
+        <h1 className="text-2xl font-bold text-ink">{category ? category.nameEnglish : "Record a Word"}</h1>
       </div>
 
       {step === "categories" && (
@@ -171,21 +187,39 @@ export default function ConceptPage() {
 
       {step === "concepts" && (
         <>
-          <p className="text-sm text-ink-muted">{category?.nameEnglish}</p>
+          <input
+            value={conceptSearch}
+            onChange={(e) => setConceptSearch(e.target.value)}
+            placeholder="Search objects..."
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+          />
           {loadingConcepts ? (
             <p className="text-ink-muted">Loading...</p>
           ) : concepts.length === 0 ? (
-            <p className="text-ink-muted">No objects in this category yet.</p>
+            <p className="text-ink-muted">No objects found.</p>
           ) : (
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
               {concepts.map((item) => (
                 <button
                   key={item.id}
                   onClick={() => openConcept(item)}
-                  className="card-duo flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
+                  className={`card-duo flex flex-col items-center justify-center gap-2 rounded-2xl p-6 text-center shadow-sm transition hover:shadow-md ${
+                    item.hasContributed ? "bg-brand-light/40" : "bg-surface"
+                  }`}
                 >
-                  <span className="text-3xl">🖼️</span>
+                  {item.imageUrl ? (
+                    <Image
+                      src={item.imageUrl}
+                      alt=""
+                      width={64}
+                      height={64}
+                      className="h-16 w-16 rounded-lg object-cover"
+                    />
+                  ) : (
+                    <span className="text-3xl">🖼️</span>
+                  )}
                   <span className="font-semibold text-ink">{item.labelEnglish}</span>
+                  {item.hasContributed ? <span className="text-xs text-brand-dark">✓ Contributed</span> : null}
                 </button>
               ))}
             </div>
