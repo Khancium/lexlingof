@@ -14,6 +14,12 @@ export const ALLOWED_MIME_TYPES = [
   "audio/webm",
   "audio/flac",
   "audio/x-m4a",
+  // An audio-only webm recording (voice-memo apps, some Android recorders)
+  // is frequently reported by the OS/browser as "video/webm" even though it
+  // has no video track -- the container format is identical to audio/webm,
+  // so this is accepted and treated the same rather than rejecting a real
+  // audio file on a mislabeled mimetype.
+  "video/webm",
 ] as const;
 
 export type AllowedAudioMimeType = (typeof ALLOWED_MIME_TYPES)[number];
@@ -27,6 +33,7 @@ export const MIME_TYPE_TO_FORMAT: Record<AllowedAudioMimeType, (typeof audioForm
   "audio/webm": "webm",
   "audio/flac": "flac",
   "audio/x-m4a": "m4a",
+  "video/webm": "webm",
 };
 
 // Module 1 (WORD) clips are capped at 3 seconds, so 500KB comfortably covers
@@ -56,7 +63,10 @@ export async function storeAudioBuffer(params: {
   if (!ALLOWED_MIME_TYPES.includes(params.mimeType as AllowedAudioMimeType)) {
     throw new HttpError(400, "INVALID_MIME_TYPE", `${params.mimeType} is not an accepted audio type`);
   }
-  const mimeType = params.mimeType as AllowedAudioMimeType;
+  // Normalize the mislabeled-video-container case to its real audio type so
+  // nothing downstream (storage Content-Type, <audio> playback) ever sees
+  // "video/webm" for what is actually audio-only content.
+  const mimeType: AllowedAudioMimeType = params.mimeType === "video/webm" ? "audio/webm" : (params.mimeType as AllowedAudioMimeType);
 
   const maxAllowed = params.module === "WORD" ? WORD_MAX_FILE_SIZE_BYTES : DEFAULT_MAX_FILE_SIZE_BYTES;
   if (params.buffer.byteLength > maxAllowed) {

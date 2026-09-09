@@ -26,6 +26,7 @@ export default function ConceptPage() {
   const [step, setStep] = useState<Step>("categories");
 
   const [categories, setCategories] = useState<Category[]>([]);
+  const [categorySearch, setCategorySearch] = useState("");
   const [category, setCategory] = useState<Category | null>(null);
   const [lastVisitedCategory, setLastVisitedCategory] = useState<Category | null>(null);
 
@@ -111,6 +112,10 @@ export default function ConceptPage() {
     }
   }, []);
 
+  const filteredCategories = categorySearch.trim()
+    ? categories.filter((c) => c.nameEnglish.toLowerCase().includes(categorySearch.trim().toLowerCase()))
+    : categories;
+
   const conceptIndex = concept ? concepts.findIndex((c) => c.id === concept.id) : -1;
 
   function goToAdjacentConcept(direction: 1 | -1) {
@@ -194,8 +199,17 @@ export default function ConceptPage() {
           <p className="text-sm font-semibold text-ink-muted">
             {lastVisitedCategory ? `Recently visited: ${lastVisitedCategory.nameEnglish}` : "Categories"}
           </p>
+          <input
+            value={categorySearch}
+            onChange={(e) => setCategorySearch(e.target.value)}
+            placeholder="Search categories..."
+            className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+          />
+          {filteredCategories.length === 0 ? (
+            <p className="text-ink-muted">No categories found.</p>
+          ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-            {categories.map((c) => {
+            {filteredCategories.map((c) => {
               const pct = c.conceptCount > 0 ? Math.min(100, Math.round((c.contributedCount / c.conceptCount) * 100)) : 0;
               return (
                 <button
@@ -215,6 +229,7 @@ export default function ConceptPage() {
               );
             })}
           </div>
+          )}
         </>
       )}
 

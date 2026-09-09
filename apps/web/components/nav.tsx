@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
 import { canReview } from "@/lib/level";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import NotificationBell from "@/components/notification-bell";
 
 const LINKS = [
   { href: "/dashboard", label: "Dashboard" },
@@ -73,6 +74,7 @@ export default function Nav() {
         </div>
 
         <div className="hidden items-center gap-3 md:flex">
+          {user ? <NotificationBell /> : null}
           <span className="text-sm text-ink-muted">{user?.displayName}</span>
           <button
             onClick={() => setConfirmingLogout(true)}
@@ -81,6 +83,12 @@ export default function Nav() {
             Sign Out
           </button>
         </div>
+
+        {user ? (
+          <div className="md:hidden">
+            <NotificationBell />
+          </div>
+        ) : null}
 
         <button
           onClick={() => setMobileOpen((prev) => !prev)}

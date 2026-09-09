@@ -1,5 +1,5 @@
 import { asc, db, eq, inArray, sql } from "../db/index.js";
-import { contributions, pendingSubmissions, pointsTransactions } from "../db/schema.js";
+import { contributions, notifications, pendingSubmissions, pointsTransactions } from "../db/schema.js";
 import { storeAudioBuffer } from "./audio-file.service.js";
 import { submitWordRecording, type SubmitWordRecordingInput } from "../modules/contributions/word/word.service.js";
 import { submitTranslation, type SubmitTranslationInput } from "../modules/contributions/translation/translation.service.js";
@@ -203,17 +203,44 @@ async function processOne(row: PendingRow): Promise<void> {
     const cause = err instanceof Error && err.cause instanceof Error ? `: ${err.cause.message}` : "";
     const message = err instanceof Error ? `${err.message}${cause}` : "Unknown error";
     const isPermanent = err instanceof PermanentFailure;
+    const isFinal = isPermanent || attempts >= MAX_ATTEMPTS;
     await db
       .update(pendingSubmissions)
       .set({
-        status: isPermanent || attempts >= MAX_ATTEMPTS ? "failed" : "pending",
+        status: isFinal ? "failed" : "pending",
         attempts,
         errorMessage: message,
         updatedAt: new Date(),
       })
       .where(eq(pendingSubmissions.id, row.id));
+
+    // Only notify once the row has actually given up retrying -- an
+    // in-progress retry (still "pending") isn't a failure the user needs to
+    // act on yet. The technical `message` above stays in errorMessage for
+    // debugging; this notification gets a plain-language body instead, since
+    // it's the one surfaced directly to the contributor.
+    if (isFinal) {
+      await db
+        .insert(notifications)
+        .values({
+          userId: row.userId,
+          channel: "in_app",
+          notificationType: "SUBMISSION_FAILED",
+          title: `${MODULE_LABEL[row.moduleType]} submission failed`,
+          body: "Something went wrong finishing this submission. Please record and submit it again.",
+          data: { pendingSubmissionId: row.id, moduleType: row.moduleType },
+        })
+        .catch((notifyErr) => console.error("[submission-buffer] failed to create failure notification", notifyErr));
+    }
   }
 }
+
+const MODULE_LABEL: Record<ModuleType, string> = {
+  WORD: "Word",
+  TRANSCRIPTION: "Audio upload",
+  TRANSLATION: "Translation",
+  SCENE: "Scene",
+};
 
 async function markDone(bufferId: string, result: { contributionId: string; pointsAwarded: number }): Promise<void> {
   await db

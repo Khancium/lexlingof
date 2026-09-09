@@ -6,7 +6,10 @@ import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneCont
 
 const listQuerySchema = z.object({
   search: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  // 1000 (not 200) so admin pages can fetch the full scene list in one
+  // request for client-side matching (bulk-add-images-by-URL) without
+  // paginating just to build a lookup map.
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 const randomQuerySchema = z.object({ exclude: z.string().uuid().optional() });

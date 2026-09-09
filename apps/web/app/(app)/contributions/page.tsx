@@ -217,7 +217,7 @@ export default function ContributionsPage() {
               />
               <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
               <span className={p.status === "failed" ? "text-danger" : "text-ink-muted"}>
-                {p.status === "failed" ? `Failed -- ${p.errorMessage ?? "unknown error"}` : "Submitted, processing..."}
+                {p.status === "failed" ? "Failed -- please record and submit again." : "Submitted, processing..."}
               </span>
             </div>
           ))}

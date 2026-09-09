@@ -159,6 +159,19 @@ export type AuthUser = {
 
 export type AuthResponse = TokenPair & { user: AuthUser };
 
+export type NotificationItem = {
+  id: string;
+  channel: "in_app" | "email" | "push";
+  status: "pending" | "sent" | "delivered" | "failed" | "read";
+  notificationType: string;
+  title: string;
+  body: string;
+  data: Record<string, unknown>;
+  readAt: string | null;
+  sentAt: string | null;
+  createdAt: string;
+};
+
 export type UserProfile = {
   id: string;
   email: string;
@@ -785,6 +798,13 @@ export const api = {
       return apiClient.post<UserProfile>("/api/v1/users/me/avatar", form).then((r) => r.data);
     },
     deleteAccount: () => apiClient.delete<{ deleted: boolean }>("/api/v1/users/me").then((r) => r.data),
+  },
+
+  notifications: {
+    getAll: (params?: { limit?: number; offset?: number }) =>
+      apiClient.get<NotificationItem[]>("/api/v1/notifications", { params }).then((r) => r.data),
+    markRead: (id: string) =>
+      apiClient.post<{ id: string; readAt: string }>(`/api/v1/notifications/${id}/read`).then((r) => r.data),
   },
 
   languages: {

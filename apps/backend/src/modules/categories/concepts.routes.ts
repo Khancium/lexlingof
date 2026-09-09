@@ -10,7 +10,10 @@ import { HttpError } from "../../utils/http-error.js";
 const listQuerySchema = z.object({
   categoryId: z.string().uuid().optional(),
   search: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  // 1000 (not 200) so admin pages can fetch the full concept list in one
+  // request for client-side matching (e.g. the bulk-add-images-by-URL and
+  // scene-coverage pickers) without paginating just to build a lookup map.
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
