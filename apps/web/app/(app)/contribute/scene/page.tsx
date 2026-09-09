@@ -124,7 +124,7 @@ export default function ScenePage() {
           >
             ← Back to Contribute
           </Link>
-          <h1 className="text-2xl font-bold text-ink">Describe a Scene</h1>
+          <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-ink">Describe a Scene</h1>
         </div>
 
         <input

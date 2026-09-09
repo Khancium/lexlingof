@@ -26,18 +26,18 @@ export default function AdminNav() {
   const links = isSuperAdmin ? [...LINKS, ...SUPER_ADMIN_LINKS] : LINKS;
 
   return (
-    <aside className="w-56 shrink-0 border-r border-border bg-surface p-4">
-      <Link href="/admin/dashboard" className="mb-6 block text-lg font-bold text-brand">
+    <aside className="w-full shrink-0 border-b border-border bg-surface p-4 md:w-56 md:border-b-0 md:border-r">
+      <Link href="/admin/dashboard" className="mb-3 block text-lg font-bold text-brand md:mb-6">
         Lexlingo Admin
       </Link>
-      <nav className="space-y-1">
+      <nav className="flex gap-1 overflow-x-auto pb-1 md:block md:space-y-1 md:overflow-visible md:pb-0">
         {links.map((link) => {
           const active = pathname === link.href;
           return (
             <Link
               key={link.href}
               href={link.href}
-              className={`block rounded-full px-3 py-2 text-sm font-medium transition ${
+              className={`block whitespace-nowrap rounded-full px-3 py-2 text-sm font-medium transition md:whitespace-normal ${
                 active ? "bg-brand text-ink-inverted" : "text-ink-muted hover:bg-surface-card hover:text-ink"
               }`}
             >
@@ -46,7 +46,7 @@ export default function AdminNav() {
           );
         })}
       </nav>
-      <Link href="/dashboard" className="mt-6 block text-xs text-ink-muted hover:text-ink">
+      <Link href="/dashboard" className="mt-3 block text-xs text-ink-muted hover:text-ink md:mt-6">
         ← Back to app
       </Link>
     </aside>

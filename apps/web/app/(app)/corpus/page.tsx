@@ -64,12 +64,12 @@ function LanguageBarChart({ languages }: { languages: CorpusLanguageBreakdown[] 
   const max = Math.max(1, ...languages.map((l) => l.contributionCount));
 
   return (
-    <div className="card-duo rounded-2xl bg-surface p-6 shadow-sm">
-      <div className="flex h-56 items-end justify-around gap-4 border-b border-border pb-2">
+    <div className="card-duo overflow-x-auto rounded-2xl bg-surface p-6 shadow-sm">
+      <div className="flex h-56 min-w-max items-end justify-around gap-4 border-b border-border pb-2">
         {languages.map((lang) => {
           const pct = lang.contributionCount === 0 ? 0 : Math.max(4, Math.round((lang.contributionCount / max) * 100));
           return (
-            <div key={lang.id} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
+            <div key={lang.id} className="flex h-full w-16 flex-shrink-0 flex-col items-center justify-end gap-2">
               <span className="text-sm font-bold text-ink">{lang.contributionCount}</span>
               <div
                 className="w-full max-w-16 rounded-t-lg bg-brand transition-all"
@@ -81,9 +81,9 @@ function LanguageBarChart({ languages }: { languages: CorpusLanguageBreakdown[] 
           );
         })}
       </div>
-      <div className="mt-2 flex justify-around gap-4">
+      <div className="mt-2 flex min-w-max justify-around gap-4">
         {languages.map((lang) => (
-          <span key={lang.id} className="flex-1 text-center text-sm font-medium text-ink-muted">
+          <span key={lang.id} className="w-16 flex-shrink-0 text-center text-sm font-medium text-ink-muted">
             {lang.nameEnglish}
           </span>
         ))}

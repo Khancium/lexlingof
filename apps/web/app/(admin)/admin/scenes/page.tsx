@@ -573,7 +573,7 @@ export default function AdminScenesPage() {
           )}
           {scenes.map((scene) => (
             <div key={scene.id} className="card-duo rounded-2xl bg-surface p-4 shadow-sm">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <input type="checkbox" checked={selected.has(scene.id)} onChange={() => toggleSelected(scene.id)} />
                   <div>
@@ -583,7 +583,7 @@ export default function AdminScenesPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-4">
                   <label className="cursor-pointer text-xs font-semibold text-brand hover:underline">
                     {pendingUploads[scene.id] ? "Choose Different Image" : "Upload Image"}
                     <input

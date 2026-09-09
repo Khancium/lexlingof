@@ -39,7 +39,7 @@ export default async function LandingPage() {
 
   return (
     <div className="min-h-screen bg-surface-muted text-ink">
-      <header className="border-b border-border bg-surface px-6 py-4">
+      <header className="border-b border-border bg-surface px-4 py-4 sm:px-6">
         <div className="mx-auto flex max-w-6xl items-center justify-between">
           <span className="text-xl font-bold text-brand">Lexlingo</span>
           <div className="flex gap-3">
@@ -53,7 +53,7 @@ export default async function LandingPage() {
         </div>
       </header>
 
-      <section className="mx-auto max-w-4xl px-6 py-24 text-center bg-gradient-to-b from-accent-light to-surface-muted">
+      <section className="mx-auto max-w-4xl px-4 py-16 text-center bg-gradient-to-b from-accent-light to-surface-muted sm:px-6 sm:py-24">
         <h1 className="text-4xl font-extrabold tracking-tight text-ink sm:text-6xl">Document Languages Together</h1>
         <p className="mx-auto mt-6 max-w-2xl text-lg text-ink-muted">
           Lexlingo is a community platform for recording, translating, and preserving under-documented languages --
@@ -67,7 +67,7 @@ export default async function LandingPage() {
         </Link>
       </section>
 
-      <section className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-6 pb-24 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 pb-16 sm:grid-cols-2 sm:px-6 sm:pb-24 lg:grid-cols-4">
         {MODULES.map((m) => (
           <div key={m.title} className={`card-duo rounded-2xl border-l-4 bg-surface p-6 shadow-sm ${m.color}`}>
             <h3 className="text-lg font-bold text-ink">{m.title}</h3>
@@ -77,7 +77,7 @@ export default async function LandingPage() {
       </section>
 
       {stats ? (
-        <section className="border-t border-border bg-surface-card px-6 py-16">
+        <section className="border-t border-border bg-surface-card px-4 py-16 sm:px-6">
           <div className="mx-auto grid max-w-6xl grid-cols-2 gap-8 text-center sm:grid-cols-4">
             <Stat value={stats.totalActiveContributors} label="Active Contributors" />
             <Stat value={stats.totalContributions} label="Contributions" />

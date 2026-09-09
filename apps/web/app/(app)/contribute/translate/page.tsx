@@ -170,7 +170,7 @@ export default function TranslatePage() {
         >
           ← Back to Contribute
         </Link>
-        <h1 className="text-2xl font-bold text-ink">Translate a Sentence</h1>
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-ink">Translate a Sentence</h1>
       </div>
 
       <div className="relative">

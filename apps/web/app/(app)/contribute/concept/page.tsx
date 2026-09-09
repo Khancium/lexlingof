@@ -189,7 +189,7 @@ export default function ConceptPage() {
             ← Back
           </button>
         )}
-        <h1 className="text-2xl font-bold text-ink">
+        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-ink">
           {step === "categories" ? "Record a Word" : category ? category.nameEnglish : "Record a Word"}
         </h1>
       </div>

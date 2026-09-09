@@ -177,7 +177,7 @@ export default function OnboardingPage() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-surface-muted px-4 py-12">
-      <div className="card-duo w-full max-w-lg rounded-3xl bg-surface p-8 shadow-sm border border-border">
+      <div className="card-duo w-full max-w-lg rounded-3xl bg-surface p-6 shadow-sm border border-border sm:p-8">
         <h1 className="mb-1 text-2xl font-bold text-ink">Tell us about yourself</h1>
         <p className="mb-6 text-sm text-ink-muted">
           This helps us understand who&apos;s contributing to the corpus.
@@ -190,7 +190,7 @@ export default function OnboardingPage() {
             {errors.fullName && <p className="mt-1 text-xs text-red-600">{errors.fullName.message}</p>}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelClass}>Date of Birth</label>
               <input
@@ -271,7 +271,7 @@ export default function OnboardingPage() {
             ) : null}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelClass}>Country</label>
               <select {...register("countryCode")} className={inputClass} defaultValue="">
@@ -358,7 +358,7 @@ export default function OnboardingPage() {
             <input {...register("dialect")} className={inputClass} placeholder="Dialect" autoComplete="off" />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className={labelClass}>Education Level (optional)</label>
               <select {...register("educationLevel")} className={inputClass} defaultValue="">

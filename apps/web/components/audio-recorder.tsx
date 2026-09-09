@@ -196,7 +196,7 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   }
 
   const micMeter = (
-    <div className="progress-duo-track w-56" style={{ height: "0.5rem" }}>
+    <div className="progress-duo-track w-full max-w-56" style={{ height: "0.5rem" }}>
       <div className="progress-duo-fill bg-emerald-500" style={{ width: `${Math.round(micLevel * 100)}%` }} />
     </div>
   );
@@ -247,7 +247,7 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
     return (
       <div className="flex flex-col items-center gap-4">
         <div className="text-5xl font-bold tabular-nums text-ink">{formatRemaining(remainingMs)}</div>
-        <div className="progress-duo-track w-64">
+        <div className="progress-duo-track w-full max-w-64">
           <div className="progress-duo-fill" style={{ width: `${progressPct}%` }} />
         </div>
         {micMeter}

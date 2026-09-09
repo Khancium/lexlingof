@@ -60,7 +60,7 @@ export default function ReviewPage() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-ink">Review Queue</h1>
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         {TABS.map((tab) => (
           <button
             key={tab.label}
