@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { sha256Hex, pickRecorderMimeType, extensionForMimeType } from "@/lib/upload";
+import { sha256Hex, pickRecorderMimeType, recorderBitsPerSecond, extensionForMimeType } from "@/lib/upload";
 
 type Status = "idle" | "requesting" | "recording" | "paused" | "done" | "error";
 
@@ -100,7 +100,8 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
   function beginRecording(stream: MediaStream) {
     const mimeType = pickRecorderMimeType();
     mimeTypeRef.current = mimeType;
-    const recorder = new MediaRecorder(stream, { mimeType });
+    const audioBitsPerSecond = recorderBitsPerSecond(mimeType);
+    const recorder = new MediaRecorder(stream, audioBitsPerSecond ? { mimeType, audioBitsPerSecond } : { mimeType });
     chunksRef.current = [];
 
     recorder.ondataavailable = (e) => {
@@ -139,7 +140,11 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
       // channelCount: 1 requests mono from the mic -- speech corpus
       // recordings only need one channel, and defaulting to the device's
       // native channel count would otherwise give stereo on many laptops.
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+      // sampleRate: 16000 is a hint (browsers may ignore or clamp it), but
+      // where honored it halves the raw PCM feeding the encoder compared to
+      // the 44.1/48kHz default -- plenty for speech, which tops out well
+      // under 8kHz of meaningful content.
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, sampleRate: 16000 } });
       streamRef.current = stream;
 
       const audioContext = new AudioContext();

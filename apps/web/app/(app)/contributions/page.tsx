@@ -272,39 +272,37 @@ function ContributionsPageInner() {
       )}
 
       {failedItems.length > 0 && (
-        <div className="space-y-2">
-          <h2 className="text-lg font-bold text-red-600">⚠ Failed Submissions</h2>
-          {failedItems.map((p) => {
-            const isHighlighted = p.id === highlightId;
-            const href = submitAgainHref(p);
-            return (
-              <div
-                key={p.id}
-                ref={isHighlighted ? highlightRef : undefined}
-                className={`card-duo flex flex-col gap-2 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between ${
-                  isHighlighted ? "ring-2 ring-red-400" : ""
-                }`}
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-red-700">{MODULE_LABEL[p.moduleType]}</p>
-                  <p className="truncate font-medium text-ink">
+        <div className="card-duo rounded-2xl border border-red-200 bg-red-50 p-4">
+          <h2 className="mb-3 text-lg font-bold text-red-700">⚠ Failed Submissions</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {failedItems.map((p) => {
+              const isHighlighted = p.id === highlightId;
+              const href = submitAgainHref(p);
+              return (
+                <div
+                  key={p.id}
+                  ref={isHighlighted ? highlightRef : undefined}
+                  className={`flex flex-col items-center gap-2 rounded-2xl bg-surface p-4 text-center shadow-sm ${
+                    isHighlighted ? "ring-2 ring-red-400" : ""
+                  }`}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-wide text-red-600">{MODULE_LABEL[p.moduleType]}</p>
+                  <p className="truncate text-sm font-medium text-ink" title={p.target?.label ?? undefined}>
                     {p.target?.label ?? "(no additional detail)"}
                     {p.target?.synonymIndex ? ` (synonym ${p.target.synonymIndex})` : ""}
                   </p>
-                  <p className="mt-1 text-xs text-red-600">{p.errorMessage || "Something went wrong finishing this submission."}</p>
-                  <p className="mt-1 text-xs text-ink-muted">{new Date(p.createdAt).toLocaleString()}</p>
+                  {href ? (
+                    <Link
+                      href={href}
+                      className="btn-duo w-full bg-red-600 px-3 py-1.5 text-center text-xs font-semibold text-white hover:bg-red-500"
+                    >
+                      Submit Again
+                    </Link>
+                  ) : null}
                 </div>
-                {href ? (
-                  <Link
-                    href={href}
-                    className="btn-duo flex-shrink-0 bg-red-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-red-500"
-                  >
-                    Submit Again
-                  </Link>
-                ) : null}
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       )}
 

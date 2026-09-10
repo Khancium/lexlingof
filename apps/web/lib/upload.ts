@@ -24,6 +24,25 @@ export function pickRecorderMimeType(): string {
   return "audio/webm";
 }
 
+// These are corpus voice recordings (single speaker, no music), not
+// general-purpose audio -- a bitrate tuned for clear speech is a small
+// fraction of a codec's music-quality default (webm/ogg's Opus commonly
+// defaults to 128kbps in Chrome) with no perceptible loss for transcription
+// or playback review. wav is excluded -- it's uncompressed PCM, so
+// audioBitsPerSecond doesn't apply and is only ever a fallback when neither
+// codec below is supported at all.
+const RECORDING_BITS_PER_SECOND: Record<string, number> = {
+  "audio/webm": 24000,
+  "audio/ogg": 24000,
+  // AAC (Safari's mp4 container) needs a bit more headroom than Opus to
+  // stay clear at low bitrates.
+  "audio/mp4": 40000,
+};
+
+export function recorderBitsPerSecond(mimeType: string): number | undefined {
+  return RECORDING_BITS_PER_SECOND[mimeType];
+}
+
 export function extensionForMimeType(mimeType: string): string {
   if (mimeType.includes("mp4")) return "m4a";
   if (mimeType.includes("ogg")) return "ogg";

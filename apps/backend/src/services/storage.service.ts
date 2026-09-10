@@ -144,7 +144,12 @@ class StorageService {
    * (existing already-uploaded originals are unaffected by this).
    */
   private static readonly IMAGE_MAX_DIMENSION = 1600;
-  private static readonly IMAGE_JPEG_QUALITY = 82;
+  // WebP at this quality is visually on par with (often better than) JPEG
+  // at the same number, but runs 25-35% smaller -- next.config.ts's
+  // remotePatterns already lets next/image re-encode per-viewer on top of
+  // this, so this is the size win for anything that reads the stored file
+  // directly (a cache hit, an email, a native mobile client).
+  private static readonly IMAGE_WEBP_QUALITY = 82;
 
   async uploadSceneImage(
     fileBuffer: Buffer,
@@ -158,14 +163,14 @@ class StorageService {
         fit: "inside",
         withoutEnlargement: true,
       })
-      .jpeg({ quality: StorageService.IMAGE_JPEG_QUALITY, mozjpeg: true })
+      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
       .toBuffer();
 
-    const jpegFilename = filename.replace(/\.[^./]+$/, "") + ".jpg";
+    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
 
     const { data, error } = await supabase.storage
       .from(IMAGE_BUCKET)
-      .upload(jpegFilename, resized, { contentType: "image/jpeg" });
+      .upload(webpFilename, resized, { contentType: "image/webp" });
 
     if (error) {
       throw error;
@@ -173,7 +178,7 @@ class StorageService {
 
     const publicUrl = this.getImagePublicUrl(data.path);
 
-    return { path: data.path, publicUrl, mimeType: "image/jpeg", fileSizeBytes: resized.byteLength };
+    return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
   }
 
   /**
@@ -191,6 +196,22 @@ class StorageService {
     }
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       throw new HttpError(400, "INVALID_URL", "Only http:// and https:// URLs are supported");
+    }
+
+    // pixabay.com's own domain (both the /photos/<slug> page AND its
+    // /images/download/... "download" link) sits behind Cloudflare bot
+    // protection and a session/CSRF check -- a server-to-server fetch gets
+    // blocked or handed an HTML wall no matter what headers are sent, so
+    // this is caught up front with a precise fix instead of a generic
+    // fetch-failed error after wasting a round trip. cdn.pixabay.com (the
+    // actual asset host -- right-click the image itself and "Copy image
+    // address" to get one) is unaffected and works normally.
+    if (parsed.hostname === "pixabay.com" || parsed.hostname === "www.pixabay.com") {
+      throw new HttpError(
+        400,
+        "UNSUPPORTED_HOST",
+        "pixabay.com page and download links can't be fetched directly (Pixabay blocks server-side requests to them) -- right-click the image itself and choose \"Copy image address\" to get a cdn.pixabay.com link instead",
+      );
     }
 
     const controller = new AbortController();
@@ -250,7 +271,7 @@ class StorageService {
   }
 
   private static readonly AVATAR_MAX_DIMENSION = 512;
-  private static readonly AVATAR_JPEG_QUALITY = 85;
+  private static readonly AVATAR_WEBP_QUALITY = 85;
 
   async uploadAvatarImage(fileBuffer: Buffer, filename: string): Promise<{ path: string; publicUrl: string }> {
     const resized = await sharp(fileBuffer)
@@ -260,14 +281,14 @@ class StorageService {
         height: StorageService.AVATAR_MAX_DIMENSION,
         fit: "cover",
       })
-      .jpeg({ quality: StorageService.AVATAR_JPEG_QUALITY, mozjpeg: true })
+      .webp({ quality: StorageService.AVATAR_WEBP_QUALITY })
       .toBuffer();
 
-    const jpegFilename = filename.replace(/\.[^./]+$/, "") + ".jpg";
+    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
 
     const { data, error } = await supabase.storage
       .from(IMAGE_BUCKET)
-      .upload(jpegFilename, resized, { contentType: "image/jpeg", upsert: true });
+      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
 
     if (error) {
       throw error;
