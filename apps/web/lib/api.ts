@@ -465,6 +465,11 @@ export type PendingSubmissionItem = {
   status: "pending" | "processing" | "failed";
   errorMessage: string | null;
   createdAt: string;
+  // The exact word/sentence/scene this submission was for -- `id` is the
+  // deep-link target (null for TRANSCRIPTION, which is a fresh upload with
+  // no pre-existing object to point back to), `label` is a human-readable
+  // fallback string when that's the best available.
+  target: { id: string | null; label: string; synonymIndex?: number } | null;
 };
 
 function submitToBuffer(

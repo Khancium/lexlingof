@@ -4,7 +4,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../../db/index.js";
-import { pendingSubmissions } from "../../../db/schema.js";
+import { concepts, pendingSubmissions, scenes, sentences } from "../../../db/schema.js";
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { enqueueSubmission } from "../../../services/submission-buffer.service.js";
@@ -170,13 +170,14 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
   // "done" rows are deliberately excluded since by then the real contribution
   // already shows up through the regular My Contributions list.
   fastify.get("/mine", { preHandler: verifyToken }, async (request) => {
-    const items = await db
+    const rows = await db
       .select({
         id: pendingSubmissions.id,
         moduleType: pendingSubmissions.moduleType,
         status: pendingSubmissions.status,
         errorMessage: pendingSubmissions.errorMessage,
         createdAt: pendingSubmissions.createdAt,
+        payload: pendingSubmissions.payload,
       })
       .from(pendingSubmissions)
       .where(
@@ -187,6 +188,52 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
       )
       .orderBy(desc(pendingSubmissions.createdAt))
       .limit(20);
+
+    // A failed row's payload carries the id of the exact word/sentence/scene
+    // that submission was for -- resolved here into a human label (and, for
+    // WORD/TRANSLATION/SCENE, a deep-link id) so the frontend's "Submit
+    // Again" can jump straight to that object instead of the user having to
+    // hunt for it again. TRANSCRIPTION has no pre-existing target object
+    // (it's a fresh upload), so it's labeled from its own payload directly.
+    const conceptIds = rows.flatMap((r) => (r.moduleType === "WORD" ? [(r.payload as { conceptId?: string }).conceptId] : [])).filter((id): id is string => !!id);
+    const sentenceIds = rows.flatMap((r) => (r.moduleType === "TRANSLATION" ? [(r.payload as { sentenceId?: string }).sentenceId] : [])).filter((id): id is string => !!id);
+    const sceneIds = rows.flatMap((r) => (r.moduleType === "SCENE" ? [(r.payload as { sceneId?: string }).sceneId] : [])).filter((id): id is string => !!id);
+
+    const [conceptRows, sentenceRows, sceneRows] = await Promise.all([
+      conceptIds.length ? db.select({ id: concepts.id, labelEnglish: concepts.labelEnglish }).from(concepts).where(inArray(concepts.id, conceptIds)) : [],
+      sentenceIds.length ? db.select({ id: sentences.id, englishText: sentences.englishText }).from(sentences).where(inArray(sentences.id, sentenceIds)) : [],
+      sceneIds.length ? db.select({ id: scenes.id, title: scenes.title }).from(scenes).where(inArray(scenes.id, sceneIds)) : [],
+    ]);
+    const conceptById = new Map(conceptRows.map((c) => [c.id, c]));
+    const sentenceById = new Map(sentenceRows.map((s) => [s.id, s]));
+    const sceneById = new Map(sceneRows.map((s) => [s.id, s]));
+
+    const items = rows.map(({ payload, ...row }) => {
+      const p = payload as Record<string, unknown>;
+      let target: { id: string | null; label: string; synonymIndex?: number } | null = null;
+
+      if (row.moduleType === "WORD") {
+        const conceptId = p.conceptId as string | undefined;
+        target = {
+          id: conceptId ?? null,
+          label: (conceptId && conceptById.get(conceptId)?.labelEnglish) || "(object no longer available)",
+          synonymIndex: p.synonymIndex as number | undefined,
+        };
+      } else if (row.moduleType === "TRANSLATION") {
+        const sentenceId = p.sentenceId as string | undefined;
+        target = {
+          id: sentenceId ?? null,
+          label: (sentenceId && sentenceById.get(sentenceId)?.englishText) || "(sentence no longer available)",
+        };
+      } else if (row.moduleType === "SCENE") {
+        const sceneId = p.sceneId as string | undefined;
+        target = { id: sceneId ?? null, label: (sceneId && sceneById.get(sceneId)?.title) || "(scene no longer available)" };
+      } else if (row.moduleType === "TRANSCRIPTION") {
+        target = { id: null, label: (p.title as string | undefined)?.trim() || (p.recordingType as string | undefined) || "Audio recording" };
+      }
+
+      return { ...row, target };
+    });
 
     return { items };
   });

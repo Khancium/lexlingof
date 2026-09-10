@@ -2,9 +2,28 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, type ContributionListItem, type ModuleType, type PendingSubmissionItem } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
+
+/** Where "Submit Again" should send the user to re-record this exact item, or null if there's no specific object to jump back to. */
+function submitAgainHref(item: PendingSubmissionItem): string | null {
+  if (!item.target) return item.moduleType === "TRANSCRIPTION" ? "/contribute/audio" : null;
+  switch (item.moduleType) {
+    case "WORD":
+      if (!item.target.id) return null;
+      return `/contribute/concept?conceptId=${item.target.id}${item.target.synonymIndex ? `&synonymIndex=${item.target.synonymIndex}` : ""}`;
+    case "TRANSLATION":
+      return item.target.id ? `/contribute/translate?sentenceId=${item.target.id}` : null;
+    case "SCENE":
+      return item.target.id ? `/contribute/scene?sceneId=${item.target.id}` : null;
+    case "TRANSCRIPTION":
+      return "/contribute/audio";
+    default:
+      return null;
+  }
+}
 
 const MODULE_LABEL: Record<ModuleType, string> = {
   WORD: "Word",
@@ -93,6 +112,8 @@ function ContributionsPageInner() {
   const [duration, setDuration] = useState(0);
 
   const [pending, setPending] = useState<PendingSubmissionItem[]>([]);
+  const processingItems = pending.filter((p) => p.status !== "failed");
+  const failedItems = pending.filter((p) => p.status === "failed");
 
   const load = useCallback(() => {
     setLoading(true);
@@ -238,27 +259,49 @@ function ContributionsPageInner() {
 
       <h1 className="text-2xl font-bold text-ink">My Contributions</h1>
 
-      {pending.length > 0 && (
+      {processingItems.length > 0 && (
         <div className="space-y-2">
-          {pending.map((p) => {
+          {processingItems.map((p) => (
+            <div key={p.id} className="card-duo flex items-center gap-3 rounded-2xl bg-surface-card p-3 text-sm">
+              <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-secondary" />
+              <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
+              <span className="text-ink-muted">Submitted, processing...</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {failedItems.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="text-lg font-bold text-red-600">⚠ Failed Submissions</h2>
+          {failedItems.map((p) => {
             const isHighlighted = p.id === highlightId;
+            const href = submitAgainHref(p);
             return (
               <div
                 key={p.id}
                 ref={isHighlighted ? highlightRef : undefined}
-                className={`card-duo flex items-center gap-3 rounded-2xl p-3 text-sm transition-colors ${
-                  isHighlighted ? "bg-red-50 ring-2 ring-red-400" : "bg-surface-card"
+                className={`card-duo flex flex-col gap-2 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between ${
+                  isHighlighted ? "ring-2 ring-red-400" : ""
                 }`}
               >
-                <span
-                  className={`h-2 w-2 flex-shrink-0 rounded-full ${
-                    p.status === "failed" ? "bg-danger" : "animate-pulse bg-secondary"
-                  }`}
-                />
-                <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
-                <span className={p.status === "failed" ? "text-danger" : "text-ink-muted"}>
-                  {p.status === "failed" ? "Failed -- please record and submit again." : "Submitted, processing..."}
-                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-red-700">{MODULE_LABEL[p.moduleType]}</p>
+                  <p className="truncate font-medium text-ink">
+                    {p.target?.label ?? "(no additional detail)"}
+                    {p.target?.synonymIndex ? ` (synonym ${p.target.synonymIndex})` : ""}
+                  </p>
+                  <p className="mt-1 text-xs text-red-600">{p.errorMessage || "Something went wrong finishing this submission."}</p>
+                  <p className="mt-1 text-xs text-ink-muted">{new Date(p.createdAt).toLocaleString()}</p>
+                </div>
+                {href ? (
+                  <Link
+                    href={href}
+                    className="btn-duo flex-shrink-0 bg-red-600 px-4 py-2 text-center text-sm font-semibold text-white hover:bg-red-500"
+                  >
+                    Submit Again
+                  </Link>
+                ) : null}
               </div>
             );
           })}

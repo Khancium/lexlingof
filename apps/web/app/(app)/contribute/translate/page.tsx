@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
@@ -20,6 +21,19 @@ const PAGE_SIZE = 50;
 const emptyDraft: Draft = { transcription: "", romanization: "", ipa: "", recording: null };
 
 export default function TranslatePage() {
+  return (
+    <Suspense fallback={<p className="text-ink-muted">Loading...</p>}>
+      <TranslatePageInner />
+    </Suspense>
+  );
+}
+
+function TranslatePageInner() {
+  // Arriving from a failed-submission "Submit Again" link (?sentenceId=X) --
+  // jumps straight into recording that exact sentence.
+  const searchParams = useSearchParams();
+  const deepLinkSentenceId = searchParams.get("sentenceId");
+
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
@@ -101,6 +115,18 @@ export default function TranslatePage() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (!deepLinkSentenceId) return;
+    setLoadingSentence(true);
+    api.contributions
+      .getSentenceById(deepLinkSentenceId)
+      .then((s) => openSentence(s))
+      .catch((err) => setSentenceError(getErrorMessage(err, "Failed to load sentence")))
+      .finally(() => setLoadingSentence(false));
+    // Only ever run once, for the initial deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSentenceId]);
 
   function openSentence(result: RandomSentence) {
     setSubmitError(null);

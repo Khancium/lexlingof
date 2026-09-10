@@ -98,7 +98,7 @@ export default function NotificationBell() {
       {open ? (
         <div
           ref={panelRef}
-          className="absolute right-0 z-50 mt-2 w-80 max-w-[90vw] overflow-hidden rounded-2xl bg-surface shadow-lg ring-1 ring-border"
+          className="fixed inset-x-4 top-16 z-50 overflow-hidden rounded-2xl bg-surface shadow-lg ring-1 ring-border sm:absolute sm:inset-x-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80"
         >
           <div className="border-b border-border px-4 py-3">
             <p className="text-sm font-bold text-ink">Notifications</p>

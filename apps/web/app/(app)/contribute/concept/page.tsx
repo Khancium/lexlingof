@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   api,
   getErrorMessage,
@@ -20,6 +21,21 @@ type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "categories" | "concepts" | "record";
 
 export default function ConceptPage() {
+  return (
+    <Suspense fallback={<p className="text-ink-muted">Loading...</p>}>
+      <ConceptPageInner />
+    </Suspense>
+  );
+}
+
+function ConceptPageInner() {
+  // Arriving from a failed-submission "Submit Again" link
+  // (?conceptId=X&synonymIndex=N) -- jumps straight into recording that
+  // exact object/synonym instead of making the user re-find it by hand.
+  const searchParams = useSearchParams();
+  const deepLinkConceptId = searchParams.get("conceptId");
+  const deepLinkSynonymIndex = searchParams.get("synonymIndex");
+
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const userId = useAuthStore((state) => state.user?.id);
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
@@ -112,6 +128,17 @@ export default function ConceptPage() {
       setLoadingConcept(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!deepLinkConceptId) return;
+    openConcept({ id: deepLinkConceptId } as ConceptListItem).then(() => {
+      const idx = Number(deepLinkSynonymIndex);
+      if (idx === 1 || idx === 2 || idx === 3) setSynonymIndex(idx);
+    });
+    // Only ever run once, for the initial deep link -- openConcept itself
+    // resets synonymIndex to 1, which is why the override happens after it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkConceptId]);
 
   const filteredCategories = categorySearch.trim()
     ? categories.filter((c) => c.nameEnglish.toLowerCase().includes(categorySearch.trim().toLowerCase()))

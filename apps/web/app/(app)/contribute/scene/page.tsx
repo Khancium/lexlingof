@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { api, getErrorMessage, type Scene } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
@@ -13,6 +14,19 @@ type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "browse" | "record";
 
 export default function ScenePage() {
+  return (
+    <Suspense fallback={<p className="text-ink-muted">Loading...</p>}>
+      <ScenePageInner />
+    </Suspense>
+  );
+}
+
+function ScenePageInner() {
+  // Arriving from a failed-submission "Submit Again" link (?sceneId=X) --
+  // jumps straight into recording that exact scene.
+  const searchParams = useSearchParams();
+  const deepLinkSceneId = searchParams.get("sceneId");
+
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const userId = useAuthStore((state) => state.user?.id);
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
@@ -65,6 +79,18 @@ export default function ScenePage() {
     setRecording(null);
     setLastSubmittedRecording(null);
   }
+
+  useEffect(() => {
+    if (!deepLinkSceneId) return;
+    setLoadingScene(true);
+    api.scenes
+      .getById(deepLinkSceneId)
+      .then((s) => openScene(s))
+      .catch((err) => setSceneError(err instanceof Error ? err.message : "Failed to load scene"))
+      .finally(() => setLoadingScene(false));
+    // Only ever run once, for the initial deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSceneId]);
 
   async function loadDifferentScene(excludeId?: string) {
     setLoadingScene(true);

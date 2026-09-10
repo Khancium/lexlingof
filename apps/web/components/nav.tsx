@@ -85,20 +85,23 @@ export default function Nav() {
           </button>
         </div>
 
-        {user ? (
-          <div className="md:hidden">
-            <NotificationBell />
-          </div>
-        ) : null}
-
-        <button
-          onClick={() => setMobileOpen((prev) => !prev)}
-          aria-label="Toggle menu"
-          aria-expanded={mobileOpen}
-          className="rounded-lg p-2 text-xl leading-none text-ink hover:bg-surface-card md:hidden"
-        >
-          {mobileOpen ? "✕" : "☰"}
-        </button>
+        {/* Grouped together (not two separate flex children) so this pair
+           sits flush against the right edge on mobile -- as siblings of the
+           justify-between row above, the bell would otherwise land near the
+           horizontal center (evenly spaced between the logo and the
+           hamburger), which is what threw off the notification panel's
+           right-0 anchor and pushed it off the left edge of the screen. */}
+        <div className="flex items-center gap-1 md:hidden">
+          {user ? <NotificationBell /> : null}
+          <button
+            onClick={() => setMobileOpen((prev) => !prev)}
+            aria-label="Toggle menu"
+            aria-expanded={mobileOpen}
+            className="rounded-lg p-2 text-xl leading-none text-ink hover:bg-surface-card"
+          >
+            {mobileOpen ? "✕" : "☰"}
+          </button>
+        </div>
       </div>
 
       {mobileOpen ? (
