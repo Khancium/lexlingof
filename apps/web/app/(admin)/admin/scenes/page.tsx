@@ -9,7 +9,7 @@ import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 function toggleInSet(set: Set<string>, id: string): Set<string> {
   const next = new Set(set);
@@ -72,6 +72,7 @@ export default function AdminScenesPage() {
   const [allScenes, setAllScenes] = useState<Scene[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -120,7 +121,7 @@ export default function AdminScenesPage() {
     setLoadError(null);
     try {
       const [sceneRes, conceptRes, allSceneRes] = await Promise.all([
-        api.scenes.getAll({ limit: PAGE_SIZE, offset }),
+        api.scenes.getAll({ limit, offset }),
         api.concepts.getAll({ limit: 200 }),
         api.scenes.getAll({ limit: 1000 }),
       ]);
@@ -138,7 +139,12 @@ export default function AdminScenesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
+  }, [offset, limit]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   async function handleCreate() {
     if (slug.trim().length === 0 || title.trim().length === 0) return;
@@ -793,7 +799,7 @@ export default function AdminScenesPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

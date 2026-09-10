@@ -4,12 +4,13 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type AuditLog } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50;
 
 export default function AdminLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [action, setAction] = useState("");
   const [resourceType, setResourceType] = useState("");
@@ -22,7 +23,7 @@ export default function AdminLogsPage() {
     setError(null);
     api.superadmin
       .getAuditLogs({
-        limit: PAGE_SIZE,
+        limit,
         offset,
         search: search.trim() || undefined,
         action: action.trim() || undefined,
@@ -34,7 +35,12 @@ export default function AdminLogsPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load logs"))
       .finally(() => setLoading(false));
-  }, [offset, search, action, resourceType]);
+  }, [offset, limit, search, action, resourceType]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   useEffect(() => {
     const timeout = setTimeout(load, 250);
@@ -144,7 +150,7 @@ export default function AdminLogsPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

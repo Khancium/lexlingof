@@ -36,7 +36,7 @@ const STATUS_COLOR: Record<string, string> = {
   rejected: "bg-red-600",
 };
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50;
 
 const selectClass = "rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border";
 const inputClass = "rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border";
@@ -161,6 +161,7 @@ export default function AdminContributionsPage() {
   const [items, setItems] = useState<AdminContributionListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -212,7 +213,7 @@ export default function AdminContributionsPage() {
         gender: filters.gender.length ? filters.gender : undefined,
         education_level: filters.educationLevel.length ? filters.educationLevel : undefined,
         profession: filters.profession.trim() || undefined,
-        limit: PAGE_SIZE,
+        limit,
         offset,
       });
       setItems(res.items);
@@ -220,7 +221,12 @@ export default function AdminContributionsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters, offset]);
+  }, [filters, offset, limit]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   // Debounced so typing in the search/profession/country/city text filters
   // doesn't fire a full contribution query (with its demographics joins) on
@@ -848,7 +854,7 @@ export default function AdminContributionsPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

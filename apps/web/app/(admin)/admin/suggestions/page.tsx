@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, getErrorMessage, type AdminSuggestion } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50;
 
 type Filter = "" | "true" | "false";
 
@@ -12,6 +12,7 @@ export default function AdminSuggestionsPage() {
   const [items, setItems] = useState<AdminSuggestion[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [filter, setFilter] = useState<Filter>("false");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -21,14 +22,19 @@ export default function AdminSuggestionsPage() {
     setLoading(true);
     setError(null);
     api.admin
-      .getSuggestions({ isReviewed: filter === "" ? undefined : filter === "true", limit: PAGE_SIZE, offset })
+      .getSuggestions({ isReviewed: filter === "" ? undefined : filter === "true", limit, offset })
       .then((res) => {
         setItems(res.items);
         setTotal(res.total);
       })
       .catch((err) => setError(getErrorMessage(err, "Failed to load suggestions")))
       .finally(() => setLoading(false));
-  }, [filter, offset]);
+  }, [filter, offset, limit]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   useEffect(() => {
     load();
@@ -105,7 +111,7 @@ export default function AdminSuggestionsPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

@@ -7,13 +7,14 @@ import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50;
 
 export default function AdminSentencesPage() {
   const [sentences, setSentences] = useState<AdminSentence[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
 
   const [englishText, setEnglishText] = useState("");
@@ -29,7 +30,7 @@ export default function AdminSentencesPage() {
 
   async function load() {
     setLoading(true);
-    const [cats, res] = await Promise.all([api.categories.getAll(), api.admin.getSentences({ limit: PAGE_SIZE, offset })]);
+    const [cats, res] = await Promise.all([api.categories.getAll(), api.admin.getSentences({ limit, offset })]);
     setCategories(cats);
     setSentences(res.items);
     setTotal(res.total);
@@ -39,7 +40,12 @@ export default function AdminSentencesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
+  }, [offset, limit]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   async function handleCreate() {
     if (englishText.trim().length === 0) return;
@@ -220,7 +226,7 @@ export default function AdminSentencesPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

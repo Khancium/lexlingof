@@ -8,7 +8,7 @@ import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
-const PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50;
 
 export default function AdminConceptsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -18,6 +18,7 @@ export default function AdminConceptsPage() {
   const [allConcepts, setAllConcepts] = useState<ConceptListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -50,7 +51,7 @@ export default function AdminConceptsPage() {
     try {
       const [cats, res, allRes] = await Promise.all([
         api.categories.getAll(),
-        api.concepts.getAll({ limit: PAGE_SIZE, offset }),
+        api.concepts.getAll({ limit, offset }),
         api.concepts.getAll({ limit: 1000 }),
       ]);
       setCategories(cats);
@@ -67,7 +68,12 @@ export default function AdminConceptsPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset]);
+  }, [offset, limit]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   async function handleCreate() {
     if (!newCategoryId || newLabel.trim().length === 0) return;
@@ -432,7 +438,7 @@ export default function AdminConceptsPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

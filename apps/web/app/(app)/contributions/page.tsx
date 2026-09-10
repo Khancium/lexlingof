@@ -21,7 +21,7 @@ const FILTERS: { label: string; value: ModuleType | undefined }[] = [
   { label: "Scene", value: "SCENE" },
 ];
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
@@ -69,6 +69,7 @@ function ContributionsPageInner() {
   const [items, setItems] = useState<ContributionListItem[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
 
   // A single shared, hidden <audio> element -- only one item can play at a
@@ -96,13 +97,18 @@ function ContributionsPageInner() {
   const load = useCallback(() => {
     setLoading(true);
     api.users
-      .getContributions({ limit: PAGE_SIZE, offset, moduleType: filter })
+      .getContributions({ limit, offset, moduleType: filter })
       .then((res) => {
         setItems(res.items);
         setTotal(res.total);
       })
       .finally(() => setLoading(false));
-  }, [filter, offset]);
+  }, [filter, offset, limit]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   const loadPending = useCallback(() => {
     api.buffer.getMine().then(setPending).catch(() => {});
@@ -346,7 +352,7 @@ function ContributionsPageInner() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }

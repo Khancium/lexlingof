@@ -6,7 +6,7 @@ import { LEVEL_COLOR } from "@/lib/level";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
-const PAGE_SIZE = 20;
+const DEFAULT_PAGE_SIZE = 20;
 
 type StatusFilter = "" | "active" | "restricted" | "suspended";
 
@@ -28,6 +28,7 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<StatusFilter>("");
   const [loading, setLoading] = useState(true);
@@ -38,14 +39,19 @@ export default function AdminUsersPage() {
     setLoading(true);
     setError(null);
     api.admin
-      .getUsers({ limit: PAGE_SIZE, offset, search: search.trim() || undefined, status: status || undefined })
+      .getUsers({ limit, offset, search: search.trim() || undefined, status: status || undefined })
       .then((res) => {
         setUsers(res.items);
         setTotal(res.total);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load users"))
       .finally(() => setLoading(false));
-  }, [offset, search, status]);
+  }, [offset, limit, search, status]);
+
+  function handleLimitChange(newLimit: number) {
+    setLimit(newLimit);
+    setOffset(0);
+  }
 
   useEffect(() => {
     const timeout = setTimeout(load, 250);
@@ -272,7 +278,7 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} />}
+      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
     </div>
   );
 }
