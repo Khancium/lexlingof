@@ -109,6 +109,115 @@ export async function searchSentences(
   return { items, limit, offset, total: totalRow?.value ?? 0 };
 }
 
+// Sentences are bucketed into fixed-size "groups" for the translate page's
+// tile view -- membership is a deterministic pseudo-random order (sorted by
+// md5(id), not creation order or alphabetically) computed on the fly rather
+// than stored, so it needs no migration/backfill and automatically covers
+// sentences added later. It isn't perfectly stable across an admin adding
+// or removing sentences (group boundaries can shift), but within a normal
+// session it's fixed, which is all the progress bar / tile view needs.
+const SENTENCE_GROUP_SIZE = 50;
+
+// This app's DB connection crosses regions (see db/index.ts's prepare:false
+// comment) -- round trips are expensive and, worse, transferring many rows
+// scales badly (6384 rows measured at ~20s+ vs. ~200ms for 100 rows). The
+// naive version of this feature (pull every active sentence id into Node,
+// chunk into groups of 50 in JS) took 20-40s per request. Both functions
+// below instead do the bucketing AND aggregation entirely in one SQL
+// statement each, so only the small, already-aggregated result ever
+// crosses the network -- a page of groups is a handful of summary rows, and
+// a single group's detail is at most 50 rows.
+export async function getSentenceGroups(userId: string, limit: number, offset: number) {
+  const [groupRows, [totalRow]] = await Promise.all([
+    db.execute<{ group_index: number; sentence_count: number; translated_count: number }>(sql`
+      with ordered as (
+        select id, (row_number() over (order by md5(id::text)) - 1) as rn
+        from ${sentences}
+        where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+      ),
+      grouped as (
+        select (rn / ${SENTENCE_GROUP_SIZE})::int as group_index, id
+        from ordered
+      )
+      select
+        g.group_index,
+        count(*)::int as sentence_count,
+        count(t.id)::int as translated_count
+      from grouped g
+      left join ${translations} t
+        on t.sentence_id = g.id and t.user_id = ${userId} and t.deleted_at is null
+      group by g.group_index
+      order by g.group_index
+      limit ${limit} offset ${offset}
+    `),
+    db.execute<{ total_groups: number }>(sql`
+      select ceil(count(*)::numeric / ${SENTENCE_GROUP_SIZE})::int as total_groups
+      from ${sentences}
+      where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+    `),
+  ]);
+
+  const items = groupRows.map((r) => ({
+    groupIndex: r.group_index,
+    sentenceCount: r.sentence_count,
+    translatedCount: r.translated_count,
+  }));
+
+  return { items, limit, offset, total: totalRow?.total_groups ?? 0 };
+}
+
+export async function getSentenceGroupDetail(userId: string, groupIndex: number) {
+  const [[totalRow], rows] = await Promise.all([
+    db.execute<{ total_groups: number }>(sql`
+      select ceil(count(*)::numeric / ${SENTENCE_GROUP_SIZE})::int as total_groups
+      from ${sentences}
+      where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+    `),
+    db.execute<{
+      id: string;
+      english_text: string;
+      category_id: string | null;
+      category_name: string | null;
+      category_slug: string | null;
+      has_translated: boolean;
+    }>(sql`
+      with ordered as (
+        select id from ${sentences}
+        where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+        order by md5(id::text)
+        offset ${groupIndex * SENTENCE_GROUP_SIZE} limit ${SENTENCE_GROUP_SIZE}
+      )
+      select
+        s.id,
+        s.english_text,
+        c.id as category_id,
+        c.name_english as category_name,
+        c.slug as category_slug,
+        exists (
+          select 1 from ${translations} t
+          where t.sentence_id = s.id and t.user_id = ${userId} and t.deleted_at is null
+        ) as has_translated
+      from ordered o
+      join ${sentences} s on s.id = o.id
+      left join ${categories} c on c.id = s.category_id
+    `),
+  ]);
+
+  const totalGroups = totalRow?.total_groups ?? 0;
+  if (groupIndex < 0 || groupIndex >= totalGroups) {
+    throw new HttpError(404, "NOT_FOUND", "Sentence group not found");
+  }
+
+  const items = rows.map((row) => ({
+    id: row.id,
+    englishText: row.english_text,
+    category: row.category_id ? { id: row.category_id, name: row.category_name, slug: row.category_slug } : null,
+    hasTranslated: row.has_translated,
+  }));
+
+  return { groupIndex, totalGroups, items };
+}
+
 export async function getRandomSentence(userId: string, languageId: string) {
   // The literal exclusion query given in spec only filters by user_id and
   // module_type, which would make the languageId parameter unused. Since

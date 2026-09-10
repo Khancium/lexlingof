@@ -418,6 +418,10 @@ export type RandomSentence = {
 };
 export type SentencesResponse = { items: RandomSentence[]; limit: number; offset: number; total: number };
 
+export type SentenceGroup = { groupIndex: number; sentenceCount: number; translatedCount: number };
+export type SentenceGroupsResponse = { items: SentenceGroup[]; limit: number; offset: number; total: number };
+export type SentenceGroupDetail = { groupIndex: number; totalGroups: number; items: RandomSentence[] };
+
 export type WordBufferMeta = {
   conceptId: string;
   languageId: string;
@@ -961,6 +965,10 @@ export const api = {
     getSentenceById: (id: string) => apiClient.get<RandomSentence>(`/api/v1/sentences/${id}`).then((r) => r.data),
     getRandomSentence: (languageId: string) =>
       apiClient.get<RandomSentence>("/api/v1/sentences/random", { params: { languageId } }).then((r) => r.data),
+    getSentenceGroups: (params?: { limit?: number; offset?: number }) =>
+      apiClient.get<SentenceGroupsResponse>("/api/v1/sentence-groups", { params }).then((r) => r.data),
+    getSentenceGroup: (groupIndex: number) =>
+      apiClient.get<SentenceGroupDetail>(`/api/v1/sentence-groups/${groupIndex}`).then((r) => r.data),
     submitTranslation: (sentenceId: string, data: SubmitTranslationInput) =>
       apiClient.post<SubmitTranslationResponse>(`/api/v1/sentences/${sentenceId}/translation`, data).then((r) => r.data),
   },

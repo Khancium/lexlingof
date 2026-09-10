@@ -6,7 +6,7 @@ import { db } from "../../../db/index.js";
 import { categories, sentences } from "../../../db/schema.js";
 import { verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
-import { getRandomSentence, searchSentences, submitTranslation } from "./translation.service.js";
+import { getRandomSentence, getSentenceGroupDetail, getSentenceGroups, searchSentences, submitTranslation } from "./translation.service.js";
 
 const randomQuerySchema = z.object({ languageId: z.string().uuid() });
 const idParamSchema = z.object({ id: z.string().uuid() });
@@ -16,6 +16,11 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
+const groupsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+const groupParamSchema = z.object({ groupIndex: z.coerce.number().int().min(0) });
 
 const submitTranslationSchema = z.object({
   nativeText: z.string().min(1).optional(),
@@ -34,6 +39,21 @@ export default async function translationRoutes(fastify: FastifyInstance) {
   fastify.get("/sentences", { preHandler: verifyToken }, async (request) => {
     const { search, filter, limit, offset } = listQuerySchema.parse(request.query);
     return searchSentences(request.user!.id, search, filter, limit, offset);
+  });
+
+  // Sentences bucketed into fixed-size (<=50) "groups" for the translate
+  // page's tile view -- see getSentenceGroups' comment for how membership
+  // is decided. Placed before "/sentences/:id" registration-wise doesn't
+  // matter (different path segment), but kept next to the other sentence
+  // list endpoints.
+  fastify.get("/sentence-groups", { preHandler: verifyToken }, async (request) => {
+    const { limit, offset } = groupsQuerySchema.parse(request.query);
+    return getSentenceGroups(request.user!.id, limit, offset);
+  });
+
+  fastify.get("/sentence-groups/:groupIndex", { preHandler: verifyToken }, async (request) => {
+    const { groupIndex } = groupParamSchema.parse(request.params);
+    return getSentenceGroupDetail(request.user!.id, groupIndex);
   });
 
   fastify.get("/sentences/random", { preHandler: verifyToken }, async (request) => {

@@ -2,6 +2,21 @@
 
 const DEFAULT_LIMIT_OPTIONS = [10, 20, 50, 100];
 
+/** [1, "...", 4, 5, 6, "...", 20] -- always keeps first, last, and a window around the current page. */
+function pageNumbers(current: number, total: number, delta = 2): (number | "...")[] {
+  const pages: (number | "...")[] = [];
+  const from = Math.max(2, current - delta);
+  const to = Math.min(total - 1, current + delta);
+
+  pages.push(1);
+  if (from > 2) pages.push("...");
+  for (let p = from; p <= to; p++) pages.push(p);
+  if (to < total - 1) pages.push("...");
+  if (total > 1) pages.push(total);
+
+  return pages;
+}
+
 export function Pagination({
   offset,
   limit,
@@ -9,6 +24,7 @@ export function Pagination({
   onChange,
   onLimitChange,
   limitOptions = DEFAULT_LIMIT_OPTIONS,
+  showPageNumbers = false,
 }: {
   offset: number;
   limit: number;
@@ -17,6 +33,8 @@ export function Pagination({
   /** Omit to keep the page size fixed (no "per page" selector shown). */
   onLimitChange?: (limit: number) => void;
   limitOptions?: number[];
+  /** Adds clickable numbered page buttons (with an ellipsis for far-apart pages) alongside Previous/Next. */
+  showPageNumbers?: boolean;
 }) {
   if (total === 0) return null;
 
@@ -39,9 +57,32 @@ export function Pagination({
           >
             ← Previous
           </button>
-          <span className="text-sm text-ink-muted">
-            Page {page} of {pageCount}
-          </span>
+          {showPageNumbers ? (
+            <div className="flex flex-wrap items-center justify-center gap-1">
+              {pageNumbers(page, pageCount).map((p, i) =>
+                p === "..." ? (
+                  <span key={`ellipsis-${i}`} className="px-1 text-sm text-ink-muted">
+                    …
+                  </span>
+                ) : (
+                  <button
+                    key={p}
+                    onClick={() => onChange((p - 1) * limit)}
+                    aria-current={p === page ? "page" : undefined}
+                    className={`h-8 min-w-8 rounded-full px-2 text-sm font-semibold transition ${
+                      p === page ? "bg-brand text-ink-inverted" : "bg-surface-card text-ink-muted hover:bg-border"
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+            </div>
+          ) : (
+            <span className="text-sm text-ink-muted">
+              Page {page} of {pageCount}
+            </span>
+          )}
           <button
             onClick={() => onChange(offset + limit)}
             disabled={offset + limit >= total}
