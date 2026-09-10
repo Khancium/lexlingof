@@ -83,6 +83,11 @@ function ContributionsPageInner() {
   const highlightId = searchParams.get("failed");
   const highlightRef = useRef<HTMLDivElement>(null);
   const [hasScrolledToHighlight, setHasScrolledToHighlight] = useState(false);
+  // Failed Submissions is a summary button on the normal view; clicking it
+  // (or arriving from a notification's "View" link) switches to a
+  // dedicated full-page listing of every failed item instead of cluttering
+  // the main contributions list with them inline.
+  const [showingFailed, setShowingFailed] = useState(!!highlightId);
 
   const [filter, setFilter] = useState<ModuleType | undefined>(undefined);
   const [items, setItems] = useState<ContributionListItem[]>([]);
@@ -259,54 +264,79 @@ function ContributionsPageInner() {
 
       <h1 className="text-2xl font-bold text-ink">My Contributions</h1>
 
-      {processingItems.length > 0 && (
-        <div className="space-y-2">
-          {processingItems.map((p) => (
-            <div key={p.id} className="card-duo flex items-center gap-3 rounded-2xl bg-surface-card p-3 text-sm">
-              <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-secondary" />
-              <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
-              <span className="text-ink-muted">Submitted, processing...</span>
-            </div>
-          ))}
-        </div>
-      )}
+      {showingFailed ? (
+        <div className="space-y-4">
+          <button
+            onClick={() => setShowingFailed(false)}
+            className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+          >
+            ← Back to Contributions
+          </button>
 
-      {failedItems.length > 0 && (
-        <div className="card-duo rounded-2xl border border-red-200 bg-red-50 p-4">
-          <h2 className="mb-3 text-lg font-bold text-red-700">⚠ Failed Submissions</h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {failedItems.map((p) => {
-              const isHighlighted = p.id === highlightId;
-              const href = submitAgainHref(p);
-              return (
-                <div
-                  key={p.id}
-                  ref={isHighlighted ? highlightRef : undefined}
-                  className={`flex flex-col items-center gap-2 rounded-2xl bg-surface p-4 text-center shadow-sm ${
-                    isHighlighted ? "ring-2 ring-red-400" : ""
-                  }`}
-                >
-                  <p className="text-xs font-semibold uppercase tracking-wide text-red-600">{MODULE_LABEL[p.moduleType]}</p>
-                  <p className="truncate text-sm font-medium text-ink" title={p.target?.label ?? undefined}>
-                    {p.target?.label ?? "(no additional detail)"}
-                    {p.target?.synonymIndex ? ` (synonym ${p.target.synonymIndex})` : ""}
-                  </p>
-                  {href ? (
-                    <Link
-                      href={href}
-                      className="btn-duo w-full bg-red-600 px-3 py-1.5 text-center text-xs font-semibold text-white hover:bg-red-500"
+          <div className="card-duo rounded-2xl border border-red-200 bg-red-50 p-4">
+            <h2 className="mb-3 text-lg font-bold text-red-700">⚠ Failed Submissions</h2>
+            {failedItems.length === 0 ? (
+              <p className="text-sm text-red-700">No failed submissions -- you're all caught up.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {failedItems.map((p) => {
+                  const isHighlighted = p.id === highlightId;
+                  const href = submitAgainHref(p);
+                  return (
+                    <div
+                      key={p.id}
+                      ref={isHighlighted ? highlightRef : undefined}
+                      className={`flex flex-col items-center gap-2 rounded-2xl bg-surface p-4 text-center shadow-sm ${
+                        isHighlighted ? "ring-2 ring-red-400" : ""
+                      }`}
                     >
-                      Submit Again
-                    </Link>
-                  ) : null}
-                </div>
-              );
-            })}
+                      <p className="text-xs font-semibold uppercase tracking-wide text-red-600">{MODULE_LABEL[p.moduleType]}</p>
+                      <p className="truncate text-sm font-medium text-ink" title={p.target?.label ?? undefined}>
+                        {p.target?.label ?? "(no additional detail)"}
+                        {p.target?.synonymIndex ? ` (synonym ${p.target.synonymIndex})` : ""}
+                      </p>
+                      {href ? (
+                        <Link
+                          href={href}
+                          className="btn-duo w-full bg-red-600 px-3 py-1.5 text-center text-xs font-semibold text-white hover:bg-red-500"
+                        >
+                          Submit Again
+                        </Link>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
-      )}
+      ) : (
+        <>
+          {processingItems.length > 0 && (
+            <div className="space-y-2">
+              {processingItems.map((p) => (
+                <div key={p.id} className="card-duo flex items-center gap-3 rounded-2xl bg-surface-card p-3 text-sm">
+                  <span className="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-secondary" />
+                  <span className="font-semibold text-ink">{MODULE_LABEL[p.moduleType]}</span>
+                  <span className="text-ink-muted">Submitted, processing...</span>
+                </div>
+              ))}
+            </div>
+          )}
 
-      <div className="flex flex-wrap gap-2">
+          {failedItems.length > 0 && (
+            <button
+              onClick={() => setShowingFailed(true)}
+              className="card-duo flex w-full items-center justify-between rounded-2xl border border-red-200 bg-red-50 p-4 text-left transition hover:shadow-md"
+            >
+              <span className="font-bold text-red-700">
+                ⚠ {failedItems.length} Failed Submission{failedItems.length === 1 ? "" : "s"}
+              </span>
+              <span className="text-red-700">→</span>
+            </button>
+          )}
+
+          <div className="flex flex-wrap gap-2">
         {FILTERS.map((f) => (
           <button
             key={f.label}
@@ -393,7 +423,9 @@ function ContributionsPageInner() {
         </div>
       )}
 
-      {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
+          {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
+        </>
+      )}
     </div>
   );
 }

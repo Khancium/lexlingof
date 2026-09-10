@@ -187,7 +187,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
         ),
       )
       .orderBy(desc(pendingSubmissions.createdAt))
-      .limit(20);
+      .limit(1000);
 
     // A failed row's payload carries the id of the exact word/sentence/scene
     // that submission was for -- resolved here into a human label (and, for

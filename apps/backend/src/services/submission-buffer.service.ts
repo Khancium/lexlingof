@@ -1,4 +1,4 @@
-import { asc, db, eq, inArray, sql } from "../db/index.js";
+import { and, asc, db, eq, inArray, sql } from "../db/index.js";
 import { contributions, notifications, pendingSubmissions, pointsTransactions } from "../db/schema.js";
 import { storeAudioBuffer } from "./audio-file.service.js";
 import { writeAuditLog } from "./audit-log.service.js";
@@ -52,6 +52,13 @@ export async function enqueueSubmission(params: {
   payload: WordPayload | TranslationPayload | AudioUploadPayload | ScenePayload;
   audio?: { buffer: Buffer; mimeType: string; filename: string; durationMs: number } | null;
 }): Promise<{ id: string }> {
+  // A "Submit Again" resubmission for the exact same word/sentence/scene
+  // should clear its old failed entry from My Contributions' Failed
+  // Submissions block, not leave it sitting there forever alongside the new
+  // attempt -- there's nothing left to act on for the old one once a fresh
+  // attempt has been queued.
+  await deleteStaleFailedSubmissionsForSameTarget(params.userId, params.moduleType, params.payload);
+
   const [row] = await db
     .insert(pendingSubmissions)
     .values({
@@ -75,6 +82,41 @@ export async function enqueueSubmission(params: {
   kickProcessor();
 
   return { id: row.id };
+}
+
+/**
+ * TRANSCRIPTION has no reusable target -- each audio upload is a fresh,
+ * independent file, not a resubmission for a pre-existing word/sentence/
+ * scene -- so there's nothing to match a new one against and it's skipped
+ * entirely.
+ */
+async function deleteStaleFailedSubmissionsForSameTarget(
+  userId: string,
+  moduleType: ModuleType,
+  payload: WordPayload | TranslationPayload | AudioUploadPayload | ScenePayload,
+): Promise<void> {
+  if (moduleType === "TRANSCRIPTION") return;
+
+  const matchesSameTarget = (candidate: Record<string, unknown>): boolean => {
+    if (moduleType === "WORD") {
+      const p = payload as WordPayload;
+      return candidate.conceptId === p.conceptId && candidate.synonymIndex === p.synonymIndex;
+    }
+    if (moduleType === "TRANSLATION") {
+      return candidate.sentenceId === (payload as TranslationPayload).sentenceId;
+    }
+    return candidate.sceneId === (payload as ScenePayload).sceneId;
+  };
+
+  const failedRows = await db
+    .select({ id: pendingSubmissions.id, payload: pendingSubmissions.payload })
+    .from(pendingSubmissions)
+    .where(and(eq(pendingSubmissions.userId, userId), eq(pendingSubmissions.moduleType, moduleType), eq(pendingSubmissions.status, "failed")));
+
+  const staleIds = failedRows.filter((r) => matchesSameTarget(r.payload as Record<string, unknown>)).map((r) => r.id);
+  if (staleIds.length > 0) {
+    await db.delete(pendingSubmissions).where(inArray(pendingSubmissions.id, staleIds));
+  }
 }
 
 export function kickProcessor(): void {
