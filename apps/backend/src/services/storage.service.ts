@@ -197,7 +197,17 @@ class StorageService {
     const timeout = setTimeout(() => controller.abort(), FETCH_IMAGE_TIMEOUT_MS);
     let response: Response;
     try {
-      response = await fetch(parsed, { signal: controller.signal });
+      // Plenty of image hosts (Pixabay, Unsplash, etc.) 403 a request with no
+      // User-Agent / Accept header as bot traffic, even for a legitimate
+      // direct image link -- a browser-like header set here is enough to
+      // pass that check without actually needing a real browser.
+      response = await fetch(parsed, {
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          Accept: "image/*,*/*;q=0.8",
+        },
+      });
     } catch {
       throw new HttpError(400, "FETCH_FAILED", "Could not reach that URL");
     } finally {
@@ -205,12 +215,24 @@ class StorageService {
     }
 
     if (!response.ok) {
-      throw new HttpError(400, "FETCH_FAILED", `URL returned HTTP ${response.status}`);
+      // A 403/404 here is very often the admin having pasted the image's
+      // *page* on a stock-photo site (e.g. pixabay.com/photos/...) instead of
+      // the actual image file URL -- that hint is more actionable than the
+      // raw status code alone.
+      const hint =
+        response.status === 403 || response.status === 404
+          ? " -- make sure this is a direct link to the image file (usually ending in .jpg/.png/.webp), not the webpage it's shown on"
+          : "";
+      throw new HttpError(400, "FETCH_FAILED", `URL returned HTTP ${response.status}${hint}`);
     }
 
     const contentType = response.headers.get("content-type") ?? "";
     if (!contentType.startsWith("image/")) {
-      throw new HttpError(400, "INVALID_FILE_TYPE", "That URL did not return an image");
+      throw new HttpError(
+        400,
+        "INVALID_FILE_TYPE",
+        "That URL did not return an image -- make sure it's a direct link to the image file, not the webpage it's shown on",
+      );
     }
 
     const contentLength = Number(response.headers.get("content-length") ?? 0);
