@@ -1,6 +1,6 @@
 "use client";
 
-const DEFAULT_LIMIT_OPTIONS = [10, 20, 50, 100];
+const DEFAULT_LIMIT_OPTIONS = [10, 20, 50, 100, 1000];
 
 /** [1, "...", 4, 5, 6, "...", 20] -- always keeps first, last, and a window around the current page. */
 function pageNumbers(current: number, total: number, delta = 2): (number | "...")[] {

@@ -13,11 +13,11 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 const listQuerySchema = z.object({
   search: z.string().min(1).optional(),
   filter: z.enum(["translated", "untranslated"]).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
 const groupsQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
 const groupParamSchema = z.object({ groupIndex: z.coerce.number().int().min(0) });

@@ -256,7 +256,7 @@ const contributionsQuerySchema = z.object({
   gender: csvOf(genderEnum.enumValues),
   education_level: csvOf(educationLevelEnum.enumValues),
   profession: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
@@ -273,7 +273,7 @@ const usersQuerySchema = z.object({
   role: z.enum(userRole.enumValues).optional(),
   search: z.string().optional(),
   status: z.enum(["active", "restricted", "suspended"]).optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
@@ -366,7 +366,7 @@ const sceneKeywordParamSchema = z.object({ id: z.string().uuid(), keywordId: z.s
 const sceneMediaIdParamSchema = z.object({ mediaId: z.string().uuid() });
 
 const sentencesQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
@@ -391,7 +391,7 @@ const auditLogsQuerySchema = z.object({
   action: z.string().optional(),
   resource_type: z.string().optional(),
   search: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(200).default(50),
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
@@ -2096,7 +2096,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   const suggestionsQuerySchema = z.object({
     isReviewed: z.enum(["true", "false"]).optional(),
-    limit: z.coerce.number().int().min(1).max(200).default(50),
+    limit: z.coerce.number().int().min(1).max(1000).default(50),
     offset: z.coerce.number().int().min(0).default(0),
   });
 
