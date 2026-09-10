@@ -163,6 +163,18 @@ export async function blockIfRestricted(request: FastifyRequest, reply: FastifyR
 /*                               requirePermission                            */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * Same check as requirePermission, but callable inline from within a
+ * handler -- needed where the required permission isn't known until after
+ * looking at the request body/DB row (e.g. the generic audit-log undo
+ * endpoint, which needs a different permission per resourceType).
+ */
+export async function hasPermission(role: Role, permission: string): Promise<boolean> {
+  if (role === "super_admin") return true;
+  const codes = await getRolePermissionCodes(role);
+  return codes.has(permission);
+}
+
 export function requirePermission(permission: string) {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {

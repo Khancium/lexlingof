@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api, getErrorMessage, type RandomSentence } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
+import { useAuthStore } from "@/lib/store";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
@@ -20,6 +21,7 @@ const emptyDraft: Draft = { transcription: "", romanization: "", ipa: "", record
 
 export default function TranslatePage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+  const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
   const [step, setStep] = useState<Step>("browse");
 
@@ -159,7 +161,9 @@ export default function TranslatePage() {
       // Previous can navigate back to it -- the backend now overrides an
       // existing translation for the same sentence instead of creating a
       // duplicate, so recording again there replaces this submission.
-      fetchNewSentence(languageId);
+      // Auto-advance is a per-user preference (Settings) -- off means the
+      // just-submitted sentence stays on screen until Next is clicked.
+      if (autoLoadNext) fetchNewSentence(languageId);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit translation"));
     } finally {

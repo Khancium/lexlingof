@@ -6,6 +6,7 @@ import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
 const PAGE_SIZE = 20;
@@ -621,6 +622,12 @@ export default function AdminScenesPage() {
                   >
                     {deletingId === scene.id ? "Deleting..." : "Delete"}
                   </button>
+                  <AdminUndoButton
+                    resourceType="scene"
+                    identifier={scene.id}
+                    onUndone={load}
+                    className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
+                  />
                 </div>
               </div>
 

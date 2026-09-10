@@ -11,6 +11,7 @@ const LINKS = [
   { href: "/admin/concepts", label: "Concepts" },
   { href: "/admin/scenes", label: "Scenes" },
   { href: "/admin/sentences", label: "Sentences" },
+  { href: "/admin/suggestions", label: "Suggestions" },
 ];
 
 const SUPER_ADMIN_LINKS = [

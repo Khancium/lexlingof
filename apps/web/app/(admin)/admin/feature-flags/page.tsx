@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/store";
 import { api, type FeatureFlag } from "@/lib/api";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 export default function FeatureFlagsPage() {
   const user = useAuthStore((state) => state.user);
@@ -10,13 +11,17 @@ export default function FeatureFlagsPage() {
   const [loading, setLoading] = useState(true);
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (user?.role !== "super_admin") return;
     api.superadmin.getFeatureFlags().then((res) => {
       setFlags(res);
       setLoading(false);
     });
   }, [user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (user?.role !== "super_admin") {
     return <p className="text-red-600">Super-admin access required.</p>;
@@ -48,18 +53,21 @@ export default function FeatureFlagsPage() {
                 <p className="font-mono text-sm text-ink">{flag.flagKey}</p>
                 <p className="text-xs text-ink-muted">{flag.description}</p>
               </div>
-              <button
-                onClick={() => toggle(flag)}
-                disabled={togglingKey === flag.flagKey}
-                className={`relative h-7 w-12 rounded-full transition ${flag.isEnabled ? "bg-emerald-600" : "bg-gray-300"}`}
-                aria-label={`Toggle ${flag.flagKey}`}
-              >
-                <span
-                  className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
-                    flag.isEnabled ? "translate-x-6" : "translate-x-1"
-                  }`}
-                />
-              </button>
+              <div className="flex items-center gap-3">
+                <AdminUndoButton resourceType="feature_flag" identifier={flag.flagKey} onUndone={load} />
+                <button
+                  onClick={() => toggle(flag)}
+                  disabled={togglingKey === flag.flagKey}
+                  className={`relative h-7 w-12 rounded-full transition ${flag.isEnabled ? "bg-emerald-600" : "bg-gray-300"}`}
+                  aria-label={`Toggle ${flag.flagKey}`}
+                >
+                  <span
+                    className={`absolute top-1 h-5 w-5 rounded-full bg-white transition-transform ${
+                      flag.isEnabled ? "translate-x-6" : "translate-x-1"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           ))}
         </div>

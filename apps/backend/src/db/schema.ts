@@ -160,6 +160,10 @@ export const users = pgTable(
     timezone: text("timezone").default("UTC").notNull(),
     locale: text("locale").default("en").notNull(),
     biography: text("biography"),
+    /** Contribute-flow preference: auto-advance to the next sentence/concept/scene right after a successful submit, vs. requiring a manual "Next" click. */
+    autoLoadNext: boolean("auto_load_next").default(true).notNull(),
+    /** Preference only -- doesn't touch device_tokens; sendPushToUser checks this before sending regardless of what tokens are registered. */
+    pushNotificationsEnabled: boolean("push_notifications_enabled").default(true).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -1172,6 +1176,27 @@ export const auditLogs = pgTable(
     index("ix_audit_logs_actor").on(t.actorId),
     index("ix_audit_logs_resource").on(t.resourceType, t.resourceId),
     index("ix_audit_logs_created_at").on(t.createdAt),
+  ],
+);
+
+/** User-submitted feedback/suggestions from the settings page -- reviewed on the admin side. */
+export const suggestions = pgTable(
+  "suggestions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    message: text("message").notNull(),
+    isReviewed: boolean("is_reviewed").default(false).notNull(),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("ix_suggestions_user").on(t.userId),
+    index("ix_suggestions_created_at").on(t.createdAt),
+    index("ix_suggestions_is_reviewed").on(t.isReviewed),
   ],
 );
 

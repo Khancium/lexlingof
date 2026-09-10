@@ -34,6 +34,7 @@ import {
   sceneMedia,
   sentences,
   subTribes,
+  suggestions,
   transcriptions,
   translations,
   tribes,
@@ -43,7 +44,7 @@ import {
   villages,
   wordRecordings,
 } from "../../db/schema.js";
-import { invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
+import { hasPermission, invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache } from "../../services/level.service.js";
@@ -542,6 +543,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       action: "admin_contribution_delete",
       resourceType: "contribution",
       resourceId: id,
+      beforeState: { deletedAt: null },
+      afterState: { deletedAt: new Date().toISOString() },
     });
 
     return { id, deleted: true };
@@ -557,7 +560,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .object({ ids: z.array(z.string().uuid()).min(1), status: z.enum(contributionStatus.enumValues), reason: z.string().optional() })
       .parse(request.body);
 
-    const rows = await db.select({ id: contributions.id, status: contributions.status }).from(contributions).where(inArray(contributions.id, ids));
+    const rows = await db
+      .select({
+        id: contributions.id,
+        status: contributions.status,
+        verifiedAt: contributions.verifiedAt,
+        verifiedBy: contributions.verifiedBy,
+        rejectedAt: contributions.rejectedAt,
+        rejectedBy: contributions.rejectedBy,
+        rejectionReason: contributions.rejectionReason,
+      })
+      .from(contributions)
+      .where(inArray(contributions.id, ids));
     if (rows.length === 0) return { updated: 0 };
 
     const updates: Record<string, unknown> = { status, updatedAt: new Date() };
@@ -567,15 +581,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const actorRole = request.user!.role;
     await writeAuditLogs(
-      rows.map((row) => ({
-        actorId: request.user!.id,
-        actorRole,
-        action: "admin_contribution_status_change",
-        resourceType: "contribution",
-        resourceId: row.id,
-        beforeState: { status: row.status },
-        afterState: { status, reason: reason ?? null },
-      })),
+      rows.map((row) => {
+        const { id, ...beforeState } = row;
+        return {
+          actorId: request.user!.id,
+          actorRole,
+          action: "admin_contribution_status_change",
+          resourceType: "contribution",
+          resourceId: id,
+          beforeState,
+          afterState: { status, reason: reason ?? null },
+        };
+      }),
     );
 
     return { updated: rows.length };
@@ -600,6 +617,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         action: "admin_contribution_delete",
         resourceType: "contribution",
         resourceId: row.id,
+        beforeState: { deletedAt: null },
+        afterState: { deletedAt: new Date().toISOString() },
       })),
     );
 
@@ -687,7 +706,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     const body = updateContributionStatusSchema.parse(request.body);
 
-    const [contribution] = await db.select({ status: contributions.status }).from(contributions).where(eq(contributions.id, id)).limit(1);
+    const [contribution] = await db
+      .select({
+        status: contributions.status,
+        verifiedAt: contributions.verifiedAt,
+        verifiedBy: contributions.verifiedBy,
+        rejectedAt: contributions.rejectedAt,
+        rejectedBy: contributions.rejectedBy,
+        rejectionReason: contributions.rejectionReason,
+      })
+      .from(contributions)
+      .where(eq(contributions.id, id))
+      .limit(1);
     if (!contribution) {
       throw new HttpError(404, "NOT_FOUND", "Contribution not found");
     }
@@ -706,7 +736,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       action: "admin_contribution_status_change",
       resourceType: "contribution",
       resourceId: id,
-      beforeState: { status: contribution.status },
+      beforeState: contribution,
       afterState: { status: body.status, reason: body.reason ?? null },
     });
 
@@ -1104,51 +1134,81 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     const body = updateConceptSchema.parse(request.body);
 
-    const [existing] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, id)).limit(1);
+    const [existing] = await db.select().from(concepts).where(eq(concepts.id, id)).limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Concept not found");
     }
 
     const [updated] = await db.update(concepts).set({ ...body, updatedAt: new Date() }).where(eq(concepts.id, id)).returning();
+
+    // Only the fields this PUT actually touched, so undo restores exactly
+    // what changed instead of overwriting untouched columns with a stale
+    // full-row snapshot.
+    const beforeState = Object.fromEntries(Object.keys(body).map((k) => [k, existing[k as keyof typeof existing]]));
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_concept_update",
+      resourceType: "concept",
+      resourceId: id,
+      beforeState,
+      afterState: body,
+    });
+
     return updated;
   });
 
   fastify.post("/admin/concepts/bulk-delete", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
-    await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(inArray(concepts.id, ids));
+    const rows = await db.select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt }).from(concepts).where(inArray(concepts.id, ids));
+    if (rows.length === 0) return { deleted: 0 };
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_concept_bulk_delete",
-      resourceType: "concept",
-      afterState: { ids },
-    });
+    await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(inArray(concepts.id, rows.map((r) => r.id)));
 
-    return { deleted: ids.length };
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_concept_delete",
+        resourceType: "concept",
+        resourceId: row.id,
+        beforeState: { isActive: row.isActive, deletedAt: row.deletedAt },
+        afterState: { isActive: false },
+      })),
+    );
+
+    return { deleted: rows.length };
   });
 
   fastify.post("/admin/concepts/bulk-edit", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const { ids, ...fields } = bulkEditConceptsSchema.parse(request.body);
 
-    await db.update(concepts).set({ ...fields, updatedAt: new Date() }).where(inArray(concepts.id, ids));
+    const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
+    const rows = await db.select().from(concepts).where(inArray(concepts.id, ids));
+    if (rows.length === 0) return { updated: 0 };
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_concept_bulk_edit",
-      resourceType: "concept",
-      afterState: { ids, ...fields },
-    });
+    await db.update(concepts).set({ ...fields, updatedAt: new Date() }).where(inArray(concepts.id, rows.map((r) => r.id)));
 
-    return { updated: ids.length };
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_concept_update",
+        resourceType: "concept",
+        resourceId: row.id,
+        beforeState: Object.fromEntries(fieldKeys.map((k) => [k, row[k as keyof typeof row]])),
+        afterState: fields,
+      })),
+    );
+
+    return { updated: rows.length };
   });
 
   fastify.delete("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [existing] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, id)).limit(1);
+    const [existing] = await db.select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt }).from(concepts).where(eq(concepts.id, id)).limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Concept not found");
     }
@@ -1161,6 +1221,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       action: "admin_concept_delete",
       resourceType: "concept",
       resourceId: id,
+      beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
+      afterState: { isActive: false },
     });
 
     return { id, deleted: true };
@@ -1285,51 +1347,78 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     const body = updateSceneSchema.parse(request.body);
 
-    const [existing] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, id)).limit(1);
+    const [existing] = await db.select().from(scenes).where(eq(scenes.id, id)).limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Scene not found");
     }
 
     const [updated] = await db.update(scenes).set({ ...body, updatedAt: new Date() }).where(eq(scenes.id, id)).returning();
+
+    const beforeState = Object.fromEntries(Object.keys(body).map((k) => [k, existing[k as keyof typeof existing]]));
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_scene_update",
+      resourceType: "scene",
+      resourceId: id,
+      beforeState,
+      afterState: body,
+    });
+
     return updated;
   });
 
   fastify.post("/admin/scenes/bulk-delete", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
-    await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(inArray(scenes.id, ids));
+    const rows = await db.select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt }).from(scenes).where(inArray(scenes.id, ids));
+    if (rows.length === 0) return { deleted: 0 };
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_scene_bulk_delete",
-      resourceType: "scene",
-      afterState: { ids },
-    });
+    await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(inArray(scenes.id, rows.map((r) => r.id)));
 
-    return { deleted: ids.length };
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_scene_delete",
+        resourceType: "scene",
+        resourceId: row.id,
+        beforeState: { isActive: row.isActive, deletedAt: row.deletedAt },
+        afterState: { isActive: false },
+      })),
+    );
+
+    return { deleted: rows.length };
   });
 
   fastify.post("/admin/scenes/bulk-edit", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { ids, ...fields } = bulkEditScenesSchema.parse(request.body);
 
-    await db.update(scenes).set({ ...fields, updatedAt: new Date() }).where(inArray(scenes.id, ids));
+    const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
+    const rows = await db.select().from(scenes).where(inArray(scenes.id, ids));
+    if (rows.length === 0) return { updated: 0 };
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_scene_bulk_edit",
-      resourceType: "scene",
-      afterState: { ids, ...fields },
-    });
+    await db.update(scenes).set({ ...fields, updatedAt: new Date() }).where(inArray(scenes.id, rows.map((r) => r.id)));
 
-    return { updated: ids.length };
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_scene_update",
+        resourceType: "scene",
+        resourceId: row.id,
+        beforeState: Object.fromEntries(fieldKeys.map((k) => [k, row[k as keyof typeof row]])),
+        afterState: fields,
+      })),
+    );
+
+    return { updated: rows.length };
   });
 
   fastify.delete("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [existing] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, id)).limit(1);
+    const [existing] = await db.select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt }).from(scenes).where(eq(scenes.id, id)).limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Scene not found");
     }
@@ -1342,6 +1431,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       action: "admin_scene_delete",
       resourceType: "scene",
       resourceId: id,
+      beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
+      afterState: { isActive: false },
     });
 
     return { id, deleted: true };
@@ -1609,39 +1700,54 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/sentences/bulk-delete", { preHandler: requirePermission("sentences.manage") }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
-    await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(inArray(sentences.id, ids));
+    const rows = await db.select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt }).from(sentences).where(inArray(sentences.id, ids));
+    if (rows.length === 0) return { deleted: 0 };
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_sentence_bulk_delete",
-      resourceType: "sentence",
-      afterState: { ids },
-    });
+    await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(inArray(sentences.id, rows.map((r) => r.id)));
 
-    return { deleted: ids.length };
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_sentence_delete",
+        resourceType: "sentence",
+        resourceId: row.id,
+        beforeState: { isActive: row.isActive, deletedAt: row.deletedAt },
+        afterState: { isActive: false },
+      })),
+    );
+
+    return { deleted: rows.length };
   });
 
   fastify.post("/admin/sentences/bulk-edit", { preHandler: requirePermission("sentences.manage") }, async (request) => {
     const { ids, ...fields } = bulkEditSentencesSchema.parse(request.body);
 
-    await db.update(sentences).set({ ...fields, updatedAt: new Date() }).where(inArray(sentences.id, ids));
+    const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
+    const rows = await db.select().from(sentences).where(inArray(sentences.id, ids));
+    if (rows.length === 0) return { updated: 0 };
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_sentence_bulk_edit",
-      resourceType: "sentence",
-      afterState: { ids, ...fields },
-    });
+    await db.update(sentences).set({ ...fields, updatedAt: new Date() }).where(inArray(sentences.id, rows.map((r) => r.id)));
 
-    return { updated: ids.length };
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_sentence_update",
+        resourceType: "sentence",
+        resourceId: row.id,
+        beforeState: Object.fromEntries(fieldKeys.map((k) => [k, row[k as keyof typeof row]])),
+        afterState: fields,
+      })),
+    );
+
+    return { updated: rows.length };
   });
 
   fastify.delete("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [existing] = await db.select({ id: sentences.id }).from(sentences).where(eq(sentences.id, id)).limit(1);
+    const [existing] = await db.select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt }).from(sentences).where(eq(sentences.id, id)).limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Sentence not found");
     }
@@ -1654,6 +1760,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       action: "admin_sentence_delete",
       resourceType: "sentence",
       resourceId: id,
+      beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
+      afterState: { isActive: false },
     });
 
     return { id, deleted: true };
@@ -1855,6 +1963,189 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     ]);
 
     return { items, limit, offset, total: totalRow?.value ?? 0 };
+  });
+
+  /* --------------------------- Reverse changes (undo) ------------------------- */
+  // "Undo last change" for a single item, everywhere an edit/status
+  // change/delete is already audit-logged: finds the most recent audit_logs
+  // row for this resource and re-applies its beforeState. Deliberately
+  // single-step (not a full history browser, not a whole-bulk-operation
+  // undo) -- clicking it a second time re-applies the row's afterState
+  // instead (an undo of an undo is a redo), since the just-written undo
+  // audit entry becomes the new "latest" for this resource.
+  //
+  // gamification_config and feature_flags are keyed by a text key, not a
+  // uuid resourceId (that column can't hold their keys), so their audit
+  // rows carry the key inside beforeState/afterState instead -- undoing
+  // those looks the row up by scanning recent entries for a match on that
+  // key rather than by resourceId.
+  const UNDO_PERMISSION_BY_RESOURCE: Record<string, string> = {
+    contribution: "contributions.manage",
+    concept: "concepts.manage",
+    scene: "scenes.manage",
+    sentence: "sentences.manage",
+    gamification_config: "system.manage",
+    feature_flag: "system.manage",
+  };
+
+  const undoParamSchema = z.object({ resourceType: z.string().min(1), identifier: z.string().min(1) });
+
+  fastify.post("/admin/undo/:resourceType/:identifier", { preHandler: verifyToken }, async (request) => {
+    const { resourceType, identifier } = undoParamSchema.parse(request.params);
+    const role = request.user!.role;
+
+    const isKeyed = resourceType === "gamification_config" || resourceType === "feature_flag";
+    const keyField = resourceType === "gamification_config" ? "configKey" : "flagKey";
+
+    let log: typeof auditLogs.$inferSelect | undefined;
+    if (isKeyed) {
+      const candidates = await db
+        .select()
+        .from(auditLogs)
+        .where(eq(auditLogs.resourceType, resourceType))
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(100);
+      log = candidates.find((c) => (c.beforeState as Record<string, unknown> | null)?.[keyField] === identifier);
+    } else {
+      if (resourceType !== "user" && !UNDO_PERMISSION_BY_RESOURCE[resourceType]) {
+        throw new HttpError(400, "NOT_REVERTIBLE", `"${resourceType}" has no undo support`);
+      }
+      [log] = await db
+        .select()
+        .from(auditLogs)
+        .where(and(eq(auditLogs.resourceType, resourceType), eq(auditLogs.resourceId, identifier)))
+        .orderBy(desc(auditLogs.createdAt))
+        .limit(1);
+    }
+
+    if (!log) {
+      throw new HttpError(404, "NOT_FOUND", "No logged change found to undo for this item");
+    }
+    if (!log.beforeState) {
+      throw new HttpError(400, "NOT_REVERTIBLE", "This change has no recorded prior state to restore");
+    }
+
+    // "user" maps to two different permissions depending on which action
+    // produced this specific log row (granting admin is super_admin-only;
+    // every other user action is users.manage) -- resolved only once the
+    // actual log row (and its action) is known.
+    const permission =
+      resourceType === "user"
+        ? log.action === "superadmin_grant_admin"
+          ? "system.manage"
+          : "users.manage"
+        : UNDO_PERMISSION_BY_RESOURCE[resourceType];
+    if (!permission || !(await hasPermission(role, permission))) {
+      throw new HttpError(403, "FORBIDDEN", `required: ${permission ?? "unknown"}`);
+    }
+
+    const before = log.beforeState as Record<string, unknown>;
+
+    switch (resourceType) {
+      case "contribution":
+        await db.update(contributions).set({ ...before, updatedAt: new Date() } as Partial<typeof contributions.$inferInsert>).where(eq(contributions.id, identifier));
+        break;
+      case "concept":
+        await db.update(concepts).set({ ...before, updatedAt: new Date() } as Partial<typeof concepts.$inferInsert>).where(eq(concepts.id, identifier));
+        break;
+      case "scene":
+        await db.update(scenes).set({ ...before, updatedAt: new Date() } as Partial<typeof scenes.$inferInsert>).where(eq(scenes.id, identifier));
+        break;
+      case "sentence":
+        await db.update(sentences).set({ ...before, updatedAt: new Date() } as Partial<typeof sentences.$inferInsert>).where(eq(sentences.id, identifier));
+        break;
+      case "user":
+        await db.update(users).set({ ...before, updatedAt: new Date() } as Partial<typeof users.$inferInsert>).where(eq(users.id, identifier));
+        invalidateUserCache(identifier);
+        break;
+      case "gamification_config":
+        await db
+          .update(gamificationConfig)
+          .set({ configValue: before.configValue as Record<string, unknown>, updatedBy: request.user!.id, updatedAt: new Date() })
+          .where(eq(gamificationConfig.configKey, identifier));
+        if (identifier.startsWith("levels.")) invalidateLevelThresholdsCache();
+        break;
+      case "feature_flag":
+        await db
+          .update(featureFlags)
+          .set({ isEnabled: before.isEnabled as boolean, updatedBy: request.user!.id, updatedAt: new Date() })
+          .where(eq(featureFlags.flagKey, identifier));
+        break;
+      default:
+        throw new HttpError(400, "NOT_REVERTIBLE", `"${resourceType}" has no undo support`);
+    }
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: role,
+      action: `undo:${log.action}`,
+      resourceType,
+      resourceId: isKeyed ? null : identifier,
+      beforeState: log.afterState,
+      afterState: log.beforeState,
+    });
+
+    return { undone: true, revertedAction: log.action };
+  });
+
+  /* -------------------------------- Suggestions -------------------------------- */
+  // User feedback submitted from the settings page (POST /users/me/suggestions);
+  // reused audit.read here rather than a brand-new permission code, since
+  // both existing admin roles that can see the audit log are the same
+  // audience for user feedback.
+
+  const suggestionsQuerySchema = z.object({
+    isReviewed: z.enum(["true", "false"]).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
+  });
+
+  fastify.get("/admin/suggestions", { preHandler: requirePermission("audit.read") }, async (request) => {
+    const { isReviewed, limit, offset } = suggestionsQuerySchema.parse(request.query);
+    const whereClause = isReviewed !== undefined ? eq(suggestions.isReviewed, isReviewed === "true") : undefined;
+
+    const [items, [totalRow]] = await Promise.all([
+      db
+        .select({
+          id: suggestions.id,
+          message: suggestions.message,
+          isReviewed: suggestions.isReviewed,
+          reviewedAt: suggestions.reviewedAt,
+          createdAt: suggestions.createdAt,
+          userId: users.id,
+          userDisplayName: users.displayName,
+          userEmail: users.email,
+        })
+        .from(suggestions)
+        .innerJoin(users, eq(users.id, suggestions.userId))
+        .where(whereClause)
+        .orderBy(desc(suggestions.createdAt))
+        .limit(limit)
+        .offset(offset),
+      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(suggestions).where(whereClause),
+    ]);
+
+    return { items, limit, offset, total: totalRow?.value ?? 0 };
+  });
+
+  fastify.put("/admin/suggestions/:id/reviewed", { preHandler: requirePermission("audit.read") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { isReviewed } = z.object({ isReviewed: z.boolean() }).parse(request.body);
+
+    const [updated] = await db
+      .update(suggestions)
+      .set({
+        isReviewed,
+        reviewedAt: isReviewed ? new Date() : null,
+        reviewedBy: isReviewed ? request.user!.id : null,
+      })
+      .where(eq(suggestions.id, id))
+      .returning({ id: suggestions.id, isReviewed: suggestions.isReviewed, reviewedAt: suggestions.reviewedAt });
+
+    if (!updated) {
+      throw new HttpError(404, "NOT_FOUND", "Suggestion not found");
+    }
+    return updated;
   });
 
   // No list endpoint existed -- only the toggle-by-key PUT below -- so there

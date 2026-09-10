@@ -16,6 +16,7 @@ import {
   sceneContributions,
   sceneMedia,
   streaks,
+  suggestions,
   translations,
   userStats,
   users,
@@ -41,6 +42,8 @@ async function getOwnProfile(userId: string) {
       role: users.role,
       biography: users.biography,
       avatarUrl: users.avatarUrl,
+      autoLoadNext: users.autoLoadNext,
+      pushNotificationsEnabled: users.pushNotificationsEnabled,
       level: userStats.level,
       totalPoints: userStats.totalPoints,
       verifiedContributions: userStats.verifiedContributions,
@@ -110,6 +113,8 @@ async function getOwnProfile(userId: string) {
     biography: row.biography,
     pointsThisWeek: row.pointsThisWeek ?? 0,
     lastContributionAt: row.lastContributionAt,
+    autoLoadNext: row.autoLoadNext,
+    pushNotificationsEnabled: row.pushNotificationsEnabled,
   };
 }
 
@@ -139,7 +144,11 @@ const updateMeSchema = z.object({
   locationVillage: z.string().optional(),
   tribe: z.string().optional(),
   showLocation: z.boolean().optional(),
+  autoLoadNext: z.boolean().optional(),
+  pushNotificationsEnabled: z.boolean().optional(),
 });
+
+const submitSuggestionSchema = z.object({ message: z.string().trim().min(1).max(2000) });
 
 const contributionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -166,7 +175,7 @@ export default async function usersRoutes(fastify: FastifyInstance) {
     const body = updateMeSchema.parse(request.body);
     const userId = request.user!.id;
 
-    const userFields = pick(body, ["displayName", "biography", "timezone", "locale"]);
+    const userFields = pick(body, ["displayName", "biography", "timezone", "locale", "autoLoadNext", "pushNotificationsEnabled"]);
     const profileFields = pick(body, [
       "primaryLanguageId",
       "primaryDialectId",
@@ -375,6 +384,20 @@ export default async function usersRoutes(fastify: FastifyInstance) {
     });
 
     return { items, limit, offset, total: totalRow?.value ?? 0 };
+  });
+
+  // A crude feedback box on the settings page -- stored as-is, reviewed on
+  // the admin side (GET /admin/suggestions). No edit/delete from the user's
+  // side; it's a one-way "send a note to the team", not a ticket thread.
+  fastify.post("/me/suggestions", { preHandler: verifyToken }, async (request, reply) => {
+    const { message } = submitSuggestionSchema.parse(request.body);
+
+    const [created] = await db
+      .insert(suggestions)
+      .values({ userId: request.user!.id, message })
+      .returning({ id: suggestions.id, message: suggestions.message, createdAt: suggestions.createdAt });
+
+    reply.code(201).send(created);
   });
 
   fastify.get("/:id", async (request) => {

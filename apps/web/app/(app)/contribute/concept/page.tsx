@@ -22,6 +22,7 @@ type Step = "categories" | "concepts" | "record";
 export default function ConceptPage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const userId = useAuthStore((state) => state.user?.id);
+  const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
   const [step, setStep] = useState<Step>("categories");
 
@@ -165,7 +166,8 @@ export default function ConceptPage() {
       // Same auto-advance the translate module already does on submit --
       // Previous/Next stay fully functional, this just saves the extra
       // click to move on when there's a next object in the current list.
-      goToAdjacentConcept(1);
+      // Gated by the user's Settings preference, same as translate/scene.
+      if (autoLoadNext) goToAdjacentConcept(1);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit recording"));
     } finally {

@@ -190,6 +190,8 @@ export type UserProfile = {
   biography: string | null;
   pointsThisWeek: number;
   lastContributionAt: string | null;
+  autoLoadNext: boolean;
+  pushNotificationsEnabled: boolean;
 };
 
 export type UpdateMeInput = Partial<{
@@ -204,6 +206,8 @@ export type UpdateMeInput = Partial<{
   locationVillage: string;
   tribe: string;
   showLocation: boolean;
+  autoLoadNext: boolean;
+  pushNotificationsEnabled: boolean;
 }>;
 
 export type NamedOption = { id: string; name: string };
@@ -680,6 +684,19 @@ export type AdminUser = {
 
 export type AdminUsersResponse = { items: AdminUser[]; limit: number; offset: number; total: number };
 
+export type AdminSuggestion = {
+  id: string;
+  message: string;
+  isReviewed: boolean;
+  reviewedAt: string | null;
+  createdAt: string;
+  userId: string;
+  userDisplayName: string;
+  userEmail: string;
+};
+
+export type AdminSuggestionsResponse = { items: AdminSuggestion[]; limit: number; offset: number; total: number };
+
 export type AdminConceptInput = { categoryId: string; labelEnglish: string; description?: string };
 export type AdminConceptUpdateInput = Partial<{
   categoryId: string;
@@ -827,6 +844,10 @@ export const api = {
       return apiClient.post<UserProfile>("/api/v1/users/me/avatar", form).then((r) => r.data);
     },
     deleteAccount: () => apiClient.delete<{ deleted: boolean }>("/api/v1/users/me").then((r) => r.data),
+    submitSuggestion: (message: string) =>
+      apiClient
+        .post<{ id: string; message: string; createdAt: string }>("/api/v1/users/me/suggestions", { message })
+        .then((r) => r.data),
   },
 
   notifications: {
@@ -996,6 +1017,22 @@ export const api = {
       apiClient.delete(`/api/v1/admin/contributions/${id}/keywords/${keywordId}`).then((r) => r.data),
 
     getAnalytics: () => apiClient.get<AdminAnalytics>("/api/v1/admin/analytics").then((r) => r.data),
+
+    // Reverses the most recent audit-logged change to one item -- pass the
+    // resourceType exactly as logged ("contribution", "concept", "scene",
+    // "sentence", "user", "gamification_config", "feature_flag") and the
+    // item's id (or, for the two key-based types, its configKey/flagKey).
+    undo: (resourceType: string, identifier: string) =>
+      apiClient.post<{ undone: boolean; revertedAction: string }>(`/api/v1/admin/undo/${resourceType}/${encodeURIComponent(identifier)}`).then((r) => r.data),
+
+    getSuggestions: (params?: { isReviewed?: boolean; limit?: number; offset?: number }) =>
+      apiClient
+        .get<AdminSuggestionsResponse>("/api/v1/admin/suggestions", {
+          params: params ? { ...params, isReviewed: params.isReviewed === undefined ? undefined : String(params.isReviewed) } : undefined,
+        })
+        .then((r) => r.data),
+    markSuggestionReviewed: (id: string, isReviewed: boolean) =>
+      apiClient.put<{ id: string; isReviewed: boolean; reviewedAt: string | null }>(`/api/v1/admin/suggestions/${id}/reviewed`, { isReviewed }).then((r) => r.data),
 
     getUsers: (params?: { role?: string; search?: string; status?: "active" | "restricted" | "suspended"; limit?: number; offset?: number }) =>
       apiClient.get<AdminUsersResponse>("/api/v1/admin/users", { params }).then((r) => r.data),

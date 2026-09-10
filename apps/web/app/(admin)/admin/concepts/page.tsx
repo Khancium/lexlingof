@@ -6,6 +6,7 @@ import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const PAGE_SIZE = 50;
 
@@ -415,6 +416,12 @@ export default function AdminConceptsPage() {
                         >
                           {deletingId === concept.id ? "Deleting..." : "Delete"}
                         </button>
+                        <AdminUndoButton
+                          resourceType="concept"
+                          identifier={concept.id}
+                          onUndone={load}
+                          className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
+                        />
                       </div>
                     </td>
                   </tr>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type AdminUser } from "@/lib/api";
 import { LEVEL_COLOR } from "@/lib/level";
 import { Pagination } from "@/components/admin-pagination";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const PAGE_SIZE = 20;
 
@@ -255,6 +256,12 @@ export default function AdminUsersPage() {
                             Ban (delete)
                           </button>
                         ) : null}
+                        <AdminUndoButton
+                          resourceType="user"
+                          identifier={u.id}
+                          onUndone={load}
+                          className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
+                        />
                       </div>
                     </td>
                   </tr>

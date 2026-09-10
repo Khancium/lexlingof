@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/store";
 import { api, type GamificationConfigRow } from "@/lib/api";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 export default function GamificationConfigPage() {
   const user = useAuthStore((state) => state.user);
@@ -13,13 +14,17 @@ export default function GamificationConfigPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     if (user?.role !== "super_admin") return;
     api.superadmin.getGamificationConfig().then((res) => {
       setRows(res);
       setLoading(false);
     });
   }, [user]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
 
   if (user?.role !== "super_admin") {
     return <p className="text-red-600">Super-admin access required.</p>;
@@ -110,9 +115,17 @@ export default function GamificationConfigPage() {
                         </button>
                       </div>
                     ) : (
-                      <button onClick={() => startEdit(row)} className="text-xs font-semibold text-brand hover:underline">
-                        Edit
-                      </button>
+                      <div className="flex gap-3">
+                        <button onClick={() => startEdit(row)} className="text-xs font-semibold text-brand hover:underline">
+                          Edit
+                        </button>
+                        <AdminUndoButton
+                          resourceType="gamification_config"
+                          identifier={row.configKey}
+                          onUndone={load}
+                          className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
+                        />
+                      </div>
                     )}
                   </td>
                 </tr>

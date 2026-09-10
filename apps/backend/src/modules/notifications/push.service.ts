@@ -6,7 +6,7 @@ import { getMessaging } from "firebase-admin/messaging";
 import { and, eq } from "drizzle-orm";
 
 import { db } from "../../db/index.js";
-import { deviceTokens } from "../../db/schema.js";
+import { deviceTokens, users } from "../../db/schema.js";
 
 let firebaseInitialized = false;
 
@@ -29,6 +29,12 @@ export async function sendPushToUser(
 ): Promise<void> {
   if (!firebaseInitialized) {
     console.log(`[push] Firebase not configured, skipping push to user ${userId}: "${title}"`);
+    return;
+  }
+
+  const [user] = await db.select({ pushNotificationsEnabled: users.pushNotificationsEnabled }).from(users).where(eq(users.id, userId)).limit(1);
+  if (user && !user.pushNotificationsEnabled) {
+    console.log(`[push] user ${userId} has push notifications disabled, skipping: "${title}"`);
     return;
   }
 

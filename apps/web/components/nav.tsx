@@ -16,6 +16,7 @@ const LINKS = [
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/corpus", label: "Corpus" },
   { href: "/profile", label: "Profile" },
+  { href: "/settings", label: "Settings" },
 ];
 
 export default function Nav() {

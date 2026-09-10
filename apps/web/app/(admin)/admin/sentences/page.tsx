@@ -5,6 +5,7 @@ import { api, type AdminSentence, type Category } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const PAGE_SIZE = 50;
 
@@ -196,13 +197,21 @@ export default function AdminSentencesPage() {
                   <td className="px-4 py-3 text-ink-muted">{categoryName(sentence.categoryId)}</td>
                   <td className="px-4 py-3 text-ink-muted">{sentence.usageCount}</td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleDelete(sentence)}
-                      disabled={deletingId === sentence.id}
-                      className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
-                    >
-                      {deletingId === sentence.id ? "Deleting..." : "Delete"}
-                    </button>
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => handleDelete(sentence)}
+                        disabled={deletingId === sentence.id}
+                        className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                      >
+                        {deletingId === sentence.id ? "Deleting..." : "Delete"}
+                      </button>
+                      <AdminUndoButton
+                        resourceType="sentence"
+                        identifier={sentence.id}
+                        onUndone={load}
+                        className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}

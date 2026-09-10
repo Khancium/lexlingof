@@ -15,6 +15,7 @@ type Step = "browse" | "record";
 export default function ScenePage() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const userId = useAuthStore((state) => state.user?.id);
+  const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
   const [step, setStep] = useState<Step>("browse");
 
@@ -101,12 +102,14 @@ export default function ScenePage() {
       // Same auto-advance the translate module already does on submit --
       // Previous/Next stay fully functional, this just moves on to the next
       // scene in the current list automatically, or a fresh random one once
-      // the list runs out.
-      const nextItem = scenes[sceneIndex + 1];
-      if (nextItem) {
-        openScene(nextItem);
-      } else {
-        loadDifferentScene(scene.id);
+      // the list runs out. Gated by the user's Settings preference.
+      if (autoLoadNext) {
+        const nextItem = scenes[sceneIndex + 1];
+        if (nextItem) {
+          openScene(nextItem);
+        } else {
+          loadDifferentScene(scene.id);
+        }
       }
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit scene description"));

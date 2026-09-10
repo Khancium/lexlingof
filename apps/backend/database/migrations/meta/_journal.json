@@ -176,6 +176,13 @@
       "when": 1788980129938,
       "tag": "0024_peaceful_argent",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789018729047,
+      "tag": "0025_wise_kylun",
+      "breakpoints": true
     }
   ]
 }

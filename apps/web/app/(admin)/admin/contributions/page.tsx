@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS } from "@/lib/demographics-constants";
 import { Pagination } from "@/components/admin-pagination";
+import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const MODULE_LABEL: Record<ModuleType, string> = {
   WORD: "Word",
@@ -753,6 +754,7 @@ export default function AdminContributionsPage() {
                         >
                           Delete
                         </button>
+                        <AdminUndoButton resourceType="contribution" identifier={item.contributionId} onUndone={load} />
                       </div>
                     </td>
                   </tr>
