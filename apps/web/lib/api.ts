@@ -43,6 +43,15 @@ function getStoredRefreshToken(): string | null {
   return window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
+// Lets loadUser() skip GET /users/me entirely when there's plainly no
+// session to restore, instead of firing it unconditionally on every app
+// boot and letting it 401 for every anonymous visitor (harmless -- caught
+// and treated as "not logged in" -- but a needless round trip, and shows up
+// as a red 401 in the browser's network tab on the login/register pages).
+export function hasStoredRefreshToken(): boolean {
+  return getStoredRefreshToken() !== null;
+}
+
 function setStoredRefreshToken(token: string | null): void {
   if (typeof window === "undefined") return;
   if (token) {
@@ -54,10 +63,10 @@ function setStoredRefreshToken(token: string | null): void {
 
 // Only redirects when a session actually existed and its refresh failed
 // (e.g. an expired/revoked refresh token) -- NOT when there was simply never
-// a refresh token to begin with. Callers like loadUser() call api.users.getMe()
-// unconditionally on every app boot, including for anonymous visitors on public
-// pages; without this distinction, every such visitor would be force-redirected
-// to /login the instant that call 401s, since there'd be nothing to refresh.
+// a refresh token to begin with (loadUser() skips calling getMe() at all in
+// that case, but any other authenticated call made with no session would
+// otherwise 401 into here too) -- without this distinction, that case would
+// force-redirect to /login for someone who was never logged in to begin with.
 function clearSessionAndRedirectToLogin(hadRefreshToken: boolean): void {
   setAccessToken(null);
   setStoredRefreshToken(null);

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import axios from "axios";
-import { api, type UserProfile } from "./api";
+import { api, hasStoredRefreshToken, type UserProfile } from "./api";
 
 type AuthState = {
   user: UserProfile | null;
@@ -23,6 +23,13 @@ export const useAuthStore = create<AuthState>((set) => ({
   logout: () => set({ user: null, error: null }),
 
   loadUser: async () => {
+    // No refresh token in sessionStorage means there's plainly no session to
+    // restore -- skip the GET /users/me round trip (which would just 401)
+    // entirely, rather than firing it unconditionally on every app boot.
+    if (!hasStoredRefreshToken()) {
+      set({ user: null, isLoading: false, error: null });
+      return;
+    }
     set({ isLoading: true, error: null });
     try {
       const user = await api.users.getMe();
