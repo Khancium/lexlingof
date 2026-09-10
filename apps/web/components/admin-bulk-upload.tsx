@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BulkUploadResult } from "@/lib/api";
+import { getErrorMessage, type BulkUploadResult } from "@/lib/api";
 
 export function AdminBulkUpload({
   label,
@@ -26,7 +26,7 @@ export function AdminBulkUpload({
       setResult(res);
       onDone?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Bulk upload failed");
+      setError(getErrorMessage(err, "Bulk upload failed"));
     } finally {
       setIsUploading(false);
     }
