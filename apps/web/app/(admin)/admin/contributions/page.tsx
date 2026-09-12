@@ -3,9 +3,11 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import {
   api,
+  getErrorMessage,
   type AdminContributionListItem,
   type AdminUser,
   type ContributionKeyword,
+  type ContributionReviewsResponse,
   type ContributionStatusValue,
   type EducationLevel,
   type GenderOption,
@@ -16,6 +18,14 @@ import {
 import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS } from "@/lib/demographics-constants";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+import { AdminMultiSelect as MultiSelect } from "@/components/admin-multi-select";
+
+const REVIEW_DECISION_LABEL: Record<string, string> = {
+  valid: "Correct",
+  invalid: "Incorrect",
+  cannot_decide: "Cannot decide",
+  needs_correction: "Needs correction",
+};
 
 const MODULE_LABEL: Record<ModuleType, string> = {
   WORD: "Word",
@@ -77,85 +87,6 @@ const EMPTY_FILTERS: Filters = {
   profession: "",
 };
 
-/** A dropdown that lets more than one option be picked from the same filter at once (e.g. status: pending + verified). */
-function MultiSelect<T extends string>({
-  label,
-  options,
-  selected,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  options: { value: T; label: string }[];
-  selected: T[];
-  onChange: (values: T[]) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onClickOutside(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [open]);
-
-  function toggle(value: T) {
-    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
-  }
-
-  const buttonLabel =
-    selected.length === 0
-      ? `All ${label}`
-      : selected.length === 1
-        ? (options.find((o) => o.value === selected[0])?.label ?? selected[0])
-        : `${selected.length} ${label} selected`;
-
-  return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        disabled={disabled}
-        className={`${selectClass} flex items-center gap-2 text-left disabled:opacity-50`}
-      >
-        {buttonLabel}
-        <span className="text-ink-muted">▾</span>
-      </button>
-      {open ? (
-        // Anchored to the button's right edge and grown leftward (rather than
-        // the default left:0 growing rightward) so filters near the right
-        // edge of a narrow/mobile viewport don't open off-screen with no way
-        // to reach their far options.
-        <div className="absolute right-0 z-10 mt-1 max-h-64 w-max min-w-48 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg bg-surface p-2 shadow-lg ring-1 ring-border">
-          {options.length === 0 ? (
-            <p className="px-2 py-1 text-xs text-ink-muted">No options</p>
-          ) : (
-            options.map((o) => (
-              <label key={o.value} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm text-ink hover:bg-surface-card">
-                <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
-                {o.label}
-              </label>
-            ))
-          )}
-          {selected.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => onChange([])}
-              className="mt-1 w-full rounded px-2 py-1 text-left text-xs font-semibold text-brand hover:bg-surface-card"
-            >
-              Clear
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 export default function AdminContributionsPage() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [items, setItems] = useState<AdminContributionListItem[]>([]);
@@ -189,6 +120,8 @@ export default function AdminContributionsPage() {
   const [isSavingRemarks, setIsSavingRemarks] = useState(false);
   const [keywords, setKeywords] = useState<ContributionKeyword[]>([]);
   const [loadingKeywords, setLoadingKeywords] = useState(false);
+  const [reviewData, setReviewData] = useState<ContributionReviewsResponse | null>(null);
+  const [loadingReviews, setLoadingReviews] = useState(false);
   const [newKeyword, setNewKeyword] = useState("");
   const [isAddingKeyword, setIsAddingKeyword] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
@@ -473,13 +406,21 @@ export default function AdminContributionsPage() {
     setNewKeyword("");
     setDetailError(null);
     setLoadingKeywords(true);
-    try {
-      setKeywords(await api.admin.getContributionKeywords(item.contributionId));
-    } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to load keywords");
-    } finally {
-      setLoadingKeywords(false);
-    }
+    setLoadingReviews(true);
+    setReviewData(null);
+    // Keywords and peer reviews are independent -- fetched together rather
+    // than as two sequential round trips on every expand.
+    const [keywordResult, reviewResult] = await Promise.allSettled([
+      api.admin.getContributionKeywords(item.contributionId),
+      api.admin.getContributionReviews(item.contributionId),
+    ]);
+
+    if (keywordResult.status === "fulfilled") setKeywords(keywordResult.value);
+    else setDetailError(getErrorMessage(keywordResult.reason, "Failed to load keywords"));
+    setLoadingKeywords(false);
+
+    if (reviewResult.status === "fulfilled") setReviewData(reviewResult.value);
+    setLoadingReviews(false);
   }
 
   async function saveRemarks(id: string) {
@@ -768,11 +709,61 @@ export default function AdminContributionsPage() {
                     <tr className="border-b border-border bg-surface-card/50 last:border-0">
                       <td colSpan={6} className="px-4 py-4">
                         <div className="grid gap-4 sm:grid-cols-2">
-                          <div>
-                            <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">Content</p>
-                            <pre className="whitespace-pre-wrap rounded-lg bg-surface p-3 text-xs text-ink ring-1 ring-border">
-                              {JSON.stringify(item.detail, null, 2)}
-                            </pre>
+                          <div className="space-y-3">
+                            <div>
+                              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">Content</p>
+                              <pre className="whitespace-pre-wrap rounded-lg bg-surface p-3 text-xs text-ink ring-1 ring-border">
+                                {JSON.stringify(item.detail, null, 2)}
+                              </pre>
+                            </div>
+
+                            <div>
+                              <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-ink-muted">Peer Reviews</p>
+                              {loadingReviews ? (
+                                <p className="text-xs text-ink-muted">Loading...</p>
+                              ) : !reviewData || reviewData.total === 0 ? (
+                                <p className="text-xs text-ink-muted">No peer reviews yet.</p>
+                              ) : (
+                                <div className="space-y-2">
+                                  <div className="flex flex-wrap gap-2 text-xs font-semibold">
+                                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">
+                                      {reviewData.tally.valid} correct
+                                    </span>
+                                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-red-700">
+                                      {reviewData.tally.invalid} incorrect
+                                    </span>
+                                    <span className="rounded-full bg-surface px-2 py-0.5 text-ink-muted ring-1 ring-border">
+                                      {reviewData.tally.cannot_decide} cannot decide
+                                    </span>
+                                    <span className="rounded-full bg-surface px-2 py-0.5 text-ink-muted ring-1 ring-border">
+                                      {reviewData.total} total
+                                    </span>
+                                  </div>
+                                  <div className="max-h-48 space-y-2 overflow-y-auto">
+                                    {reviewData.items.map((r) => (
+                                      <div key={r.id} className="rounded-lg bg-surface p-2 text-xs ring-1 ring-border">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                          <span className="font-semibold text-ink">{r.reviewerName ?? "(deleted user)"}</span>
+                                          <span
+                                            className={`rounded-full px-2 py-0.5 font-semibold ${
+                                              r.decision === "valid"
+                                                ? "bg-emerald-100 text-emerald-700"
+                                                : r.decision === "invalid"
+                                                  ? "bg-red-100 text-red-700"
+                                                  : "bg-surface-card text-ink-muted"
+                                            }`}
+                                          >
+                                            {REVIEW_DECISION_LABEL[r.decision] ?? r.decision}
+                                          </span>
+                                        </div>
+                                        <p className="mt-0.5 text-ink-muted">{new Date(r.createdAt).toLocaleString()}</p>
+                                        {r.notes ? <p className="mt-1 whitespace-pre-wrap text-ink">{r.notes}</p> : null}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
                           </div>
                           <div className="space-y-3">
                             <div>

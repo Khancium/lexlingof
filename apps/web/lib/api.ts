@@ -669,6 +669,25 @@ export type AdminContributionsQuery = {
 
 export type ContributionKeyword = { id: string; keyword: string; audioFileId: string | null };
 
+export type ContributionReview = {
+  id: string;
+  decision: ReviewDecision;
+  reason: string | null;
+  notes: string | null;
+  statusBefore: string | null;
+  statusAfter: string | null;
+  createdAt: string;
+  reviewerId: string | null;
+  reviewerName: string | null;
+  reviewerEmail: string | null;
+};
+
+export type ContributionReviewsResponse = {
+  items: ContributionReview[];
+  tally: { valid: number; invalid: number; cannot_decide: number; needs_correction: number };
+  total: number;
+};
+
 export type UpdateContributionStatusInput = { status: ContributionStatusValue; reason?: string };
 
 export type AdminAnalytics = {
@@ -698,9 +717,73 @@ export type AdminUser = {
   verifiedContributions: number | null;
   totalPoints: number | null;
   level: ContributorLevel | null;
+  reviewsCompleted: number | null;
+  gender: GenderOption | null;
+  age: number | null;
+  city: string | null;
+  country: string | null;
+  motherTongue: string | null;
+  tribeName: string | null;
 };
 
 export type AdminUsersResponse = { items: AdminUser[]; limit: number; offset: number; total: number };
+
+function filenameFromResponse(headers: unknown, fallback: string) {
+  const raw = (headers as Record<string, string> | undefined)?.["content-disposition"];
+  const match = raw ? /filename="?([^"]+)"?/.exec(raw) : null;
+  return match?.[1] ?? fallback;
+}
+
+/** Turns an API blob response into a browser download without leaking the object URL. */
+export function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Mirrors the admin contributions filters: array values are sent as one comma-separated param so a single dropdown can select several options. */
+export type AdminUsersQuery = {
+  role?: string | string[];
+  search?: string;
+  status?: UserStatusFilter | UserStatusFilter[];
+  gender?: GenderOption | GenderOption[];
+  education_level?: EducationLevel | EducationLevel[];
+  tribe_id?: string | string[];
+  sub_tribe_id?: string | string[];
+  village_id?: string | string[];
+  quarter_id?: string | string[];
+  country?: string;
+  city?: string;
+  mother_tongue?: string;
+  profession?: string;
+  min_age?: number;
+  max_age?: number;
+  level?: ContributorLevel | ContributorLevel[];
+  min_contributions?: number;
+  max_contributions?: number;
+  min_verified?: number;
+  min_points?: number;
+  max_points?: number;
+  min_reviews?: number;
+  activity?: "contributed" | "never_contributed";
+  joined_from?: string;
+  joined_to?: string;
+  sort?: UserSortOption;
+  limit?: number;
+  offset?: number;
+};
+
+export type UserStatusFilter = "active" | "restricted" | "suspended";
+export type UserSortOption = "created_desc" | "created_asc" | "contributions_desc" | "points_desc" | "name_asc";
+export type ReportFormat = "csv" | "pdf";
+
+/** Bulk permanent delete is per-item best-effort: anything still referenced by contributor recordings is skipped, not failed. */
+export type BulkPermanentDeleteResult = { deleted: number; skipped: { id: string; reason: string }[] };
 
 export type AdminUserDetail = {
   id: string;
@@ -1084,6 +1167,8 @@ export const api = {
       apiClient.put<{ id: string; remarks: string | null }>(`/api/v1/admin/contributions/${id}/remarks`, { remarks }).then((r) => r.data),
     deleteContribution: (id: string) =>
       apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/contributions/${id}`).then((r) => r.data),
+    getContributionReviews: (id: string) =>
+      apiClient.get<ContributionReviewsResponse>(`/api/v1/admin/contributions/${id}/reviews`).then((r) => r.data),
     getContributionKeywords: (id: string) =>
       apiClient.get<{ items: ContributionKeyword[] }>(`/api/v1/admin/contributions/${id}/keywords`).then((r) => r.data.items),
     addContributionKeyword: (id: string, keyword: string) =>
@@ -1109,8 +1194,28 @@ export const api = {
     markSuggestionReviewed: (id: string, isReviewed: boolean) =>
       apiClient.put<{ id: string; isReviewed: boolean; reviewedAt: string | null }>(`/api/v1/admin/suggestions/${id}/reviewed`, { isReviewed }).then((r) => r.data),
 
-    getUsers: (params?: { role?: string; search?: string; status?: "active" | "restricted" | "suspended"; limit?: number; offset?: number }) =>
-      apiClient.get<AdminUsersResponse>("/api/v1/admin/users", { params }).then((r) => r.data),
+    getUsers: (params?: AdminUsersQuery) => {
+      const flat = params
+        ? Object.fromEntries(
+            Object.entries(params)
+              .filter(([, v]) => v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
+              .map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : v]),
+          )
+        : undefined;
+      return apiClient.get<AdminUsersResponse>("/api/v1/admin/users", { params: flat }).then((r) => r.data);
+    },
+
+    /** One user's full record as a file. Returns the blob plus the filename the server chose. */
+    getUserReport: (id: string, format: ReportFormat) =>
+      apiClient
+        .get<Blob>(`/api/v1/admin/users/${id}/report`, { params: { format }, responseType: "blob" })
+        .then((r) => ({ blob: r.data, filename: filenameFromResponse(r.headers, `lexlingo-user.${format}`) })),
+
+    /** A single consolidated file covering every selected user. */
+    getUsersReport: (ids: string[], format: ReportFormat) =>
+      apiClient
+        .post<Blob>("/api/v1/admin/users/report", { ids, format }, { responseType: "blob" })
+        .then((r) => ({ blob: r.data, filename: filenameFromResponse(r.headers, `lexlingo-users.${format}`) })),
     getUserDetail: (id: string) => apiClient.get<AdminUserDetail>(`/api/v1/admin/users/${id}`).then((r) => r.data),
     restrictUser: (id: string, reason: string) =>
       apiClient.post<{ id: string; isRestricted: boolean }>(`/api/v1/admin/users/${id}/restrict`, { reason }).then((r) => r.data),
@@ -1149,6 +1254,10 @@ export const api = {
     deleteConcept: (id: string) => apiClient.delete(`/api/v1/admin/concepts/${id}`).then((r) => r.data),
     bulkDeleteConcepts: (ids: string[]) =>
       apiClient.post<{ deleted: number }>("/api/v1/admin/concepts/bulk-delete", { ids }).then((r) => r.data),
+    permanentlyDeleteConcept: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean; permanent: true }>(`/api/v1/admin/concepts/${id}/permanent`).then((r) => r.data),
+    bulkPermanentlyDeleteConcepts: (ids: string[]) =>
+      apiClient.post<BulkPermanentDeleteResult>("/api/v1/admin/concepts/bulk-delete-permanent", { ids }).then((r) => r.data),
     bulkEditConcepts: (data: BulkEditConceptsInput) =>
       apiClient.post<{ updated: number }>("/api/v1/admin/concepts/bulk-edit", data).then((r) => r.data),
     uploadConceptMedia: (id: string, file: File) => {
@@ -1176,6 +1285,10 @@ export const api = {
     deleteScene: (id: string) => apiClient.delete(`/api/v1/admin/scenes/${id}`).then((r) => r.data),
     bulkDeleteScenes: (ids: string[]) =>
       apiClient.post<{ deleted: number }>("/api/v1/admin/scenes/bulk-delete", { ids }).then((r) => r.data),
+    permanentlyDeleteScene: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean; permanent: true }>(`/api/v1/admin/scenes/${id}/permanent`).then((r) => r.data),
+    bulkPermanentlyDeleteScenes: (ids: string[]) =>
+      apiClient.post<BulkPermanentDeleteResult>("/api/v1/admin/scenes/bulk-delete-permanent", { ids }).then((r) => r.data),
     bulkEditScenes: (data: BulkEditScenesInput) =>
       apiClient.post<{ updated: number }>("/api/v1/admin/scenes/bulk-edit", data).then((r) => r.data),
     uploadSceneMedia: (id: string, file: File) => {
@@ -1213,6 +1326,10 @@ export const api = {
     deleteSentence: (id: string) => apiClient.delete(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
     bulkDeleteSentences: (ids: string[]) =>
       apiClient.post<{ deleted: number }>("/api/v1/admin/sentences/bulk-delete", { ids }).then((r) => r.data),
+    permanentlyDeleteSentence: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean; permanent: true }>(`/api/v1/admin/sentences/${id}/permanent`).then((r) => r.data),
+    bulkPermanentlyDeleteSentences: (ids: string[]) =>
+      apiClient.post<BulkPermanentDeleteResult>("/api/v1/admin/sentences/bulk-delete-permanent", { ids }).then((r) => r.data),
     bulkEditSentences: (data: BulkEditSentencesInput) =>
       apiClient.post<{ updated: number }>("/api/v1/admin/sentences/bulk-edit", data).then((r) => r.data),
     bulkUploadSentences: (file: File) => {

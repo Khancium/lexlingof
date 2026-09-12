@@ -259,8 +259,11 @@ function ReviewCard({
         onReviewed(item.contributionId);
         return;
       }
+      // pendingDecision is deliberately NOT reset here: once a decision has
+      // been clicked, all three buttons stay frozen for good. Re-enabling
+      // them on failure invited a second, different verdict on the same
+      // contribution after the first one had already been sent.
       setError(getErrorMessage(err, "Failed to submit review"));
-      setPendingDecision(null);
     }
   }
 
@@ -362,21 +365,21 @@ function ReviewCard({
           disabled={pendingDecision !== null}
           className="btn-duo flex-1 bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
         >
-          ✓ Correct
+          {pendingDecision === "valid" ? "✓ Sending..." : "✓ Correct"}
         </button>
         <button
           onClick={() => submitDecision("invalid")}
           disabled={pendingDecision !== null}
           className="btn-duo btn-duo-danger flex-1 bg-red-600 py-2.5 font-semibold text-white hover:bg-red-500 disabled:opacity-50"
         >
-          ✕ Incorrect
+          {pendingDecision === "invalid" ? "✕ Sending..." : "✕ Incorrect"}
         </button>
         <button
           onClick={() => submitDecision("cannot_decide")}
           disabled={pendingDecision !== null}
           className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-2.5 font-semibold text-ink hover:bg-border disabled:opacity-50"
         >
-          ? Cannot Decide
+          {pendingDecision === "cannot_decide" ? "? Sending..." : "? Cannot Decide"}
         </button>
       </div>
     </div>

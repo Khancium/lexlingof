@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, asc, desc, eq, gte, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { and, asc, desc, eq, gte, ilike, inArray, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { parse as csvParse } from "csv-parse/sync";
 import { ZipArchive } from "archiver";
 import { z } from "zod";
@@ -18,6 +18,7 @@ import {
   contributions,
   contributionStatus,
   contributorDemographics,
+  contributorLevel,
   dialects,
   educationLevelEnum,
   gamificationConfig,
@@ -26,6 +27,7 @@ import {
   featureFlags,
   auditLogs,
   quarters,
+  reviews,
   scenes,
   sceneConcepts,
   sceneContributions,
@@ -49,9 +51,36 @@ import { deleteUserAccount } from "../../services/account.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache } from "../../services/level.service.js";
 import { storageService } from "../../services/storage.service.js";
+import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
+
+/** Content-Disposition filenames go through unescaped, so everything outside a safe ASCII set is dropped rather than quoted. */
+function fileSlug(name: string) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+  return slug || "user";
+}
+
+async function sendReport(
+  reply: FastifyReply,
+  rows: Awaited<ReturnType<typeof fetchUserReportRows>>,
+  format: "csv" | "pdf",
+  baseName: string,
+  generatedBy: string,
+) {
+  if (format === "pdf") {
+    const pdf = await buildUsersPdf(rows, generatedBy);
+    return reply
+      .header("Content-Type", "application/pdf")
+      .header("Content-Disposition", `attachment; filename="${baseName}.pdf"`)
+      .send(pdf);
+  }
+  return reply
+    .header("Content-Type", "text/csv; charset=utf-8")
+    .header("Content-Disposition", `attachment; filename="${baseName}.csv"`)
+    .send(buildUsersCsv(rows));
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -134,6 +163,176 @@ function slugify(value: string): string {
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+type ContentKind = "concept" | "scene" | "sentence";
+
+type PermanentDeleteOutcome = { id: string; deleted: boolean; reason?: string; code?: "NOT_FOUND" | "HAS_CONTRIBUTIONS" };
+
+const CONTENT_LABEL: Record<ContentKind, string> = { concept: "Concept", scene: "Scene", sentence: "Sentence" };
+
+/**
+ * Permanently removes one concept/scene/sentence: the actual DB row (not a
+ * soft delete) plus its images in Supabase Storage. The regular DELETE
+ * routes only set is_active/deleted_at, which hides a row from the app but
+ * leaves both the row and its uploaded files in place forever -- this is
+ * the "and actually delete it" counterpart.
+ *
+ * REFUSES when contributor recordings reference the row (word_recordings /
+ * scene_contributions / translations). Those FKs would block the delete
+ * anyway, but the point is that cascading through them would destroy real
+ * corpus audio and leave already-awarded points and user_stats counters
+ * describing contributions that no longer exist. Soft delete stays the
+ * correct tool there. The count is deliberately NOT filtered by deleted_at:
+ * a soft-deleted recording still holds the foreign key, so it still blocks.
+ *
+ * Storage objects are removed only AFTER the DB row is gone, and a storage
+ * failure is logged rather than thrown -- by that point the delete has
+ * already succeeded, and an orphaned file wasting space is a much smaller
+ * problem than reporting failure for work that did happen.
+ */
+async function permanentlyDeleteContent(kind: ContentKind, id: string): Promise<PermanentDeleteOutcome> {
+  const storageKeys: string[] = [];
+
+  if (kind === "concept") {
+    const [existing] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, id)).limit(1);
+    if (!existing) return { id, deleted: false, reason: "Concept not found", code: "NOT_FOUND" };
+
+    const media = await db.select({ storageKey: conceptMedia.storageKey }).from(conceptMedia).where(eq(conceptMedia.conceptId, id));
+    storageKeys.push(...media.map((m) => m.storageKey));
+  } else if (kind === "scene") {
+    const [existing] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, id)).limit(1);
+    if (!existing) return { id, deleted: false, reason: "Scene not found", code: "NOT_FOUND" };
+
+    const media = await db.select({ storageKey: sceneMedia.storageKey }).from(sceneMedia).where(eq(sceneMedia.sceneId, id));
+    storageKeys.push(...media.map((m) => m.storageKey));
+  } else {
+    const [existing] = await db.select({ id: sentences.id }).from(sentences).where(eq(sentences.id, id)).limit(1);
+    if (!existing) return { id, deleted: false, reason: "Sentence not found", code: "NOT_FOUND" };
+    // Sentences are plain text -- no media, nothing in object storage.
+  }
+
+  try {
+    await db.transaction(async (tx) => {
+      if (kind === "concept") {
+        // Admin-only scene-coverage annotations -- these FK to concepts
+        // without a cascade, so they'd block the delete, but they carry no
+        // contributor data and are meaningless once the concept is gone.
+        // Inside the transaction so a blocked delete rolls these back too.
+        await tx.delete(sceneConcepts).where(eq(sceneConcepts.conceptId, id));
+        // concept_media rows cascade with the concept row itself.
+        await tx.delete(concepts).where(eq(concepts.id, id));
+      } else if (kind === "scene") {
+        // scene_media (and its scene_image_keywords) plus scene_concepts all
+        // cascade with the scene row.
+        await tx.delete(scenes).where(eq(scenes.id, id));
+      } else {
+        await tx.delete(sentences).where(eq(sentences.id, id));
+      }
+    });
+  } catch (err) {
+    // The contributor-recording guard is the FK violation itself, not a
+    // pre-flight count. Counting first and then deleting is a
+    // time-of-check/time-of-use race: this app's DB is cross-region, so
+    // seconds pass between the two statements, and the submission-buffer
+    // worker can land a recording right in that window (which is exactly
+    // how this was found -- a 500 on the FK instead of a clean refusal).
+    // Letting Postgres arbitrate is atomic; the count below only runs on
+    // this cold path, purely to word the message.
+    if (!isForeignKeyViolation(err)) throw err;
+    return { id, deleted: false, reason: await describeBlockingReferences(kind, id), code: "HAS_CONTRIBUTIONS" };
+  }
+
+  if (storageKeys.length > 0) {
+    try {
+      await storageService.deleteImages(storageKeys);
+    } catch (err) {
+      console.error(`[admin] ${kind} ${id} was deleted but its storage objects could not be removed:`, err);
+    }
+  }
+
+  return { id, deleted: true };
+}
+
+/** Postgres 23503 = foreign_key_violation. postgres.js nests the real error under DrizzleQueryError's `cause`. */
+function isForeignKeyViolation(err: unknown): boolean {
+  const code = (err as { code?: string })?.code;
+  const causeCode = ((err as { cause?: { code?: string } })?.cause)?.code;
+  return code === "23503" || causeCode === "23503";
+}
+
+async function describeBlockingReferences(kind: ContentKind, id: string): Promise<string> {
+  if (kind === "concept") {
+    const [row] = await db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(wordRecordings)
+      .where(eq(wordRecordings.conceptId, id));
+    return `${row?.value ?? "Some"} contributor recording(s) reference this concept`;
+  }
+  if (kind === "scene") {
+    const [row] = await db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(sceneContributions)
+      .where(eq(sceneContributions.sceneId, id));
+    return `${row?.value ?? "Some"} contributor recording(s) reference this scene`;
+  }
+  const [row] = await db
+    .select({ value: sql<number>`count(*)`.mapWith(Number) })
+    .from(translations)
+    .where(eq(translations.sentenceId, id));
+  return `${row?.value ?? "Some"} contributor translation(s) reference this sentence`;
+}
+
+/**
+ * The audit entry deliberately carries no beforeState: there's nothing left
+ * to restore, so the generic undo endpoint correctly refuses this action
+ * with NOT_REVERTIBLE rather than pretending a permanent delete is
+ * reversible.
+ */
+async function logPermanentDelete(request: FastifyRequest, kind: ContentKind, id: string): Promise<void> {
+  await writeAuditLog({
+    actorId: request.user!.id,
+    actorRole: request.user!.role,
+    action: `admin_${kind}_permanent_delete`,
+    resourceType: kind,
+    resourceId: id,
+    afterState: { permanentlyDeleted: true },
+  });
+}
+
+async function runPermanentDelete(request: FastifyRequest, kind: ContentKind, id: string) {
+  const outcome = await permanentlyDeleteContent(kind, id);
+
+  if (!outcome.deleted) {
+    if (outcome.code === "NOT_FOUND") {
+      throw new HttpError(404, "NOT_FOUND", `${CONTENT_LABEL[kind]} not found`);
+    }
+    throw new HttpError(
+      409,
+      "HAS_CONTRIBUTIONS",
+      `${outcome.reason} -- permanently deleting it would destroy contributor recordings. Use the normal delete instead, which hides it from the app while keeping those recordings intact.`,
+    );
+  }
+
+  await logPermanentDelete(request, kind, id);
+  return { id, deleted: true, permanent: true };
+}
+
+async function runBulkPermanentDelete(request: FastifyRequest, kind: ContentKind, ids: string[]) {
+  const deleted: string[] = [];
+  const skipped: { id: string; reason: string }[] = [];
+
+  for (const id of ids) {
+    const outcome = await permanentlyDeleteContent(kind, id);
+    if (outcome.deleted) {
+      deleted.push(id);
+      await logPermanentDelete(request, kind, id);
+    } else {
+      skipped.push({ id, reason: outcome.reason ?? "Could not be deleted" });
+    }
+  }
+
+  return { deleted: deleted.length, skipped };
 }
 
 const MAX_BULK_FILE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -269,12 +468,113 @@ const updateContributionStatusSchema = z.object({
   reason: z.string().optional(),
 });
 
+// Same multi-select CSV convention as the contributions filters, extended
+// across both halves of a user record: the signup form (contributor_demographics)
+// and the activity rollup (user_stats). Every field is optional and an absent
+// one adds no condition, so the unfiltered list behaves exactly as before.
 const usersQuerySchema = z.object({
-  role: z.enum(userRole.enumValues).optional(),
+  role: csvOf(userRole.enumValues),
   search: z.string().optional(),
-  status: z.enum(["active", "restricted", "suspended"]).optional(),
+  status: csvOf(["active", "restricted", "suspended"]),
+  // Signup form fields.
+  gender: csvOf(genderEnum.enumValues),
+  education_level: csvOf(educationLevelEnum.enumValues),
+  tribe_id: csvOfUuid(),
+  sub_tribe_id: csvOfUuid(),
+  village_id: csvOfUuid(),
+  quarter_id: csvOfUuid(),
+  country: z.string().min(1).optional(),
+  city: z.string().min(1).optional(),
+  mother_tongue: z.string().min(1).optional(),
+  profession: z.string().min(1).optional(),
+  min_age: z.coerce.number().int().min(0).optional(),
+  max_age: z.coerce.number().int().min(0).optional(),
+  // Activity / contribution metrics.
+  level: csvOf(contributorLevel.enumValues),
+  min_contributions: z.coerce.number().int().min(0).optional(),
+  max_contributions: z.coerce.number().int().min(0).optional(),
+  min_verified: z.coerce.number().int().min(0).optional(),
+  min_points: z.coerce.number().int().min(0).optional(),
+  max_points: z.coerce.number().int().min(0).optional(),
+  min_reviews: z.coerce.number().int().min(0).optional(),
+  activity: z.enum(["contributed", "never_contributed"]).optional(),
+  joined_from: z.string().datetime().optional(),
+  joined_to: z.string().datetime().optional(),
+  sort: z.enum(["created_desc", "created_asc", "contributions_desc", "points_desc", "name_asc"]).default("created_desc"),
   limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
+});
+
+type UsersQuery = z.infer<typeof usersQuerySchema>;
+
+/** Shared by the list endpoint and the report endpoints so a report over the current filters always covers exactly the rows the table is showing. */
+function buildUserConditions(q: UsersQuery) {
+  const conditions: SQL[] = [isNull(users.deletedAt)];
+  if (q.role?.length) conditions.push(inArray(users.role, q.role));
+  if (q.search) conditions.push(or(ilike(users.displayName, `%${q.search}%`), ilike(users.email, `%${q.search}%`))!);
+
+  if (q.status?.length) {
+    const statusParts: SQL[] = [];
+    if (q.status.includes("suspended")) statusParts.push(eq(users.isSuspended, true));
+    if (q.status.includes("restricted")) statusParts.push(and(eq(users.isRestricted, true), eq(users.isSuspended, false))!);
+    if (q.status.includes("active")) statusParts.push(and(eq(users.isSuspended, false), eq(users.isRestricted, false))!);
+    if (statusParts.length) conditions.push(or(...statusParts)!);
+  }
+
+  if (q.gender?.length) conditions.push(inArray(contributorDemographics.gender, q.gender));
+  if (q.education_level?.length) conditions.push(inArray(contributorDemographics.educationLevel, q.education_level));
+  if (q.tribe_id?.length) conditions.push(inArray(contributorDemographics.tribeId, q.tribe_id));
+  if (q.sub_tribe_id?.length) conditions.push(inArray(contributorDemographics.subTribeId, q.sub_tribe_id));
+  if (q.village_id?.length) conditions.push(inArray(contributorDemographics.villageId, q.village_id));
+  if (q.quarter_id?.length) conditions.push(inArray(contributorDemographics.quarterId, q.quarter_id));
+  if (q.country) conditions.push(ilike(contributorDemographics.country, `%${q.country}%`));
+  if (q.city) conditions.push(ilike(contributorDemographics.city, `%${q.city}%`));
+  if (q.mother_tongue) conditions.push(ilike(contributorDemographics.motherTongue, `%${q.mother_tongue}%`));
+  if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
+  if (q.min_age !== undefined) conditions.push(gte(contributorDemographics.age, q.min_age));
+  if (q.max_age !== undefined) conditions.push(lte(contributorDemographics.age, q.max_age));
+
+  if (q.level?.length) conditions.push(inArray(userStats.level, q.level));
+  // user_stats is LEFT JOINed, so a user who has never contributed has NULL
+  // counters rather than 0. coalesce keeps those rows comparable instead of
+  // silently dropping them out of every numeric filter.
+  if (q.min_contributions !== undefined) conditions.push(sql`coalesce(${userStats.totalContributions}, 0) >= ${q.min_contributions}`);
+  if (q.max_contributions !== undefined) conditions.push(sql`coalesce(${userStats.totalContributions}, 0) <= ${q.max_contributions}`);
+  if (q.min_verified !== undefined) conditions.push(sql`coalesce(${userStats.verifiedContributions}, 0) >= ${q.min_verified}`);
+  if (q.min_points !== undefined) conditions.push(sql`coalesce(${userStats.totalPoints}, 0) >= ${q.min_points}`);
+  if (q.max_points !== undefined) conditions.push(sql`coalesce(${userStats.totalPoints}, 0) <= ${q.max_points}`);
+  if (q.min_reviews !== undefined) conditions.push(sql`coalesce(${userStats.reviewsCompleted}, 0) >= ${q.min_reviews}`);
+  if (q.activity === "contributed") conditions.push(sql`coalesce(${userStats.totalContributions}, 0) > 0`);
+  if (q.activity === "never_contributed") conditions.push(sql`coalesce(${userStats.totalContributions}, 0) = 0`);
+
+  if (q.joined_from) conditions.push(gte(users.createdAt, new Date(q.joined_from)));
+  if (q.joined_to) conditions.push(lte(users.createdAt, new Date(q.joined_to)));
+
+  return and(...conditions)!;
+}
+
+function userSortOrder(sort: UsersQuery["sort"]) {
+  switch (sort) {
+    case "created_asc":
+      return asc(users.createdAt);
+    case "contributions_desc":
+      return sql`coalesce(${userStats.totalContributions}, 0) desc`;
+    case "points_desc":
+      return sql`coalesce(${userStats.totalPoints}, 0) desc`;
+    case "name_asc":
+      return asc(users.displayName);
+    default:
+      return desc(users.createdAt);
+  }
+}
+
+const reportFormatSchema = z.object({ format: z.enum(["csv", "pdf"]).default("csv") });
+// Capped at the list endpoint's own page ceiling: a bulk report is generated
+// from an explicit selection made in the table, so it can never legitimately
+// exceed one full page of results.
+const bulkReportSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1).max(1000),
+  format: z.enum(["csv", "pdf"]).default("csv"),
 });
 
 const suspendUserSchema = z.object({ reason: z.string().min(1) });
@@ -631,6 +931,42 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { deleted: rows.length };
   });
 
+  /* --------------------------- Contribution reviews --------------------------- */
+  // Every peer review left on one contribution, for the admin detail panel:
+  // who reviewed it, what they decided, and any note they left, plus a
+  // tally per decision. audio_files carries denormalized counters for the
+  // same thing, but those are per audio file, not per contribution, and
+  // carry no reviewer identity -- this reads the reviews table directly.
+
+  fastify.get("/admin/contributions/:id/reviews", { preHandler: requirePermission("contributions.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const items = await db
+      .select({
+        id: reviews.id,
+        decision: reviews.decision,
+        reason: reviews.reason,
+        notes: reviews.notes,
+        statusBefore: reviews.statusBefore,
+        statusAfter: reviews.statusAfter,
+        createdAt: reviews.createdAt,
+        reviewerId: users.id,
+        reviewerName: users.displayName,
+        reviewerEmail: users.email,
+      })
+      .from(reviews)
+      .leftJoin(users, eq(users.id, reviews.reviewerId))
+      .where(eq(reviews.contributionId, id))
+      .orderBy(desc(reviews.createdAt));
+
+    const tally = { valid: 0, invalid: 0, cannot_decide: 0, needs_correction: 0 };
+    for (const r of items) {
+      if (r.decision in tally) tally[r.decision as keyof typeof tally] += 1;
+    }
+
+    return { items, tally, total: items.length };
+  });
+
   /* --------------------------- Contribution keywords -------------------------- */
   // ADMIN ONLY: free-text training-data labels for any of the four modules'
   // contributions. Never exposed to contributors.
@@ -852,15 +1188,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   /* ---------------------------------- Users ---------------------------------- */
 
   fastify.get("/admin/users", { preHandler: requirePermission("users.manage") }, async (request) => {
-    const { role, search, status, limit, offset } = usersQuerySchema.parse(request.query);
-
-    const conditions = [isNull(users.deletedAt)];
-    if (role) conditions.push(eq(users.role, role));
-    if (search) conditions.push(or(ilike(users.displayName, `%${search}%`), ilike(users.email, `%${search}%`))!);
-    if (status === "suspended") conditions.push(eq(users.isSuspended, true));
-    if (status === "restricted") conditions.push(and(eq(users.isRestricted, true), eq(users.isSuspended, false))!);
-    if (status === "active") conditions.push(and(eq(users.isSuspended, false), eq(users.isRestricted, false))!);
-    const whereClause = and(...conditions);
+    const query = usersQuerySchema.parse(request.query);
+    const { limit, offset } = query;
+    const whereClause = buildUserConditions(query);
 
     const selection = {
       id: users.id,
@@ -879,6 +1209,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       verifiedContributions: userStats.verifiedContributions,
       totalPoints: userStats.totalPoints,
       level: userStats.level,
+      reviewsCompleted: userStats.reviewsCompleted,
+      gender: contributorDemographics.gender,
+      age: contributorDemographics.age,
+      city: contributorDemographics.city,
+      country: contributorDemographics.country,
+      motherTongue: contributorDemographics.motherTongue,
+      tribeName: tribes.name,
     };
 
     const [items, [totalRow]] = await Promise.all([
@@ -886,11 +1223,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         .select(selection)
         .from(users)
         .leftJoin(userStats, eq(userStats.userId, users.id))
+        .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
+        .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
         .where(whereClause)
-        .orderBy(desc(users.createdAt))
+        .orderBy(userSortOrder(query.sort))
         .limit(limit)
         .offset(offset),
-      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(users).where(whereClause),
+      db
+        .select({ value: sql<number>`count(*)`.mapWith(Number) })
+        .from(users)
+        .leftJoin(userStats, eq(userStats.userId, users.id))
+        .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
+        .where(whereClause),
     ]);
 
     return { items, limit, offset, total: totalRow?.value ?? 0 };
@@ -903,72 +1247,47 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.get("/admin/users/:id", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [row] = await db
-      .select({
-        id: users.id,
-        email: users.email,
-        displayName: users.displayName,
-        role: users.role,
-        avatarUrl: users.avatarUrl,
-        biography: users.biography,
-        isActive: users.isActive,
-        isSuspended: users.isSuspended,
-        suspendedReason: users.suspendedReason,
-        suspendedUntil: users.suspendedUntil,
-        isRestricted: users.isRestricted,
-        restrictedReason: users.restrictedReason,
-        createdAt: users.createdAt,
-        lastSeenAt: users.lastSeenAt,
-        fullName: contributorDemographics.fullName,
-        age: contributorDemographics.age,
-        dateOfBirth: contributorDemographics.dateOfBirth,
-        gender: contributorDemographics.gender,
-        motherTongue: contributorDemographics.motherTongue,
-        country: contributorDemographics.country,
-        city: contributorDemographics.city,
-        dialect: contributorDemographics.dialect,
-        educationLevel: contributorDemographics.educationLevel,
-        profession: contributorDemographics.profession,
-        tribeName: tribes.name,
-        subTribeName: subTribes.name,
-        villageName: villages.name,
-        quarterName: quarters.name,
-        level: userStats.level,
-        totalPoints: userStats.totalPoints,
-        pointsThisWeek: userStats.pointsThisWeek,
-        pointsThisMonth: userStats.pointsThisMonth,
-        totalContributions: userStats.totalContributions,
-        verifiedContributions: userStats.verifiedContributions,
-        pendingContributions: userStats.pendingContributions,
-        rejectedContributions: userStats.rejectedContributions,
-        wordContributions: userStats.wordContributions,
-        audioContributions: userStats.audioContributions,
-        translationContributions: userStats.translationContributions,
-        sceneContributionsCount: userStats.sceneContributionsCount,
-        verifiedWords: userStats.verifiedWords,
-        verifiedAudios: userStats.verifiedAudios,
-        verifiedTranslations: userStats.verifiedTranslations,
-        verifiedScenes: userStats.verifiedScenes,
-        reviewsCompleted: userStats.reviewsCompleted,
-        totalAudioDurationMs: userStats.totalAudioDurationMs,
-        lastContributionAt: userStats.lastContributionAt,
-        lastContributionModule: userStats.lastContributionModule,
-      })
-      .from(users)
-      .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
-      .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
-      .leftJoin(subTribes, eq(subTribes.id, contributorDemographics.subTribeId))
-      .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
-      .leftJoin(quarters, eq(quarters.id, contributorDemographics.quarterId))
-      .leftJoin(userStats, eq(userStats.userId, users.id))
-      .where(and(eq(users.id, id), isNull(users.deletedAt)))
-      .limit(1);
+    const [row] = await userReportQuery(and(eq(users.id, id), isNull(users.deletedAt))!).limit(1);
 
     if (!row) {
       throw new HttpError(404, "NOT_FOUND", "User not found");
     }
 
     return row;
+  });
+
+  /* --------------------------- User reports (CSV/PDF) -------------------------- */
+
+  /** A single user's full record as a downloadable file. */
+  fastify.get("/admin/users/:id/report", { preHandler: requirePermission("users.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { format } = reportFormatSchema.parse(request.query);
+
+    const rows = await fetchUserReportRows([id]);
+    if (rows.length === 0) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+
+    const slug = fileSlug(rows[0]!.fullName ?? rows[0]!.displayName);
+    return sendReport(reply, rows, format, `lexlingo-user-${slug}`, request.user?.email ?? "admin");
+  });
+
+  /** One combined report covering every user selected in the table. */
+  fastify.post("/admin/users/report", { preHandler: requirePermission("users.manage") }, async (request, reply) => {
+    const { ids, format } = bulkReportSchema.parse(request.body);
+
+    const rows = await fetchUserReportRows(ids);
+    if (rows.length === 0) {
+      throw new HttpError(404, "NOT_FOUND", "No matching users found");
+    }
+    // Preserve the order the admin selected in, not the order Postgres
+    // happened to return -- a consolidated report that reshuffles rows is
+    // hard to reconcile against the table it was generated from.
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const ordered = ids.map((id) => byId.get(id)).filter((r): r is NonNullable<typeof r> => Boolean(r));
+
+    const stamp = new Date().toISOString().slice(0, 10);
+    return sendReport(reply, ordered, format, `lexlingo-users-${ordered.length}-${stamp}`, request.user?.email ?? "admin");
   });
 
   fastify.post("/admin/users/:id/restrict", { preHandler: requirePermission("users.manage") }, async (request) => {
@@ -1346,6 +1665,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { id, deleted: true };
   });
 
+  fastify.delete("/admin/concepts/:id/permanent", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    return runPermanentDelete(request, "concept", id);
+  });
+
+  fastify.post("/admin/concepts/bulk-delete-permanent", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+    return runBulkPermanentDelete(request, "concept", ids);
+  });
+
   fastify.post("/admin/concepts/:id/media", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
 
@@ -1509,6 +1838,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { deleted: rows.length };
   });
 
+  fastify.post("/admin/scenes/bulk-delete-permanent", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+    return runBulkPermanentDelete(request, "scene", ids);
+  });
+
   fastify.post("/admin/scenes/bulk-edit", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { ids, ...fields } = bulkEditScenesSchema.parse(request.body);
 
@@ -1554,6 +1888,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return { id, deleted: true };
+  });
+
+  fastify.delete("/admin/scenes/:id/permanent", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    return runPermanentDelete(request, "scene", id);
   });
 
   fastify.post("/admin/scenes/:id/media", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
@@ -1838,6 +2177,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { deleted: rows.length };
   });
 
+  fastify.post("/admin/sentences/bulk-delete-permanent", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+    return runBulkPermanentDelete(request, "sentence", ids);
+  });
+
   fastify.post("/admin/sentences/bulk-edit", { preHandler: requirePermission("sentences.manage") }, async (request) => {
     const { ids, ...fields } = bulkEditSentencesSchema.parse(request.body);
 
@@ -1883,6 +2227,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return { id, deleted: true };
+  });
+
+  fastify.delete("/admin/sentences/:id/permanent", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    return runPermanentDelete(request, "sentence", id);
   });
 
   /* -------------------------------- Analytics -------------------------------- */

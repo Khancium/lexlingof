@@ -7,10 +7,38 @@ import { api, type UserStatsResponse } from "@/lib/api";
 import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
 
 const QUICK_ACTIONS = [
-  { href: "/contribute/concept", title: "Record a Word", color: "border-brand" },
-  { href: "/contribute/audio", title: "Upload Audio", color: "border-accent" },
-  { href: "/contribute/translate", title: "Translate", color: "border-emerald-500" },
-  { href: "/contribute/scene", title: "Describe a Scene", color: "border-amber-500" },
+  {
+    href: "/contribute/concept",
+    title: "Record a Word",
+    icon: "🎙️",
+    color: "border-brand",
+    description: "Pick an everyday object from a category and say its name in your language.",
+    detail: "Up to 3 different words per object, about 5 seconds each. Add spelling and pronunciation if you know them.",
+  },
+  {
+    href: "/contribute/audio",
+    title: "Upload Audio",
+    icon: "📁",
+    color: "border-accent",
+    description: "Share a recording you already have — a conversation, a story, a song.",
+    detail: "Any length. You can add a written transcription and an English translation for extra points.",
+  },
+  {
+    href: "/contribute/translate",
+    title: "Translate",
+    icon: "🌐",
+    color: "border-emerald-500",
+    description: "Read an English sentence and say it aloud in your language.",
+    detail: "Sentences come in groups of 50 so you can track progress. Up to 60 seconds each.",
+  },
+  {
+    href: "/contribute/scene",
+    title: "Describe a Scene",
+    icon: "🖼️",
+    color: "border-amber-500",
+    description: "Look at a picture and describe out loud what is happening in it.",
+    detail: "Speak as long as you like — longer, richer descriptions earn more points.",
+  },
 ];
 
 export default function DashboardPage() {
@@ -70,9 +98,16 @@ export default function DashboardPage() {
             <Link
               key={action.href}
               href={action.href}
-              className={`card-duo rounded-2xl border-l-4 bg-surface p-6 font-semibold text-ink shadow-sm transition hover:bg-surface-card ${action.color}`}
+              className={`card-duo flex flex-col gap-1 rounded-2xl border-l-4 bg-surface p-6 shadow-sm transition hover:bg-surface-card ${action.color}`}
             >
-              {action.title}
+              <span className="flex items-center gap-2 font-semibold text-ink">
+                <span aria-hidden className="text-xl">
+                  {action.icon}
+                </span>
+                {action.title}
+              </span>
+              <span className="text-sm text-ink-muted">{action.description}</span>
+              <span className="text-xs text-ink-muted/80">{action.detail}</span>
             </Link>
           ))}
         </div>

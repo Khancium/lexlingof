@@ -5,6 +5,7 @@ import { api, type ConceptListItem, type Scene, type SceneDifficulty, type Scene
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
+import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 import { AdminCreateCategory } from "@/components/admin-create-category";
@@ -348,6 +349,13 @@ export default function AdminScenesPage() {
     await load();
   }
 
+  async function handleBulkPermanentDelete() {
+    const result = await api.admin.bulkPermanentlyDeleteScenes([...selected]);
+    setSelected(new Set());
+    await load();
+    return result;
+  }
+
   async function handleBulkSetDifficulty() {
     if (!bulkDifficulty) return;
     setIsBulkEditing(true);
@@ -551,7 +559,12 @@ export default function AdminScenesPage() {
         onDone={load}
       />
 
-      <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
+      <AdminBulkBar
+        count={selected.size}
+        onClear={() => setSelected(new Set())}
+        onDelete={handleBulkDelete}
+        onPermanentDelete={handleBulkPermanentDelete}
+      >
         <select
           value={bulkDifficulty}
           onChange={(e) => setBulkDifficulty(e.target.value as SceneDifficulty)}
@@ -635,6 +648,11 @@ export default function AdminScenesPage() {
                   >
                     {deletingId === scene.id ? "Deleting..." : "Delete"}
                   </button>
+                  <AdminPermanentDeleteButton
+                    itemLabel={scene.title}
+                    onDelete={() => api.admin.permanentlyDeleteScene(scene.id)}
+                    onDone={load}
+                  />
                   <AdminUndoButton
                     resourceType="scene"
                     identifier={scene.id}

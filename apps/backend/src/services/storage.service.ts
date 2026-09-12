@@ -312,6 +312,17 @@ class StorageService {
       throw error;
     }
   }
+
+  /** Batched variant of deleteImage -- one storage request for a whole permanent-delete's worth of media, instead of one per file. */
+  async deleteImages(paths: string[]): Promise<void> {
+    if (paths.length === 0) return;
+
+    const { error } = await supabase.storage.from(IMAGE_BUCKET).remove(paths);
+
+    if (error) {
+      throw error;
+    }
+  }
 }
 
 export const storageService = new StorageService();

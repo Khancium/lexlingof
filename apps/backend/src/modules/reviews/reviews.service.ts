@@ -140,22 +140,23 @@ export async function getQueue(reviewerId: string, reviewerRole: Role, moduleTyp
     conditions.push(eq(contributions.moduleType, moduleType));
   }
 
-  // Peer review is scoped to the reviewer's own tribe + city + language --
-  // admins and super_admins are moderators rather than peers, and keep the
-  // old unrestricted queue (mirrors requireReviewerEligibility's
-  // level-gating exemption for those roles).
-  if (reviewerRole === "contributor") {
-    const reviewerScope = await getReviewScope(reviewerId);
-    if (!reviewerScope) {
-      // No tribe/city/language on file -- nothing can match, so there's nothing to review.
-      return [];
-    }
-    conditions.push(
-      eq(contributorDemographics.tribeId, reviewerScope.tribeId),
-      eq(contributorDemographics.city, reviewerScope.city),
-      eq(contributions.languageId, reviewerScope.languageId),
-    );
+  // Peer review is scoped to the reviewer's own tribe + city + language, for
+  // EVERY role including admin/super_admin. An earlier version exempted
+  // admins here (treating them as moderators rather than peers), which is
+  // why a super_admin reviewing their own queue still saw contributions
+  // matching none of their three metrics -- admins moderate through
+  // /admin/contributions, which is the unrestricted surface; this one is
+  // peer review and is scoped for everyone.
+  const reviewerScope = await getReviewScope(reviewerId);
+  if (!reviewerScope) {
+    // No tribe/city/language on file -- nothing can match, so there's nothing to review.
+    return [];
   }
+  conditions.push(
+    eq(contributorDemographics.tribeId, reviewerScope.tribeId),
+    eq(contributorDemographics.city, reviewerScope.city),
+    eq(contributions.languageId, reviewerScope.languageId),
+  );
 
   // One wide left-join across every module's payload table: each row only
   // has non-null values in the columns for its own module_type, since
@@ -291,25 +292,23 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
     throw new HttpError(403, "SELF_REVIEW_FORBIDDEN", "You cannot review your own contributions");
   }
 
-  // 2b. CRITICAL: tribe + city + language guard. The queue already filters
-  // to matches, but that's only a hint -- this is the authoritative check,
-  // since a client could POST any contributionId directly. Admins/
-  // super_admins are moderators, not peers, and are exempt (mirrors the
-  // queue's exemption).
-  if (reviewerRole === "contributor") {
-    const [reviewerScope, submitterScope] = await Promise.all([
-      getReviewScope(reviewerId),
-      getReviewScope(contribution.userId),
-    ]);
-    if (
-      !reviewerScope ||
-      !submitterScope ||
-      reviewerScope.tribeId !== submitterScope.tribeId ||
-      reviewerScope.city !== submitterScope.city ||
-      reviewerScope.languageId !== contribution.languageId
-    ) {
-      throw new HttpError(403, "TRIBE_CITY_MISMATCH", "You can only review contributions from your own tribe, city, and language");
-    }
+  // 2b. CRITICAL: tribe + city + language guard, for every role (see
+  // getQueue's matching comment on why admins are no longer exempt). The
+  // queue already filters to matches, but that's only a hint -- this is the
+  // authoritative check, since a client could POST any contributionId
+  // directly.
+  const [reviewerScope, submitterScope] = await Promise.all([
+    getReviewScope(reviewerId),
+    getReviewScope(contribution.userId),
+  ]);
+  if (
+    !reviewerScope ||
+    !submitterScope ||
+    reviewerScope.tribeId !== submitterScope.tribeId ||
+    reviewerScope.city !== submitterScope.city ||
+    reviewerScope.languageId !== contribution.languageId
+  ) {
+    throw new HttpError(403, "TRIBE_CITY_MISMATCH", "You can only review contributions from your own tribe, city, and language");
   }
 
   // 3. Must still be pending.

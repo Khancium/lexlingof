@@ -5,6 +5,7 @@ import { api, type Category, type ConceptListItem } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
+import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 import { AdminCreateCategory } from "@/components/admin-create-category";
@@ -184,6 +185,13 @@ export default function AdminConceptsPage() {
     await load();
   }
 
+  async function handleBulkPermanentDelete() {
+    const result = await api.admin.bulkPermanentlyDeleteConcepts([...selected]);
+    setSelected(new Set());
+    await load();
+    return result;
+  }
+
   async function handleBulkMoveCategory() {
     if (!bulkCategoryId) return;
     setIsBulkEditing(true);
@@ -255,7 +263,12 @@ export default function AdminConceptsPage() {
         onDone={load}
       />
 
-      <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
+      <AdminBulkBar
+        count={selected.size}
+        onClear={() => setSelected(new Set())}
+        onDelete={handleBulkDelete}
+        onPermanentDelete={handleBulkPermanentDelete}
+      >
         <select
           value={bulkCategoryId}
           onChange={(e) => setBulkCategoryId(e.target.value)}
@@ -425,6 +438,11 @@ export default function AdminConceptsPage() {
                         >
                           {deletingId === concept.id ? "Deleting..." : "Delete"}
                         </button>
+                        <AdminPermanentDeleteButton
+                          itemLabel={concept.labelEnglish}
+                          onDelete={() => api.admin.permanentlyDeleteConcept(concept.id)}
+                          onDone={load}
+                        />
                         <AdminUndoButton
                           resourceType="concept"
                           identifier={concept.id}

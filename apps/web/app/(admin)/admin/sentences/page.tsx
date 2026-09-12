@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type AdminSentence, type Category } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
+import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
@@ -100,6 +101,13 @@ export default function AdminSentencesPage() {
     await load();
   }
 
+  async function handleBulkPermanentDelete() {
+    const result = await api.admin.bulkPermanentlyDeleteSentences([...selected]);
+    setSelected(new Set());
+    await load();
+    return result;
+  }
+
   async function handleBulkMoveCategory() {
     if (!bulkCategoryId) return;
     setIsBulkEditing(true);
@@ -151,7 +159,12 @@ export default function AdminSentencesPage() {
 
       <AdminBulkUpload label="Bulk Upload Sentences" onUpload={(file) => api.admin.bulkUploadSentences(file)} onDone={load} />
 
-      <AdminBulkBar count={selected.size} onClear={() => setSelected(new Set())} onDelete={handleBulkDelete}>
+      <AdminBulkBar
+        count={selected.size}
+        onClear={() => setSelected(new Set())}
+        onDelete={handleBulkDelete}
+        onPermanentDelete={handleBulkPermanentDelete}
+      >
         <select
           value={bulkCategoryId}
           onChange={(e) => setBulkCategoryId(e.target.value)}
@@ -211,6 +224,11 @@ export default function AdminSentencesPage() {
                       >
                         {deletingId === sentence.id ? "Deleting..." : "Delete"}
                       </button>
+                      <AdminPermanentDeleteButton
+                        itemLabel={sentence.englishText}
+                        onDelete={() => api.admin.permanentlyDeleteSentence(sentence.id)}
+                        onDone={load}
+                      />
                       <AdminUndoButton
                         resourceType="sentence"
                         identifier={sentence.id}
