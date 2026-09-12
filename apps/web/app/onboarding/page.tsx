@@ -13,6 +13,7 @@ import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS, MOTHER_TONGUE_LANGUAGES } from
 const today = new Date();
 const maxDateOfBirth = today.toISOString().slice(0, 10);
 const minDateOfBirth = new Date(today.getFullYear() - 120, today.getMonth(), today.getDate()).toISOString().slice(0, 10);
+const MINIMUM_SIGNUP_AGE = 14;
 
 function ageFromDateOfBirth(dateOfBirth: string): number {
   const dob = new Date(dateOfBirth);
@@ -28,7 +29,11 @@ const schema = z.object({
   dateOfBirth: z
     .string()
     .min(1, "Date of birth is required")
-    .refine((v) => ageFromDateOfBirth(v) >= 1 && ageFromDateOfBirth(v) <= 120, "Please enter a valid date of birth"),
+    .refine((v) => ageFromDateOfBirth(v) <= 120, "Please enter a valid date of birth")
+    .refine(
+      (v) => ageFromDateOfBirth(v) >= MINIMUM_SIGNUP_AGE,
+      `You can't sign up yet -- the minimum age to register is ${MINIMUM_SIGNUP_AGE} years`,
+    ),
   gender: z.enum(["male", "female", "other", "prefer_not_to_say"], "Gender is required"),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES, "Language is required"),
   tribe: z.string().min(1, "Tribe is required"),
@@ -70,6 +75,10 @@ export default function OnboardingPage() {
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: { fullName: user?.displayName ?? "" },
+    // Live validation -- specifically so the minimum-age message on date of
+    // birth appears the moment it's picked, not only after Submit is
+    // clicked once.
+    mode: "onChange",
   });
 
   const tribe = watch("tribe");

@@ -15,12 +15,36 @@ const TABS: { label: string; value: ModuleType | undefined }[] = [
   { label: "SCENE", value: "SCENE" },
 ];
 
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+
 export default function ReviewPage() {
   const user = useAuthStore((state) => state.user);
   const levelThresholds = useLevelThresholds();
   const [filter, setFilter] = useState<ModuleType | undefined>(undefined);
   const [items, setItems] = useState<ReviewQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // A single shared, hidden <audio> element for the whole queue -- same
+  // pattern as My Contributions -- so play/pause/stop are instant direct
+  // calls on one persistent element instead of the previous per-card
+  // <audio> that only mounted (and only got a real ref) after the first
+  // Play click, which is exactly why that click loaded the audio but never
+  // actually started it: .play() ran before the just-mounted element had
+  // finished attaching its ref, so only the *second* click (by then already
+  // mounted) worked.
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const [playUrlCache, setPlayUrlCache] = useState<Record<string, string>>({});
+  const [playError, setPlayError] = useState<{ id: string; message: string } | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
 
   const load = useCallback(async (moduleType: ModuleType | undefined) => {
     setLoading(true);
@@ -37,6 +61,78 @@ export default function ReviewPage() {
 
   function handleReviewed(contributionId: string) {
     setItems((prev) => prev.filter((i) => i.contributionId !== contributionId));
+    if (loadedId === contributionId) {
+      audioRef.current?.pause();
+      setLoadedId(null);
+      setPlayingId(null);
+      setCurrentTime(0);
+    }
+  }
+
+  async function togglePlay(item: ReviewQueueItem) {
+    const audioEl = audioRef.current;
+    const audioFileId = item.detail.audioFileId as string | undefined;
+    if (!audioEl || !audioFileId) return;
+
+    if (playingId === item.contributionId) {
+      audioEl.pause();
+      setPlayingId(null);
+      return;
+    }
+
+    // Already loaded (just paused) -- resume in place rather than
+    // reassigning .src, which would reload the media and jump back to 0.
+    if (loadedId === item.contributionId) {
+      setPlayingId(item.contributionId);
+      audioEl.play().catch(() => {});
+      return;
+    }
+
+    setPlayError(null);
+    setCurrentTime(0);
+    setDuration(0);
+
+    const cachedUrl = playUrlCache[item.contributionId];
+    if (cachedUrl) {
+      audioEl.src = cachedUrl;
+      setLoadedId(item.contributionId);
+      setPlayingId(item.contributionId);
+      audioEl.play().catch(() => {});
+      return;
+    }
+
+    setLoadingAudioId(item.contributionId);
+    try {
+      const { url } = await api.audio.getPlayUrl(audioFileId);
+      setPlayUrlCache((prev) => ({ ...prev, [item.contributionId]: url }));
+      audioEl.src = url;
+      setLoadedId(item.contributionId);
+      setPlayingId(item.contributionId);
+      await audioEl.play();
+    } catch (err) {
+      setPlayError({ id: item.contributionId, message: getErrorMessage(err, "Failed to load audio") });
+    } finally {
+      setLoadingAudioId(null);
+    }
+  }
+
+  function stopPlayback(item: ReviewQueueItem) {
+    const audioEl = audioRef.current;
+    if (!audioEl || loadedId !== item.contributionId) return;
+    audioEl.pause();
+    audioEl.currentTime = 0;
+    setPlayingId(null);
+    setLoadedId(null);
+    setCurrentTime(0);
+  }
+
+  function seek(e: React.MouseEvent<HTMLDivElement>) {
+    const audioEl = audioRef.current;
+    if (!audioEl || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    audioEl.currentTime = fraction * duration;
+    setCurrentTime(fraction * duration);
   }
 
   if (!canReview(user?.level)) {
@@ -60,6 +156,22 @@ export default function ReviewPage() {
 
   return (
     <div className="space-y-6">
+      {/* Hidden -- playback driven entirely by the Play/Pause/Stop buttons
+         below, never the browser's native controls. onPause is deliberately
+         not wired to clear playingId: swapping .src on this same element to
+         switch tracks fires a pause event first, which would otherwise race
+         the very setPlayingId(item.contributionId) that follows it. */}
+      <audio
+        ref={audioRef}
+        onEnded={() => {
+          setPlayingId(null);
+          setCurrentTime(0);
+        }}
+        onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+        onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+        className="hidden"
+      />
+
       <h1 className="text-2xl font-bold text-ink">Review Queue</h1>
 
       <div className="flex flex-wrap gap-2">
@@ -83,7 +195,20 @@ export default function ReviewPage() {
       ) : (
         <div className="space-y-4">
           {items.map((item) => (
-            <ReviewCard key={item.contributionId} item={item} onReviewed={handleReviewed} />
+            <ReviewCard
+              key={item.contributionId}
+              item={item}
+              onReviewed={handleReviewed}
+              isLoadingAudio={loadingAudioId === item.contributionId}
+              isLoaded={loadedId === item.contributionId}
+              isPlaying={playingId === item.contributionId}
+              currentTime={loadedId === item.contributionId ? currentTime : 0}
+              duration={loadedId === item.contributionId ? duration : 0}
+              playError={playError?.id === item.contributionId ? playError.message : null}
+              onTogglePlay={() => togglePlay(item)}
+              onStop={() => stopPlayback(item)}
+              onSeek={seek}
+            />
           ))}
         </div>
       )}
@@ -91,38 +216,34 @@ export default function ReviewPage() {
   );
 }
 
-function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (contributionId: string) => void }) {
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [isLoadingAudio, setIsLoadingAudio] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const audioRef = useRef<HTMLAudioElement>(null);
-
+function ReviewCard({
+  item,
+  onReviewed,
+  isLoadingAudio,
+  isLoaded,
+  isPlaying,
+  currentTime,
+  duration,
+  playError,
+  onTogglePlay,
+  onStop,
+  onSeek,
+}: {
+  item: ReviewQueueItem;
+  onReviewed: (contributionId: string) => void;
+  isLoadingAudio: boolean;
+  isLoaded: boolean;
+  isPlaying: boolean;
+  currentTime: number;
+  duration: number;
+  playError: string | null;
+  onTogglePlay: () => void;
+  onStop: () => void;
+  onSeek: (e: React.MouseEvent<HTMLDivElement>) => void;
+}) {
   const [notes, setNotes] = useState("");
   const [pendingDecision, setPendingDecision] = useState<ReviewDecision | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  async function togglePlay() {
-    if (!item.detail.audioFileId) return;
-    setError(null);
-    if (!audioUrl) {
-      setIsLoadingAudio(true);
-      try {
-        const { url } = await api.audio.getPlayUrl(item.detail.audioFileId);
-        setAudioUrl(url);
-        setTimeout(() => audioRef.current?.play(), 0);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load audio");
-      } finally {
-        setIsLoadingAudio(false);
-      }
-      return;
-    }
-    if (isPlaying) {
-      audioRef.current?.pause();
-    } else {
-      audioRef.current?.play();
-    }
-  }
 
   async function submitDecision(decision: ReviewDecision) {
     setPendingDecision(decision);
@@ -191,24 +312,37 @@ function ReviewCard({ item, onReviewed }: { item: ReviewQueueItem; onReviewed: (
         </div>
       ) : null}
 
-      <div className="flex items-center gap-3 rounded-xl bg-surface-card p-3">
-        <button
-          onClick={togglePlay}
-          disabled={!item.detail.audioFileId || isLoadingAudio}
-          className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
-        >
-          {isLoadingAudio ? "Loading..." : isPlaying ? "Pause" : "Play"}
-        </button>
-        {!item.detail.audioFileId ? <span className="text-xs text-ink-muted">No audio for this submission</span> : null}
-        {audioUrl ? (
-          <audio
-            ref={audioRef}
-            src={audioUrl}
-            onPlay={() => setIsPlaying(true)}
-            onPause={() => setIsPlaying(false)}
-            onEnded={() => setIsPlaying(false)}
-            className="hidden"
-          />
+      <div className="space-y-2 rounded-xl bg-surface-card p-3">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onTogglePlay}
+            disabled={!item.detail.audioFileId || isLoadingAudio}
+            className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+          >
+            {isLoadingAudio ? "Loading..." : isPlaying ? "⏸ Pause" : "▶ Play"}
+          </button>
+          {isLoaded ? (
+            <button
+              onClick={onStop}
+              className="btn-duo btn-duo-secondary bg-surface px-3 py-2 text-sm font-semibold text-ink hover:bg-border"
+            >
+              ■ Stop
+            </button>
+          ) : null}
+          {!item.detail.audioFileId ? <span className="text-xs text-ink-muted">No audio for this submission</span> : null}
+        </div>
+        {playError ? <p className="text-xs text-red-600">{playError}</p> : null}
+        {isLoaded ? (
+          <div className="flex items-center gap-2">
+            <span className="w-9 flex-shrink-0 text-xs tabular-nums text-ink-muted">{formatTime(currentTime)}</span>
+            <div onClick={onSeek} className="h-1.5 flex-1 cursor-pointer rounded-full bg-surface">
+              <div
+                className="h-full rounded-full bg-brand"
+                style={{ width: `${duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0}%` }}
+              />
+            </div>
+            <span className="w-9 flex-shrink-0 text-xs tabular-nums text-ink-muted">{formatTime(duration)}</span>
+          </div>
         ) : null}
       </div>
 

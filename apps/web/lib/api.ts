@@ -702,6 +702,59 @@ export type AdminUser = {
 
 export type AdminUsersResponse = { items: AdminUser[]; limit: number; offset: number; total: number };
 
+export type AdminUserDetail = {
+  id: string;
+  email: string;
+  displayName: string;
+  role: string;
+  avatarUrl: string | null;
+  biography: string | null;
+  isActive: boolean;
+  isSuspended: boolean;
+  suspendedReason: string | null;
+  suspendedUntil: string | null;
+  isRestricted: boolean;
+  restrictedReason: string | null;
+  createdAt: string;
+  lastSeenAt: string | null;
+  // Signup form (contributor_demographics) -- null if onboarding was never completed.
+  fullName: string | null;
+  age: number | null;
+  dateOfBirth: string | null;
+  gender: GenderOption | null;
+  motherTongue: string | null;
+  country: string | null;
+  city: string | null;
+  dialect: string | null;
+  educationLevel: EducationLevel | null;
+  profession: string | null;
+  tribeName: string | null;
+  subTribeName: string | null;
+  villageName: string | null;
+  quarterName: string | null;
+  // Activity summary (user_stats).
+  level: ContributorLevel | null;
+  totalPoints: number | null;
+  pointsThisWeek: number | null;
+  pointsThisMonth: number | null;
+  totalContributions: number | null;
+  verifiedContributions: number | null;
+  pendingContributions: number | null;
+  rejectedContributions: number | null;
+  wordContributions: number | null;
+  audioContributions: number | null;
+  translationContributions: number | null;
+  sceneContributionsCount: number | null;
+  verifiedWords: number | null;
+  verifiedAudios: number | null;
+  verifiedTranslations: number | null;
+  verifiedScenes: number | null;
+  reviewsCompleted: number | null;
+  totalAudioDurationMs: number | null;
+  lastContributionAt: string | null;
+  lastContributionModule: ModuleType | null;
+};
+
 export type AdminSuggestion = {
   id: string;
   message: string;
@@ -1058,6 +1111,7 @@ export const api = {
 
     getUsers: (params?: { role?: string; search?: string; status?: "active" | "restricted" | "suspended"; limit?: number; offset?: number }) =>
       apiClient.get<AdminUsersResponse>("/api/v1/admin/users", { params }).then((r) => r.data),
+    getUserDetail: (id: string) => apiClient.get<AdminUserDetail>(`/api/v1/admin/users/${id}`).then((r) => r.data),
     restrictUser: (id: string, reason: string) =>
       apiClient.post<{ id: string; isRestricted: boolean }>(`/api/v1/admin/users/${id}/restrict`, { reason }).then((r) => r.data),
     unrestrictUser: (id: string) =>
@@ -1087,6 +1141,8 @@ export const api = {
     // public GET /concepts and GET /scenes routes have no auth requirement
     // and return everything needed, so admin pages reuse api.concepts.getAll
     // / api.scenes.getAll directly instead of duplicating them here.
+    createCategory: (data: { nameEnglish: string; icon?: string; sortOrder?: number }) =>
+      apiClient.post<Category>("/api/v1/admin/categories", data).then((r) => r.data),
     createConcept: (data: AdminConceptInput) => apiClient.post<ConceptDetail>("/api/v1/admin/concepts", data).then((r) => r.data),
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>
       apiClient.put<ConceptDetail>(`/api/v1/admin/concepts/${id}`, data).then((r) => r.data),

@@ -126,6 +126,8 @@ async function getOrCreateQuarter(villageId: string, name: string): Promise<stri
   return row.id;
 }
 
+const MINIMUM_SIGNUP_AGE = 14;
+
 /** Age in whole years as of today, from a YYYY-MM-DD date of birth. */
 function calculateAge(dateOfBirth: string): number {
   const dob = new Date(dateOfBirth);
@@ -194,7 +196,8 @@ const submitDemographicsSchema = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, "dateOfBirth must be YYYY-MM-DD")
     .refine((v) => !Number.isNaN(new Date(v).getTime()), "Invalid date of birth")
-    .refine((v) => calculateAge(v) >= 1 && calculateAge(v) <= 120, "Age must be between 1 and 120"),
+    .refine((v) => calculateAge(v) <= 120, "Age must be 120 or under")
+    .refine((v) => calculateAge(v) >= MINIMUM_SIGNUP_AGE, `You must be at least ${MINIMUM_SIGNUP_AGE} years old to register`),
   gender: z.enum(GENDER_OPTIONS),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES),
   tribe: z.string().trim().min(1),

@@ -9,6 +9,7 @@ import {
   contributionModule,
   contributions,
   contributorDemographics,
+  contributorProfiles,
   gamificationConfig,
   languages,
   pointsTransactions,
@@ -98,14 +99,27 @@ async function resolveAudioFileId(
   }
 }
 
-async function getDemographics(userId: string): Promise<{ tribeId: string; city: string } | null> {
+/**
+ * Peer review is scoped to tribe + city + language -- all three, per spec.
+ * A prior version of this only matched tribe + city, which is how Seraiki
+ * contributions could still show up in a Pashto reviewer's queue: two
+ * contributors from the very same tribe and city can still be recording in
+ * different languages, and nothing was excluding those.
+ */
+async function getReviewScope(userId: string): Promise<{ tribeId: string; city: string; languageId: string } | null> {
   const [row] = await db
-    .select({ tribeId: contributorDemographics.tribeId, city: contributorDemographics.city })
+    .select({
+      tribeId: contributorDemographics.tribeId,
+      city: contributorDemographics.city,
+      languageId: contributorProfiles.primaryLanguageId,
+    })
     .from(contributorDemographics)
+    .leftJoin(contributorProfiles, eq(contributorProfiles.userId, contributorDemographics.userId))
     .where(eq(contributorDemographics.userId, userId))
     .limit(1);
 
-  return row ?? null;
+  if (!row || !row.languageId) return null;
+  return { tribeId: row.tribeId, city: row.city, languageId: row.languageId };
 }
 
 export async function getQueue(reviewerId: string, reviewerRole: Role, moduleType?: Module) {
@@ -126,19 +140,20 @@ export async function getQueue(reviewerId: string, reviewerRole: Role, moduleTyp
     conditions.push(eq(contributions.moduleType, moduleType));
   }
 
-  // Peer review is scoped to the reviewer's own tribe + city -- admins and
-  // super_admins are moderators rather than peers, and keep the old
-  // unrestricted queue (mirrors requireReviewerEligibility's level-gating
-  // exemption for those roles).
+  // Peer review is scoped to the reviewer's own tribe + city + language --
+  // admins and super_admins are moderators rather than peers, and keep the
+  // old unrestricted queue (mirrors requireReviewerEligibility's
+  // level-gating exemption for those roles).
   if (reviewerRole === "contributor") {
-    const reviewerDemo = await getDemographics(reviewerId);
-    if (!reviewerDemo) {
-      // No tribe/city on file -- nothing can match, so there's nothing to review.
+    const reviewerScope = await getReviewScope(reviewerId);
+    if (!reviewerScope) {
+      // No tribe/city/language on file -- nothing can match, so there's nothing to review.
       return [];
     }
     conditions.push(
-      eq(contributorDemographics.tribeId, reviewerDemo.tribeId),
-      eq(contributorDemographics.city, reviewerDemo.city),
+      eq(contributorDemographics.tribeId, reviewerScope.tribeId),
+      eq(contributorDemographics.city, reviewerScope.city),
+      eq(contributions.languageId, reviewerScope.languageId),
     );
   }
 
@@ -257,6 +272,7 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
       userId: contributions.userId,
       status: contributions.status,
       moduleType: contributions.moduleType,
+      languageId: contributions.languageId,
       wordRecordingId: contributions.wordRecordingId,
       audioUploadId: contributions.audioUploadId,
       translationId: contributions.translationId,
@@ -275,22 +291,24 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
     throw new HttpError(403, "SELF_REVIEW_FORBIDDEN", "You cannot review your own contributions");
   }
 
-  // 2b. CRITICAL: tribe + city guard. The queue already filters to matches,
-  // but that's only a hint -- this is the authoritative check, since a
-  // client could POST any contributionId directly. Admins/super_admins are
-  // moderators, not peers, and are exempt (mirrors the queue's exemption).
+  // 2b. CRITICAL: tribe + city + language guard. The queue already filters
+  // to matches, but that's only a hint -- this is the authoritative check,
+  // since a client could POST any contributionId directly. Admins/
+  // super_admins are moderators, not peers, and are exempt (mirrors the
+  // queue's exemption).
   if (reviewerRole === "contributor") {
-    const [reviewerDemo, submitterDemo] = await Promise.all([
-      getDemographics(reviewerId),
-      getDemographics(contribution.userId),
+    const [reviewerScope, submitterScope] = await Promise.all([
+      getReviewScope(reviewerId),
+      getReviewScope(contribution.userId),
     ]);
     if (
-      !reviewerDemo ||
-      !submitterDemo ||
-      reviewerDemo.tribeId !== submitterDemo.tribeId ||
-      reviewerDemo.city !== submitterDemo.city
+      !reviewerScope ||
+      !submitterScope ||
+      reviewerScope.tribeId !== submitterScope.tribeId ||
+      reviewerScope.city !== submitterScope.city ||
+      reviewerScope.languageId !== contribution.languageId
     ) {
-      throw new HttpError(403, "TRIBE_CITY_MISMATCH", "You can only review contributions from your own tribe and city");
+      throw new HttpError(403, "TRIBE_CITY_MISMATCH", "You can only review contributions from your own tribe, city, and language");
     }
   }
 

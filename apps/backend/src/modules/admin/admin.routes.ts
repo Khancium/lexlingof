@@ -281,6 +281,12 @@ const suspendUserSchema = z.object({ reason: z.string().min(1) });
 const cooloffUserSchema = z.object({ reason: z.string().min(1), days: z.coerce.number().int().min(1).max(365) });
 const restrictUserSchema = z.object({ reason: z.string().min(1) });
 
+const createCategorySchema = z.object({
+  nameEnglish: z.string().trim().min(1),
+  icon: z.string().trim().min(1).optional(),
+  sortOrder: z.number().int().optional(),
+});
+
 const createConceptSchema = z.object({
   categoryId: z.string().uuid(),
   labelEnglish: z.string().min(1),
@@ -890,6 +896,81 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { items, limit, offset, total: totalRow?.value ?? 0 };
   });
 
+  // Everything filled in at signup (contributor_demographics) plus a
+  // crude activity summary (user_stats) for the admin "Details" view --
+  // the list endpoint above only carries the handful of columns the table
+  // needs, not the full onboarding form or activity breakdown.
+  fastify.get("/admin/users/:id", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [row] = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        role: users.role,
+        avatarUrl: users.avatarUrl,
+        biography: users.biography,
+        isActive: users.isActive,
+        isSuspended: users.isSuspended,
+        suspendedReason: users.suspendedReason,
+        suspendedUntil: users.suspendedUntil,
+        isRestricted: users.isRestricted,
+        restrictedReason: users.restrictedReason,
+        createdAt: users.createdAt,
+        lastSeenAt: users.lastSeenAt,
+        fullName: contributorDemographics.fullName,
+        age: contributorDemographics.age,
+        dateOfBirth: contributorDemographics.dateOfBirth,
+        gender: contributorDemographics.gender,
+        motherTongue: contributorDemographics.motherTongue,
+        country: contributorDemographics.country,
+        city: contributorDemographics.city,
+        dialect: contributorDemographics.dialect,
+        educationLevel: contributorDemographics.educationLevel,
+        profession: contributorDemographics.profession,
+        tribeName: tribes.name,
+        subTribeName: subTribes.name,
+        villageName: villages.name,
+        quarterName: quarters.name,
+        level: userStats.level,
+        totalPoints: userStats.totalPoints,
+        pointsThisWeek: userStats.pointsThisWeek,
+        pointsThisMonth: userStats.pointsThisMonth,
+        totalContributions: userStats.totalContributions,
+        verifiedContributions: userStats.verifiedContributions,
+        pendingContributions: userStats.pendingContributions,
+        rejectedContributions: userStats.rejectedContributions,
+        wordContributions: userStats.wordContributions,
+        audioContributions: userStats.audioContributions,
+        translationContributions: userStats.translationContributions,
+        sceneContributionsCount: userStats.sceneContributionsCount,
+        verifiedWords: userStats.verifiedWords,
+        verifiedAudios: userStats.verifiedAudios,
+        verifiedTranslations: userStats.verifiedTranslations,
+        verifiedScenes: userStats.verifiedScenes,
+        reviewsCompleted: userStats.reviewsCompleted,
+        totalAudioDurationMs: userStats.totalAudioDurationMs,
+        lastContributionAt: userStats.lastContributionAt,
+        lastContributionModule: userStats.lastContributionModule,
+      })
+      .from(users)
+      .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
+      .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+      .leftJoin(subTribes, eq(subTribes.id, contributorDemographics.subTribeId))
+      .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+      .leftJoin(quarters, eq(quarters.id, contributorDemographics.quarterId))
+      .leftJoin(userStats, eq(userStats.userId, users.id))
+      .where(and(eq(users.id, id), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!row) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+
+    return row;
+  });
+
   fastify.post("/admin/users/:id/restrict", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const body = restrictUserSchema.parse(request.body);
@@ -1052,6 +1133,43 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     return { id, deleted: true };
   });
+
+  /* ------------------------------ Categories ------------------------------- */
+  // No creation route existed at all before this -- every category in the
+  // corpus came from the initial seed script, so an admin could never add
+  // one on their own, not even an empty one to organize future concepts
+  // into. Deliberately just a category by itself: nothing here requires or
+  // creates a concept alongside it.
+
+  fastify.post(
+    "/admin/categories",
+    { preHandler: requirePermission("concepts.manage") },
+    async (request, reply) => {
+      const body = createCategorySchema.parse(request.body);
+      const slug = slugify(body.nameEnglish);
+
+      const [existing] = await db.select({ id: categories.id }).from(categories).where(eq(categories.slug, slug)).limit(1);
+      if (existing) {
+        throw new HttpError(409, "ALREADY_EXISTS", `A category with slug "${slug}" already exists`);
+      }
+
+      const [category] = await db
+        .insert(categories)
+        .values({ slug, nameEnglish: body.nameEnglish, icon: body.icon ?? null, sortOrder: body.sortOrder ?? 0 })
+        .returning();
+
+      await writeAuditLog({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_category_create",
+        resourceType: "category",
+        resourceId: category!.id,
+        afterState: { nameEnglish: body.nameEnglish, slug },
+      });
+
+      reply.code(201).send(category);
+    },
+  );
 
   /* ------------------------------- Concepts ------------------------------- */
 

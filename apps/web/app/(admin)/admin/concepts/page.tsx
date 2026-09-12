@@ -7,6 +7,7 @@ import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-uploa
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+import { AdminCreateCategory } from "@/components/admin-create-category";
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -237,6 +238,8 @@ export default function AdminConceptsPage() {
         </div>
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
       </div>
+
+      <AdminCreateCategory onCreated={(c) => setCategories((prev) => [...prev, c])} />
 
       <AdminBulkUpload
         label="Bulk Upload Concepts"

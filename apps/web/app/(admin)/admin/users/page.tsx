@@ -5,6 +5,8 @@ import { api, type AdminUser } from "@/lib/api";
 import { LEVEL_COLOR } from "@/lib/level";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+import { AdminUserActionModal } from "@/components/admin-user-action-modal";
+import { AdminUserDetailsModal } from "@/components/admin-user-details-modal";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -34,6 +36,8 @@ export default function AdminUsersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionUser, setActionUser] = useState<AdminUser | null>(null);
+  const [detailsUserId, setDetailsUserId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -58,20 +62,6 @@ export default function AdminUsersPage() {
     return () => clearTimeout(timeout);
   }, [load]);
 
-  async function handleRestrict(u: AdminUser) {
-    const reason = window.prompt(`Reason for restricting ${u.displayName}? (blocks new contribution submissions, they can still log in)`);
-    if (!reason) return;
-    setBusyId(u.id);
-    try {
-      await api.admin.restrictUser(u.id, reason);
-      load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to restrict user");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   async function handleUnrestrict(u: AdminUser) {
     setBusyId(u.id);
     try {
@@ -79,27 +69,6 @@ export default function AdminUsersPage() {
       load();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to unrestrict user");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function handleCooloff(u: AdminUser) {
-    const daysStr = window.prompt(`Cool-off ${u.displayName} for how many days? (blocks login entirely for this long)`, "7");
-    if (!daysStr) return;
-    const days = Number(daysStr);
-    if (!Number.isFinite(days) || days < 1) {
-      alert("Enter a whole number of days (1 or more).");
-      return;
-    }
-    const reason = window.prompt("Reason for the cool-off?");
-    if (!reason) return;
-    setBusyId(u.id);
-    try {
-      await api.admin.cooloffUser(u.id, reason, Math.round(days));
-      load();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to apply cool-off");
     } finally {
       setBusyId(null);
     }
@@ -219,6 +188,12 @@ export default function AdminUsersPage() {
                     <td className="px-4 py-3 text-ink-muted">{new Date(u.createdAt).toLocaleDateString()}</td>
                     <td className="px-4 py-3">
                       <div className="flex flex-wrap gap-1.5">
+                        <button
+                          onClick={() => setDetailsUserId(u.id)}
+                          className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border"
+                        >
+                          Details
+                        </button>
                         {u.isSuspended ? (
                           <button
                             onClick={() => handleUnsuspend(u)}
@@ -229,11 +204,11 @@ export default function AdminUsersPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => handleCooloff(u)}
+                            onClick={() => setActionUser(u)}
                             disabled={isBusy}
                             className="rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white hover:bg-amber-400 disabled:opacity-50"
                           >
-                            Cool-off
+                            Restrict / Cool-off
                           </button>
                         )}
                         {u.isRestricted ? (
@@ -244,15 +219,7 @@ export default function AdminUsersPage() {
                           >
                             Unrestrict
                           </button>
-                        ) : (
-                          <button
-                            onClick={() => handleRestrict(u)}
-                            disabled={isBusy || u.isSuspended}
-                            className="rounded-full bg-orange-500 px-3 py-1 text-xs font-semibold text-white hover:bg-orange-400 disabled:opacity-50"
-                          >
-                            Restrict
-                          </button>
-                        )}
+                        ) : null}
                         {u.role !== "super_admin" ? (
                           <button
                             onClick={() => handleBan(u)}
@@ -279,6 +246,13 @@ export default function AdminUsersPage() {
       )}
 
       {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
+
+      {actionUser ? (
+        <AdminUserActionModal user={actionUser} onClose={() => setActionUser(null)} onDone={load} />
+      ) : null}
+      {detailsUserId ? (
+        <AdminUserDetailsModal userId={detailsUserId} onClose={() => setDetailsUserId(null)} />
+      ) : null}
     </div>
   );
 }

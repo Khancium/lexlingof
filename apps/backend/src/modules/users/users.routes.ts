@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, count, desc, eq, inArray, isNull } from "drizzle-orm";
+import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -283,7 +283,30 @@ export default async function usersRoutes(fastify: FastifyInstance) {
           id: contributions.id,
           moduleType: contributions.moduleType,
           status: contributions.status,
-          totalPoints: contributions.totalPoints,
+          // contributions.total_points is a generated column (base_points +
+          // bonus_points), but nothing ever populates those two columns at
+          // submission time -- every module's actual point-awarding logic
+          // writes to points_transactions instead, so that column has
+          // always just been a hardcoded 0. Summing the real transactions
+          // for this contribution (scoped to this contributor, so a
+          // reviewer's own REVIEW_COMPLETED award on it isn't mixed in) is
+          // what actually reflects points earned.
+          //
+          // The subquery below deliberately spells out plain, literal
+          // "points_transactions"/"contributions" table-qualified SQL text
+          // rather than interpolating ${contributions.id} /
+          // ${contributions.userId} -- drizzle renders those as bare
+          // (unqualified) column names, and points_transactions happens to
+          // have its own "id" column too, so an unqualified "id" inside
+          // this subquery silently resolved to points_transactions.id
+          // instead of the outer contributions.id, comparing a row against
+          // itself and always summing to 0.
+          totalPoints: sql<number>`(
+            select coalesce(sum(pt.points), 0)
+            from points_transactions pt
+            where pt.contribution_id = contributions.id
+              and pt.user_id = contributions.user_id
+          )`.mapWith(Number),
           submittedAt: contributions.submittedAt,
           verifiedAt: contributions.verifiedAt,
           wordRecordingId: contributions.wordRecordingId,
