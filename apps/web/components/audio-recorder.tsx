@@ -115,6 +115,11 @@ export default function AudioRecorder({ maxDurationMs, onRecordingComplete, onEr
         lastModified: Date.now(),
       });
 
+      // Release any previous take's blob URL before replacing it -- an
+      // orphaned one pins the whole recording in memory until the page is
+      // reloaded. retake() already revokes, but this keeps the invariant
+      // local to the assignment rather than resting on the caller's path.
+      if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
       const url = URL.createObjectURL(file);
       audioUrlRef.current = url;
       setAudioUrl(url);

@@ -55,9 +55,14 @@ export default function ReviewPage() {
     }
   }, []);
 
+  // Depends on the level, not the whole user object: any auth-store refresh
+  // (profile save, token refresh) hands back a new object identity, which
+  // would otherwise refetch the entire queue and resurrect cards the reviewer
+  // had just cleared.
+  const reviewerLevel = user?.level;
   useEffect(() => {
-    if (canReview(user?.level)) load(filter);
-  }, [filter, user, load]);
+    if (canReview(reviewerLevel)) load(filter);
+  }, [filter, reviewerLevel, load]);
 
   function handleReviewed(contributionId: string) {
     setItems((prev) => prev.filter((i) => i.contributionId !== contributionId));

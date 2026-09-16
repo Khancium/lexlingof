@@ -9,6 +9,7 @@ import {
   api,
   getErrorMessage,
   type EducationLevel,
+  type StreakStatus,
   type UserStatsResponse,
   type UserBadgesResponse,
   type ContributorDemographics,
@@ -26,6 +27,7 @@ export default function ProfilePage() {
 
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
+  const [streakStatus, setStreakStatus] = useState<StreakStatus>("active");
   const [badges, setBadges] = useState<UserBadgesResponse["earned"]>([]);
   const [demographics, setDemographics] = useState<ContributorDemographics | null>(null);
 
@@ -108,6 +110,7 @@ export default function ProfilePage() {
     api.users.getStats().then((res) => {
       setStats(res.stats);
       setStreak(res.streak?.currentStreak ?? 0);
+      setStreakStatus(res.streak?.status ?? "active");
     });
     api.badges.getForUser(user.id).then((res) => setBadges(res.earned));
     api.demographics.getMe().then(setDemographics).catch(() => setDemographics(null));
@@ -235,7 +238,12 @@ export default function ProfilePage() {
         <StatCard label="Total" value={stats?.totalContributions ?? user.totalContributions} />
         <StatCard label="Verified" value={verified} />
         <StatCard label="Points" value={stats?.totalPoints ?? user.totalPoints} emoji="⚡" />
-        <StatCard label="Streak" value={streak} emoji="🔥" />
+        <StatCard
+          label="Streak"
+          value={streak}
+          emoji="🔥"
+          hint={streakStatus === "grace" ? "Contribute today!" : streakStatus === "broken" ? "Streak reset" : null}
+        />
       </div>
 
       <div>
@@ -469,7 +477,7 @@ export default function ProfilePage() {
   );
 }
 
-function StatCard({ label, value, emoji }: { label: string; value: number; emoji?: string }) {
+function StatCard({ label, value, emoji, hint }: { label: string; value: number; emoji?: string; hint?: string | null }) {
   return (
     <div className="card-duo rounded-2xl bg-surface p-5 shadow-sm text-center">
       <div className="animate-duo-pop text-2xl font-bold text-ink">
@@ -477,6 +485,7 @@ function StatCard({ label, value, emoji }: { label: string; value: number; emoji
         {value}
       </div>
       <div className="mt-1 text-xs text-ink-muted">{label}</div>
+      {hint ? <div className="mt-1 text-[11px] font-semibold text-amber-600">{hint}</div> : null}
     </div>
   );
 }

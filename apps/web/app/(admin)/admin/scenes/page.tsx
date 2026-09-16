@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type ConceptListItem, type Scene, type SceneDifficulty, type SceneImageKeyword } from "@/lib/api";
+import { api, type ConceptListItem, type OpenverseImageResult, type Scene, type SceneDifficulty, type SceneImageKeyword } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
+import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
+import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
@@ -106,6 +108,7 @@ export default function AdminScenesPage() {
 
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
+  const [openverseSceneId, setOpenverseSceneId] = useState<string | null>(null);
   // A file the admin has chosen but not yet confirmed -- lets them type
   // keywords for it before the actual upload+tag round trips fire.
   const [pendingUploads, setPendingUploads] = useState<Record<string, { file: File; keywordsText: string }>>({});
@@ -219,6 +222,20 @@ export default function AdminScenesPage() {
       return next;
     });
     setPendingUploads((prev) => ({ ...prev, [sceneId]: { file, keywordsText: "" } }));
+  }
+
+  async function handleAddImageOpenverse(sceneId: string, image: OpenverseImageResult) {
+    setUploadingId(sceneId);
+    setUploadMessage(null);
+    try {
+      await api.admin.addSceneMediaOpenverse(sceneId, image);
+      setUploadMessage({ id: sceneId, text: "Image added from Openverse" });
+    } catch (err) {
+      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      throw err;
+    } finally {
+      setUploadingId(null);
+    }
   }
 
   function startUrlUpload(sceneId: string) {
@@ -559,6 +576,12 @@ export default function AdminScenesPage() {
         onDone={load}
       />
 
+      <AdminOpenverseAutofill
+        label="Auto-fill Missing Scene Images from Openverse"
+        onSubmit={() => api.admin.bulkOpenverseAutofillScenes()}
+        onDone={load}
+      />
+
       <AdminBulkBar
         count={selected.size}
         onClear={() => setSelected(new Set())}
@@ -626,6 +649,12 @@ export default function AdminScenesPage() {
                     className="text-xs font-semibold text-brand hover:underline"
                   >
                     From URL
+                  </button>
+                  <button
+                    onClick={() => setOpenverseSceneId(scene.id)}
+                    className="text-xs font-semibold text-brand hover:underline"
+                  >
+                    Openverse
                   </button>
                   <button
                     onClick={() => {
@@ -825,6 +854,14 @@ export default function AdminScenesPage() {
       )}
 
       {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
+
+      {openverseSceneId ? (
+        <AdminOpenversePicker
+          defaultQuery={scenes.find((s) => s.id === openverseSceneId)?.title ?? ""}
+          onSelect={(image) => handleAddImageOpenverse(openverseSceneId, image)}
+          onClose={() => setOpenverseSceneId(null)}
+        />
+      ) : null}
     </div>
   );
 }

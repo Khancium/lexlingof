@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type Category, type ConceptListItem } from "@/lib/api";
+import { api, type Category, type ConceptListItem, type OpenverseImageResult } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
+import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
+import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
@@ -39,6 +41,7 @@ export default function AdminConceptsPage() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
   const [urlEntryId, setUrlEntryId] = useState<string | null>(null);
+  const [openverseConceptId, setOpenverseConceptId] = useState<string | null>(null);
   const [urlEntryValue, setUrlEntryValue] = useState("");
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -106,6 +109,20 @@ export default function AdminConceptsPage() {
       setUploadMessage({ id: conceptId, text: "Image uploaded" });
     } catch (err) {
       setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Upload failed", error: true });
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
+  async function handleAddImageOpenverse(conceptId: string, image: OpenverseImageResult) {
+    setUploadingId(conceptId);
+    setUploadMessage(null);
+    try {
+      await api.admin.addConceptMediaOpenverse(conceptId, image);
+      setUploadMessage({ id: conceptId, text: "Image added from Openverse" });
+    } catch (err) {
+      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      throw err;
     } finally {
       setUploadingId(null);
     }
@@ -260,6 +277,12 @@ export default function AdminConceptsPage() {
         matchItems={allConcepts}
         matchLabel={(c) => c.labelEnglish}
         onSubmit={(pairs) => api.admin.bulkAddConceptMediaUrl(pairs.map((p) => ({ conceptId: p.id, imageUrl: p.imageUrl })))}
+        onDone={load}
+      />
+
+      <AdminOpenverseAutofill
+        label="Auto-fill Missing Concept Images from Openverse"
+        onSubmit={() => api.admin.bulkOpenverseAutofillConcepts()}
         onDone={load}
       />
 
@@ -418,6 +441,13 @@ export default function AdminConceptsPage() {
                           >
                             From URL
                           </button>
+                          <span className="text-ink-muted">·</span>
+                          <button
+                            onClick={() => setOpenverseConceptId(concept.id)}
+                            className="text-xs font-semibold text-brand hover:underline"
+                          >
+                            Openverse
+                          </button>
                         </div>
                       )}
                       {uploadMessage?.id === concept.id ? (
@@ -460,6 +490,14 @@ export default function AdminConceptsPage() {
       )}
 
       {!loading && <Pagination offset={offset} limit={limit} total={total} onChange={setOffset} onLimitChange={handleLimitChange} />}
+
+      {openverseConceptId ? (
+        <AdminOpenversePicker
+          defaultQuery={concepts.find((c) => c.id === openverseConceptId)?.labelEnglish ?? ""}
+          onSelect={(image) => handleAddImageOpenverse(openverseConceptId, image)}
+          onClose={() => setOpenverseConceptId(null)}
+        />
+      ) : null}
     </div>
   );
 }

@@ -23,6 +23,7 @@ import {
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { getLevelThresholds } from "../../services/level.service.js";
+import { computeStreakDisplay } from "../../services/streak.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 /* -------------------------------------------------------------------------- */
@@ -172,6 +173,8 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
         totalPoints: pointsColumn,
         verifiedContributions: userStats.verifiedContributions,
         currentStreak: streaks.currentStreak,
+        longestStreak: streaks.longestStreak,
+        streakLastActivityDate: streaks.lastActivityDate,
         languageId: languages.id,
         languageCode: languages.code,
         languageNameEnglish: languages.nameEnglish,
@@ -193,7 +196,11 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
       level: row.level,
       totalPoints: row.totalPoints,
       verifiedContributions: row.verifiedContributions,
-      currentStreak: row.currentStreak ?? 0,
+      currentStreak: computeStreakDisplay({
+        currentStreak: row.currentStreak ?? 0,
+        longestStreak: row.longestStreak ?? 0,
+        lastActivityDate: row.streakLastActivityDate,
+      }).currentStreak,
       language: row.languageId ? { id: row.languageId, code: row.languageCode, nameEnglish: row.languageNameEnglish } : null,
     }));
   });

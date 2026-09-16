@@ -326,6 +326,12 @@ export const conceptMedia = pgTable("concept_media", {
   mimeType: text("mime_type").notNull(),
   fileSizeBytes: bigint("file_size_bytes", { mode: "number" }),
   isPrimary: boolean("is_primary").default(false).notNull(),
+  // Populated only for images sourced from a licensed third-party catalog
+  // (currently Openverse) -- null for a plain admin upload or an arbitrary
+  // "From URL" fetch, neither of which carries license/creator metadata.
+  sourceProvider: text("source_provider"),
+  sourceUrl: text("source_url"),
+  attribution: text("attribution"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -379,6 +385,10 @@ export const sceneMedia = pgTable("scene_media", {
   publicUrl: text("public_url"),
   mimeType: text("mime_type").notNull(),
   isPrimary: boolean("is_primary").default(true).notNull(),
+  // See concept_media's identical columns.
+  sourceProvider: text("source_provider"),
+  sourceUrl: text("source_url"),
+  attribution: text("attribution"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
@@ -1330,39 +1340,52 @@ export const educationLevelEnum = pgEnum("education_level", [
  * columns are all required at signup time and profile settings' fields are
  * all optional/editable later.
  */
-export const contributorDemographics = pgTable("contributor_demographics", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  fullName: text("full_name").notNull(),
-  /**
-   * Server-computed from dateOfBirth on every submit (see demographics.routes.ts)
-   * -- the form no longer takes a raw age input. Kept as a real, queryable
-   * column (rather than computed on every read) since it was already NOT
-   * NULL and read in several places; dateOfBirth is nullable because rows
-   * created before this column existed have no birth date on file, only the
-   * age that was directly entered at the time.
-   */
-  age: integer("age").notNull(),
-  dateOfBirth: date("date_of_birth"),
-  gender: genderEnum("gender").notNull(),
-  motherTongue: text("mother_tongue").notNull(),
-  tribeId: uuid("tribe_id")
-    .notNull()
-    .references(() => tribes.id),
-  subTribeId: uuid("sub_tribe_id").references(() => subTribes.id),
-  country: text("country").notNull(),
-  city: text("city").notNull(),
-  villageId: uuid("village_id")
-    .notNull()
-    .references(() => villages.id),
-  quarterId: uuid("quarter_id").references(() => quarters.id),
-  dialect: text("dialect"),
-  educationLevel: educationLevelEnum("education_level"),
-  profession: text("profession"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-});
+export const contributorDemographics = pgTable(
+  "contributor_demographics",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    fullName: text("full_name").notNull(),
+    /**
+     * Server-computed from dateOfBirth on every submit (see demographics.routes.ts)
+     * -- the form no longer takes a raw age input. Kept as a real, queryable
+     * column (rather than computed on every read) since it was already NOT
+     * NULL and read in several places; dateOfBirth is nullable because rows
+     * created before this column existed have no birth date on file, only the
+     * age that was directly entered at the time.
+     */
+    age: integer("age").notNull(),
+    dateOfBirth: date("date_of_birth"),
+    gender: genderEnum("gender").notNull(),
+    motherTongue: text("mother_tongue").notNull(),
+    tribeId: uuid("tribe_id")
+      .notNull()
+      .references(() => tribes.id),
+    subTribeId: uuid("sub_tribe_id").references(() => subTribes.id),
+    country: text("country").notNull(),
+    city: text("city").notNull(),
+    villageId: uuid("village_id")
+      .notNull()
+      .references(() => villages.id),
+    quarterId: uuid("quarter_id").references(() => quarters.id),
+    dialect: text("dialect"),
+    educationLevel: educationLevelEnum("education_level"),
+    profession: text("profession"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // The peer-review queue joins every pending contribution's author to this
+    // table and filters on tribe + city together, so the composite is the one
+    // that matters for the hottest scoped query in the app.
+    index("ix_contributor_demographics_tribe_city").on(t.tribeId, t.city),
+    // The admin Users filters slice on these independently of tribe, which
+    // the leading column of the composite above cannot serve.
+    index("ix_contributor_demographics_city").on(t.city),
+    index("ix_contributor_demographics_village").on(t.villageId),
+  ],
+);
 
 /* -------------------------------------------------------------------------- */
 /*                                  Relations                                 */

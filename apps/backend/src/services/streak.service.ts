@@ -1,10 +1,18 @@
 import { eq } from "drizzle-orm";
 
 import type { db } from "../db/index.js";
-import { streaks } from "../db/schema.js";
+import { streaks, type streakStatus } from "../db/schema.js";
 import { HttpError } from "../utils/http-error.js";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+type StreakStatus = (typeof streakStatus.enumValues)[number];
+
+/** Whole days between two ISO (YYYY-MM-DD) dates, both read as UTC midnight. */
+function daysBetween(fromIso: string, toIso: string): number {
+  const from = new Date(`${fromIso}T00:00:00Z`).getTime();
+  const to = new Date(`${toIso}T00:00:00Z`).getTime();
+  return Math.round((to - from) / 86_400_000);
+}
 
 /**
  * Bumps a user's daily streak after a qualifying contribution. Must run
@@ -30,9 +38,7 @@ export async function updateStreakOnContribution(tx: Tx, userId: string): Promis
   if (streak.lastActivityDate === todayIso && streak.qualifyingContributionsToday > 0) {
     newQualifying = streak.qualifyingContributionsToday + 1;
   } else {
-    const lastDate = new Date(`${streak.lastActivityDate}T00:00:00Z`);
-    const todayDate = new Date(`${todayIso}T00:00:00Z`);
-    const diffDays = Math.round((todayDate.getTime() - lastDate.getTime()) / 86_400_000);
+    const diffDays = daysBetween(streak.lastActivityDate, todayIso);
 
     if (diffDays === 1) {
       newCurrentStreak = streak.currentStreak + 1;
@@ -59,4 +65,51 @@ export async function updateStreakOnContribution(tx: Tx, userId: string): Promis
     .where(eq(streaks.userId, userId));
 
   return { currentStreak: newCurrentStreak };
+}
+
+export type StreakDisplay = {
+  currentStreak: number;
+  longestStreak: number;
+  status: StreakStatus;
+};
+
+/**
+ * The `streaks` row is only ever touched by updateStreakOnContribution above,
+ * which runs exclusively when the user submits something -- so currentStreak
+ * only gets corrected to 0 the NEXT time they contribute after breaking it.
+ * In between, every read (dashboard, profile, leaderboard) was showing the
+ * stale pre-break number: a user who built a 10-day streak and then missed 3
+ * days still saw "10" on their dashboard, days after it actually ended,
+ * because nothing had recomputed it on read.
+ *
+ * This derives the true-as-of-now display without writing anything --
+ * cheap, side-effect-free, and safe to call from any read path. It also
+ * finally uses the `streak_status` enum's "grace" value, which existed in
+ * the schema from the start but nothing ever set: a streak that's one day
+ * stale isn't broken yet (today isn't over), so it's surfaced as "at risk"
+ * rather than silently reported as still fully "active".
+ *
+ * diffDays semantics (see daysBetween): 0 = already contributed today (or
+ * a same-day re-read); 1 = last contribution was yesterday, so the streak
+ * survives only if they contribute again today; >=2 = a full day was missed
+ * with no contribution, so the streak is broken and reads as 0.
+ */
+export function computeStreakDisplay(
+  row: { currentStreak: number; longestStreak: number; lastActivityDate: string | null } | null | undefined,
+  now: Date = new Date(),
+): StreakDisplay {
+  if (!row || !row.lastActivityDate) {
+    return { currentStreak: 0, longestStreak: row?.longestStreak ?? 0, status: "broken" };
+  }
+
+  const todayIso = now.toISOString().slice(0, 10);
+  const diffDays = daysBetween(row.lastActivityDate, todayIso);
+
+  if (diffDays <= 0) {
+    return { currentStreak: row.currentStreak, longestStreak: row.longestStreak, status: "active" };
+  }
+  if (diffDays === 1) {
+    return { currentStreak: row.currentStreak, longestStreak: row.longestStreak, status: "grace" };
+  }
+  return { currentStreak: 0, longestStreak: row.longestStreak, status: "broken" };
 }

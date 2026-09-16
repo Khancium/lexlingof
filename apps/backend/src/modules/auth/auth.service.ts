@@ -137,9 +137,16 @@ class AuthService {
   async refreshTokens(token: string): Promise<TokenPair> {
     const tokenHash = sha256(token);
 
+    // Validating and revoking in one statement -- the WHERE clause *is* the
+    // validity check and the UPDATE is the rotation -- closes a replay window:
+    // as a separate SELECT then UPDATE, two requests carrying the same refresh
+    // token could both pass the check before either revoked it, and both walk
+    // away with a fresh token pair. It also drops a round trip off every
+    // session restore, which at cross-region latency is the single slowest
+    // step of app boot.
     const [row] = await db
-      .select({ id: refreshTokens.id, userId: refreshTokens.userId })
-      .from(refreshTokens)
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
       .where(
         and(
           eq(refreshTokens.tokenHash, tokenHash),
@@ -147,7 +154,7 @@ class AuthService {
           gt(refreshTokens.expiresAt, new Date()),
         ),
       )
-      .limit(1);
+      .returning({ userId: refreshTokens.userId });
 
     if (!row) {
       throw new HttpError(401, "INVALID_REFRESH_TOKEN");
@@ -162,8 +169,6 @@ class AuthService {
     if (!user) {
       throw new HttpError(401, "INVALID_REFRESH_TOKEN");
     }
-
-    await db.update(refreshTokens).set({ revokedAt: new Date() }).where(eq(refreshTokens.id, row.id));
 
     return this.generateTokens(user.id, user.email, user.role);
   }

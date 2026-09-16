@@ -5,7 +5,7 @@ import { audioFiles, contributions, gamificationConfig, pointsTransactions, stre
 import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { storageService } from "../../../services/storage.service.js";
-import { updateStreakOnContribution } from "../../../services/streak.service.js";
+import { computeStreakDisplay, updateStreakOnContribution } from "../../../services/streak.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
@@ -243,10 +243,17 @@ async function overrideWordRecording(
 ): Promise<SubmitWordRecordingResult> {
   const [[levelRow], [streakRow]] = await Promise.all([
     db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1),
-    db.select({ currentStreak: streaks.currentStreak }).from(streaks).where(eq(streaks.userId, userId)).limit(1),
+    db.select({ currentStreak: streaks.currentStreak, longestStreak: streaks.longestStreak, lastActivityDate: streaks.lastActivityDate })
+      .from(streaks)
+      .where(eq(streaks.userId, userId))
+      .limit(1),
   ]);
   const userLevel = levelRow?.level ?? null;
-  const currentStreak = streakRow?.currentStreak ?? 0;
+  // This retake path never calls updateStreakOnContribution (see the
+  // no-double-credit comment above), so unlike the fresh-submit path below,
+  // the row read here isn't guaranteed to already reflect today -- run it
+  // through the same read-time correction as every other streak display.
+  const currentStreak = computeStreakDisplay(streakRow ?? null).currentStreak;
 
   // Idempotent short-circuit: a buffer-worker retry after a crash resolves
   // to the SAME audioFileId (resolveAudioFileId persists it), so if it's

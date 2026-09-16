@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import axios from "axios";
-import { api, hasStoredRefreshToken, type UserProfile } from "./api";
+import { api, ensureAccessToken, hasStoredRefreshToken, type UserProfile } from "./api";
 
 type AuthState = {
   user: UserProfile | null;
@@ -32,6 +32,15 @@ export const useAuthStore = create<AuthState>((set) => ({
     }
     set({ isLoading: true, error: null });
     try {
+      // Mint the access token up front rather than letting GET /users/me 401
+      // and be retried by the interceptor -- that path costs an extra full
+      // round trip on every page load, all of it spent behind the blocking
+      // spinner in components/providers.tsx.
+      const token = await ensureAccessToken();
+      if (!token) {
+        set({ user: null, isLoading: false, error: null });
+        return;
+      }
       const user = await api.users.getMe();
       set({ user, isLoading: false });
     } catch (err) {

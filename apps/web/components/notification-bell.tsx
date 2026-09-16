@@ -42,10 +42,40 @@ export default function NotificationBell() {
       .finally(() => setLoading(false));
   }
 
+  // Polling stops while the tab is in the background and resumes (with an
+  // immediate catch-up fetch) when it comes back. A backgrounded tab used to
+  // keep firing a full 20-notification request every 30s indefinitely, which
+  // on mobile is pure battery and data cost for something nobody can see.
   useEffect(() => {
-    load();
-    const interval = setInterval(load, POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    function start() {
+      if (interval) return;
+      interval = setInterval(load, POLL_INTERVAL_MS);
+    }
+    function stop() {
+      if (!interval) return;
+      clearInterval(interval);
+      interval = null;
+    }
+    function onVisibilityChange() {
+      if (document.hidden) {
+        stop();
+      } else {
+        load();
+        start();
+      }
+    }
+
+    if (!document.hidden) {
+      load();
+      start();
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
   }, []);
 
   useEffect(() => {

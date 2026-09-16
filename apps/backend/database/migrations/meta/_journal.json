@@ -183,6 +183,20 @@
       "when": 1789018729047,
       "tag": "0025_wise_kylun",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789202957364,
+      "tag": "0026_dry_vulture",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1789540034536,
+      "tag": "0027_rainy_genesis",
+      "breakpoints": true
     }
   ]
 }

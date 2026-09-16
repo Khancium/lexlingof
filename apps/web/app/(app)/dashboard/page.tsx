@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store";
-import { api, type UserStatsResponse } from "@/lib/api";
+import { api, type StreakStatus, type UserStatsResponse } from "@/lib/api";
 import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
 
 const QUICK_ACTIONS = [
@@ -45,11 +45,13 @@ export default function DashboardPage() {
   const user = useAuthStore((state) => state.user);
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
+  const [streakStatus, setStreakStatus] = useState<StreakStatus>("active");
 
   useEffect(() => {
     api.users.getStats().then((res) => {
       setStats(res.stats);
       setStreak(res.streak?.currentStreak ?? 0);
+      setStreakStatus(res.streak?.status ?? "active");
     });
   }, []);
 
@@ -85,10 +87,15 @@ export default function DashboardPage() {
         ) : null}
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <StatCard label="Total Contributions" value={stats?.totalContributions ?? 0} />
         <StatCard label="Points" value={stats?.totalPoints ?? user?.totalPoints ?? 0} emoji="⚡" />
-        <StatCard label="Streak" value={streak} emoji="🔥" />
+        <StatCard
+          label="Streak"
+          value={streak}
+          emoji="🔥"
+          hint={streakStatus === "grace" ? "Contribute today to keep it!" : streakStatus === "broken" ? "Start a new streak today" : null}
+        />
       </div>
 
       <div>
@@ -116,7 +123,7 @@ export default function DashboardPage() {
   );
 }
 
-function StatCard({ label, value, emoji }: { label: string; value: number; emoji?: string }) {
+function StatCard({ label, value, emoji, hint }: { label: string; value: number; emoji?: string; hint?: string | null }) {
   return (
     <div className="card-duo rounded-2xl bg-surface-card p-5 text-center shadow-sm">
       <div className="animate-duo-pop text-2xl font-bold text-ink">
@@ -124,6 +131,7 @@ function StatCard({ label, value, emoji }: { label: string; value: number; emoji
         {value}
       </div>
       <div className="mt-1 text-xs text-ink-muted">{label}</div>
+      {hint ? <div className="mt-1 text-[11px] font-semibold text-amber-600">{hint}</div> : null}
     </div>
   );
 }

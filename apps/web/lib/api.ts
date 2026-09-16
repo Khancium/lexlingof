@@ -110,6 +110,27 @@ async function refreshAccessToken(): Promise<string | null> {
   return newAccessToken;
 }
 
+/**
+ * Mints an access token before the first authenticated request of a page load,
+ * sharing the same in-flight promise as the 401-retry path.
+ *
+ * The access token is memory-only, so after a reload there is never one. Left
+ * to the interceptor, boot cost three sequential round trips -- GET /users/me,
+ * which 401s, then the refresh, then /users/me again -- and at cross-region
+ * latency that is most of the time the app spends on its blocking spinner. It
+ * is also where the spurious 401 in the browser console on sign-in came from.
+ */
+export async function ensureAccessToken(): Promise<string | null> {
+  if (accessToken) return accessToken;
+  if (!getStoredRefreshToken()) return null;
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -193,6 +214,7 @@ export type UserProfile = {
   totalContributions: number;
   currentStreak: number;
   longestStreak: number;
+  streakStatus: StreakStatus;
   language: { id: string; code: string; nameEnglish: string; nameNative: string } | null;
   dialect: { id: string; code: string; nameEnglish: string } | null;
   location: { country: string | null; city: string | null; village: string | null; showLocation: boolean } | null;
@@ -277,8 +299,11 @@ export type UserStatsResponse = {
     sceneContributionsCount: number;
     level: ContributorLevel;
   } | null;
-  streak: { currentStreak: number; longestStreak: number } | null;
+  streak: { currentStreak: number; longestStreak: number; status: StreakStatus } | null;
 };
+
+/** "grace" = last contribution was yesterday -- still alive, but breaks if today passes with no activity. */
+export type StreakStatus = "active" | "grace" | "broken";
 
 export type ContributionsQuery = { limit?: number; offset?: number; moduleType?: ModuleType };
 export type ContributionDetail = {
@@ -728,6 +753,8 @@ export type AdminUser = {
 
 export type AdminUsersResponse = { items: AdminUser[]; limit: number; offset: number; total: number };
 
+export type AdminUserOption = { id: string; displayName: string; email: string };
+
 function filenameFromResponse(headers: unknown, fallback: string) {
   const raw = (headers as Record<string, string> | undefined)?.["content-disposition"];
   const match = raw ? /filename="?([^"]+)"?/.exec(raw) : null;
@@ -884,6 +911,24 @@ export type SceneImageKeyword = { id: string; keyword: string };
 
 export type AdminSentenceInput = { englishText: string; categoryId?: string };
 export type BulkUploadResult = { created: number; errors: { row: number; message: string }[] };
+
+export type OpenverseImageResult = {
+  id: string;
+  title: string | null;
+  creator: string | null;
+  creatorUrl: string | null;
+  url: string;
+  thumbnail: string | null;
+  foreignLandingUrl: string;
+  license: string;
+  licenseVersion: string | null;
+  provider: string | null;
+  width: number | null;
+  height: number | null;
+  attribution: string;
+};
+
+export type OpenverseSearchResponse = { results: OpenverseImageResult[]; resultCount: number; pageCount: number; page: number };
 export type AdminSentence = {
   id: string;
   englishText: string;
@@ -1194,6 +1239,10 @@ export const api = {
     markSuggestionReviewed: (id: string, isReviewed: boolean) =>
       apiClient.put<{ id: string; isReviewed: boolean; reviewedAt: string | null }>(`/api/v1/admin/suggestions/${id}/reviewed`, { isReviewed }).then((r) => r.data),
 
+    /** Minimal id/name/email list for contributor pickers -- avoids pulling full joined user rows just to fill a <select>. */
+    getUserOptions: () =>
+      apiClient.get<{ items: AdminUserOption[] }>("/api/v1/admin/users/options").then((r) => r.data.items),
+
     getUsers: (params?: AdminUsersQuery) => {
       const flat = params
         ? Object.fromEntries(
@@ -1273,11 +1322,24 @@ export const api = {
         .then((r) => r.data),
     bulkAddConceptMediaUrl: (items: { conceptId: string; imageUrl: string }[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/bulk-url", { items }).then((r) => r.data),
+    addConceptMediaOpenverse: (id: string, image: OpenverseImageResult) =>
+      apiClient
+        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media/openverse`, { image })
+        .then((r) => r.data),
+    /** Searches Openverse by each concept's own label and attaches the top result -- omit `ids` to target every concept in the corpus with no image at all. */
+    bulkOpenverseAutofillConcepts: (ids?: string[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/openverse-autofill", { ids }).then((r) => r.data),
     bulkUploadConcepts: (file: File) => {
       const form = new FormData();
       form.append("file", file);
       return apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/bulk", form).then((r) => r.data);
     },
+
+    /** Shared by both the concepts and scenes admin pages -- read-only against Openverse's own catalog. */
+    searchOpenverse: (q: string, page = 1, pageSize = 20) =>
+      apiClient
+        .get<OpenverseSearchResponse>("/api/v1/admin/openverse/search", { params: { q, page, pageSize } })
+        .then((r) => r.data),
 
     createScene: (data: AdminSceneInput) => apiClient.post<Scene>("/api/v1/admin/scenes", data).then((r) => r.data),
     updateScene: (id: string, data: AdminSceneUpdateInput) =>
@@ -1304,6 +1366,13 @@ export const api = {
         .then((r) => r.data),
     bulkAddSceneMediaUrl: (items: { sceneId: string; imageUrl: string }[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/bulk-url", { items }).then((r) => r.data),
+    addSceneMediaOpenverse: (id: string, image: OpenverseImageResult) =>
+      apiClient
+        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media/openverse`, { image })
+        .then((r) => r.data),
+    /** Searches Openverse by each scene's own title and attaches the top result -- omit `ids` to target every scene with no image at all. */
+    bulkOpenverseAutofillScenes: (ids?: string[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/openverse-autofill", { ids }).then((r) => r.data),
     bulkUploadScenes: (file: File) => {
       const form = new FormData();
       form.append("file", file);

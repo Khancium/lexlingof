@@ -47,9 +47,10 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { hasPermission, invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
+import { buildAttribution, searchOpenverseImages } from "../../services/openverse.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
-import { invalidateLevelThresholdsCache } from "../../services/level.service.js";
+import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/level.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -103,7 +104,9 @@ async function readImageFile(request: FastifyRequest) {
   return { buffer, filename: file.filename, mimetype: file.mimetype };
 }
 
-async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: string) {
+type MediaAttribution = { sourceProvider: string; sourceUrl: string; attribution: string };
+
+async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: string, source?: MediaAttribution) {
   const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
   const storageFilename = `concepts/${conceptId}/${randomUUID()}.${ext}`;
   const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadSceneImage(buffer, storageFilename);
@@ -116,21 +119,31 @@ async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: s
 
   const [media] = await db
     .insert(conceptMedia)
-    .values({ conceptId, storageKey: path, publicUrl, mimeType, fileSizeBytes, isPrimary })
+    .values({
+      conceptId,
+      storageKey: path,
+      publicUrl,
+      mimeType,
+      fileSizeBytes,
+      isPrimary,
+      sourceProvider: source?.sourceProvider ?? null,
+      sourceUrl: source?.sourceUrl ?? null,
+      attribution: source?.attribution ?? null,
+    })
     .returning();
   return media;
 }
 
-async function addConceptImageFromUrl(conceptId: string, imageUrl: string) {
+async function addConceptImageFromUrl(conceptId: string, imageUrl: string, source?: MediaAttribution) {
   const [concept] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, conceptId)).limit(1);
   if (!concept) {
     throw new HttpError(404, "NOT_FOUND", "Concept not found");
   }
   const { buffer, filename } = await storageService.fetchImageFromUrl(imageUrl);
-  return insertConceptMedia(conceptId, buffer, filename);
+  return insertConceptMedia(conceptId, buffer, filename, source);
 }
 
-async function insertSceneMedia(sceneId: string, buffer: Buffer, filename: string) {
+async function insertSceneMedia(sceneId: string, buffer: Buffer, filename: string, source?: MediaAttribution) {
   const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
   const storageFilename = `scenes/${sceneId}/${randomUUID()}.${ext}`;
   const { path, publicUrl, mimeType } = await storageService.uploadSceneImage(buffer, storageFilename);
@@ -143,18 +156,77 @@ async function insertSceneMedia(sceneId: string, buffer: Buffer, filename: strin
 
   const [media] = await db
     .insert(sceneMedia)
-    .values({ sceneId, storageKey: path, publicUrl, mimeType, isPrimary })
+    .values({
+      sceneId,
+      storageKey: path,
+      publicUrl,
+      mimeType,
+      isPrimary,
+      sourceProvider: source?.sourceProvider ?? null,
+      sourceUrl: source?.sourceUrl ?? null,
+      attribution: source?.attribution ?? null,
+    })
     .returning();
   return media;
 }
 
-async function addSceneImageFromUrl(sceneId: string, imageUrl: string) {
+async function addSceneImageFromUrl(sceneId: string, imageUrl: string, source?: MediaAttribution) {
   const [scene] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, sceneId)).limit(1);
   if (!scene) {
     throw new HttpError(404, "NOT_FOUND", "Scene not found");
   }
   const { buffer, filename } = await storageService.fetchImageFromUrl(imageUrl);
-  return insertSceneMedia(sceneId, buffer, filename);
+  return insertSceneMedia(sceneId, buffer, filename, source);
+}
+
+/**
+ * An Openverse image (whether it's the client's chosen search result or one
+ * the bulk auto-fill picked server-side) -> the MediaAttribution shape
+ * stored alongside the re-hosted image. Trusting the client-submitted
+ * attribution string (rather than rebuilding it server-side) is fine here --
+ * this is admin-only, and worst case a mismatched credit line is a data
+ * quality issue, not a security one, the same trust level already extended
+ * to an admin-supplied "From URL" image.
+ */
+function attributionFromOpenverse(image: { foreignLandingUrl: string; attribution: string }): MediaAttribution {
+  return { sourceProvider: "openverse", sourceUrl: image.foreignLandingUrl, attribution: image.attribution };
+}
+
+/** Concepts/scenes currently missing any image at all -- the autofill target set when no explicit ids are given. */
+async function conceptsWithoutImage(ids?: string[]) {
+  const conditions = [isNull(concepts.deletedAt), isNull(conceptMedia.id)];
+  if (ids?.length) conditions.push(inArray(concepts.id, ids));
+  return db
+    .select({ id: concepts.id, labelEnglish: concepts.labelEnglish })
+    .from(concepts)
+    .leftJoin(conceptMedia, eq(conceptMedia.conceptId, concepts.id))
+    .where(and(...conditions));
+}
+
+async function scenesWithoutImage(ids?: string[]) {
+  const conditions = [isNull(scenes.deletedAt), isNull(sceneMedia.id)];
+  if (ids?.length) conditions.push(inArray(scenes.id, ids));
+  return db
+    .select({ id: scenes.id, title: scenes.title })
+    .from(scenes)
+    .leftJoin(sceneMedia, eq(sceneMedia.sceneId, scenes.id))
+    .where(and(...conditions));
+}
+
+/** Like requirePermission, but passes if the caller holds ANY of the listed codes -- for endpoints (e.g. the shared Openverse search) usable from both the concepts and scenes admin pages, which are gated by different permission codes. */
+function requireAnyPermission(...permissions: string[]) {
+  return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    if (!request.user) {
+      reply.code(401).send({ code: "UNAUTHORIZED", message: "Invalid or missing token" });
+      return;
+    }
+    if (request.user.role === "super_admin") return;
+    const role = request.user.role;
+    const checks = await Promise.all(permissions.map((p) => hasPermission(role, p)));
+    if (!checks.some(Boolean)) {
+      reply.code(403).send({ code: "FORBIDDEN", required: permissions.join(" or ") });
+    }
+  };
 }
 
 function slugify(value: string): string {
@@ -170,6 +242,107 @@ type ContentKind = "concept" | "scene" | "sentence";
 type PermanentDeleteOutcome = { id: string; deleted: boolean; reason?: string; code?: "NOT_FOUND" | "HAS_CONTRIBUTIONS" };
 
 const CONTENT_LABEL: Record<ContentKind, string> = { concept: "Concept", scene: "Scene", sentence: "Sentence" };
+
+type Module = (typeof contributionModule.enumValues)[number];
+type Status = (typeof contributionStatus.enumValues)[number];
+
+const MODULE_COUNT_COLUMN = {
+  WORD: userStats.wordContributions,
+  TRANSCRIPTION: userStats.audioContributions,
+  TRANSLATION: userStats.translationContributions,
+  SCENE: userStats.sceneContributionsCount,
+} as const;
+
+const MODULE_VERIFIED_COLUMN = {
+  WORD: userStats.verifiedWords,
+  TRANSCRIPTION: userStats.verifiedAudios,
+  TRANSLATION: userStats.verifiedTranslations,
+  SCENE: userStats.verifiedScenes,
+} as const;
+
+/**
+ * Deleting a contribution (admin moderation, not the contributor's own undo)
+ * used to touch only the `contributions` row -- `user_stats.totalContributions`
+ * and its siblings kept whatever value the original submission had already
+ * added, forever. That's what a live mobile-responsiveness check on this
+ * account (farrukh@lexlingo.app) surfaced: user_stats read 4 total
+ * contributions and 0 verified, but the `contributions` table had zero rows
+ * for this user -- every one of the 4 had been admin-deleted at some point,
+ * none of the increments were ever reversed, so the dashboard progress bar,
+ * level, and "My Contributions" total were all reporting phantom activity.
+ *
+ * Deliberately does NOT touch points_transactions/totalPoints: unlike the
+ * count columns (which should always mirror "how many non-deleted
+ * contributions exist"), whether a moderation delete should also claw back
+ * the points already earned is a separate product decision, and reversing
+ * points safely means inserting idempotency-keyed reversal transactions, not
+ * just decrementing a counter -- out of scope for this fix.
+ */
+const MODULE_COUNT_KEY = {
+  WORD: "wordContributions",
+  TRANSCRIPTION: "audioContributions",
+  TRANSLATION: "translationContributions",
+  SCENE: "sceneContributionsCount",
+} as const;
+
+const MODULE_VERIFIED_KEY = {
+  WORD: "verifiedWords",
+  TRANSCRIPTION: "verifiedAudios",
+  TRANSLATION: "verifiedTranslations",
+  SCENE: "verifiedScenes",
+} as const;
+
+/**
+ * +1 when a deleted contribution is restored via Undo, -1 when one is
+ * deleted -- same set of columns either way, since restoring is exactly
+ * "re-apply the increment the original submission made". `greatest(x, 0)`
+ * guards the -1 direction against ever going negative; it's a no-op for +1.
+ */
+async function adjustContributionStats(userId: string, moduleType: Module, status: Status, delta: 1 | -1): Promise<void> {
+  const levelExpr = await levelUpdateExpr(delta);
+  const moduleCountColumn = MODULE_COUNT_COLUMN[moduleType];
+
+  const updates: Record<string, unknown> = {
+    totalContributions: sql`greatest(${userStats.totalContributions} + ${delta}, 0)`,
+    [MODULE_COUNT_KEY[moduleType]]: sql`greatest(${moduleCountColumn} + ${delta}, 0)`,
+    level: levelExpr,
+    updatedAt: new Date(),
+  };
+
+  if (status === "verified") {
+    const verifiedColumn = MODULE_VERIFIED_COLUMN[moduleType];
+    updates.verifiedContributions = sql`greatest(${userStats.verifiedContributions} + ${delta}, 0)`;
+    updates[MODULE_VERIFIED_KEY[moduleType]] = sql`greatest(${verifiedColumn} + ${delta}, 0)`;
+  } else if (status === "pending" || status === "under_review") {
+    updates.pendingContributions = sql`greatest(${userStats.pendingContributions} + ${delta}, 0)`;
+  }
+  // Deliberately no "rejected" branch: reviews.service.ts's invalid-decision
+  // path only ever decrements pendingContributions, it never increments
+  // userStats.rejectedContributions -- so that column sits at 0 for every
+  // user regardless of how many of their contributions were actually
+  // rejected (a separate, pre-existing bug, not introduced here). Adjusting
+  // an always-zero counter here isn't symmetric: delete's greatest(x-1,0)
+  // floors as a no-op (already 0), but undo's blind +1 would then move it to
+  // 1 -- a real value drifting further from the always-0 truth. Left alone
+  // until that root cause is fixed.
+
+  await db.update(userStats).set(updates).where(eq(userStats.userId, userId));
+}
+
+/**
+ * See adjustContributionStats above -- deleting a contribution used to
+ * leave user_stats permanently inflated (found live: farrukh@lexlingo.app's
+ * user_stats read 4 total contributions / 0 verified while the
+ * `contributions` table had zero rows for them -- all 4 had been
+ * admin-deleted at some point and none of the increments were ever
+ * reversed). Deliberately does NOT touch points_transactions/totalPoints --
+ * whether a moderation delete should also claw back already-earned points
+ * is a separate product decision, and doing it safely means idempotency-
+ * keyed reversal transactions, not just decrementing a counter.
+ */
+function reverseContributionStatsOnDelete(userId: string, moduleType: Module, status: Status): Promise<void> {
+  return adjustContributionStats(userId, moduleType, status, -1);
+}
 
 /**
  * Permanently removes one concept/scene/sentence: the actual DB row (not a
@@ -300,6 +473,20 @@ async function logPermanentDelete(request: FastifyRequest, kind: ContentKind, id
   });
 }
 
+/** Bulk form of the above: one INSERT for the whole batch instead of one per deleted item. */
+async function logPermanentDeletes(request: FastifyRequest, kind: ContentKind, ids: string[]): Promise<void> {
+  await writeAuditLogs(
+    ids.map((id) => ({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: `admin_${kind}_permanent_delete`,
+      resourceType: kind,
+      resourceId: id,
+      afterState: { permanentlyDeleted: true },
+    })),
+  );
+}
+
 async function runPermanentDelete(request: FastifyRequest, kind: ContentKind, id: string) {
   const outcome = await permanentlyDeleteContent(kind, id);
 
@@ -318,18 +505,34 @@ async function runPermanentDelete(request: FastifyRequest, kind: ContentKind, id
   return { id, deleted: true, permanent: true };
 }
 
+/**
+ * Each permanent delete is several round trips plus object-storage calls, so
+ * at cross-region latency a serial loop over a 50-item selection ran for
+ * minutes. Items are independent (each guards itself with the FK-violation
+ * catch), so they run in bounded batches instead -- capped rather than
+ * unbounded so a 1000-item selection cannot exhaust the connection pool.
+ */
+const PERMANENT_DELETE_CONCURRENCY = 5;
+
 async function runBulkPermanentDelete(request: FastifyRequest, kind: ContentKind, ids: string[]) {
   const deleted: string[] = [];
   const skipped: { id: string; reason: string }[] = [];
 
-  for (const id of ids) {
-    const outcome = await permanentlyDeleteContent(kind, id);
-    if (outcome.deleted) {
-      deleted.push(id);
-      await logPermanentDelete(request, kind, id);
-    } else {
-      skipped.push({ id, reason: outcome.reason ?? "Could not be deleted" });
+  for (let i = 0; i < ids.length; i += PERMANENT_DELETE_CONCURRENCY) {
+    const batch = ids.slice(i, i + PERMANENT_DELETE_CONCURRENCY);
+    const outcomes = await Promise.all(
+      batch.map(async (id) => ({ id, outcome: await permanentlyDeleteContent(kind, id) })),
+    );
+    for (const { id, outcome } of outcomes) {
+      if (outcome.deleted) deleted.push(id);
+      else skipped.push({ id, reason: outcome.reason ?? "Could not be deleted" });
     }
+  }
+
+  // One audit write per batch run rather than one per item -- writeAuditLogs
+  // is the existing bulk form and turns N round trips into one.
+  if (deleted.length > 0) {
+    await logPermanentDeletes(request, kind, deleted);
   }
 
   return { deleted: deleted.length, skipped };
@@ -617,6 +820,28 @@ const bulkSceneImageUrlSchema = z.object({
   items: z.array(z.object({ sceneId: z.string().uuid(), imageUrl: z.string().min(1) })).min(1).max(200),
 });
 
+const openverseSearchQuerySchema = z.object({
+  q: z.string().trim().min(1),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(40).default(20),
+});
+
+/** The subset of an OpenverseImageResult a client actually chose -- re-validated rather than trusting the shape blindly, since the browser could send anything back. */
+const openverseImageRefSchema = z.object({
+  url: z.string().url(),
+  foreignLandingUrl: z.string().url(),
+  attribution: z.string().min(1),
+});
+
+const addConceptOpenverseSchema = z.object({ image: openverseImageRefSchema });
+const addSceneOpenverseSchema = z.object({ image: openverseImageRefSchema });
+
+const bulkOpenverseAutofillSchema = z.object({
+  // Explicit ids to fill (from a selection), or omit to autofill every item
+  // in the given content type that currently has no image at all.
+  ids: z.array(z.string().uuid()).max(200).optional(),
+});
+
 const bulkIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
 
 const bulkEditConceptsSchema = z.object({
@@ -836,12 +1061,17 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.delete("/admin/contributions/:id", { preHandler: requirePermission("contributions.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
-    const [existing] = await db.select({ id: contributions.id }).from(contributions).where(eq(contributions.id, id)).limit(1);
+    const [existing] = await db
+      .select({ id: contributions.id, userId: contributions.userId, moduleType: contributions.moduleType, status: contributions.status })
+      .from(contributions)
+      .where(eq(contributions.id, id))
+      .limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Contribution not found");
     }
 
     await db.update(contributions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(contributions.id, id));
+    await reverseContributionStatsOnDelete(existing.userId, existing.moduleType, existing.status);
 
     await writeAuditLog({
       actorId: request.user!.id,
@@ -908,12 +1138,21 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { ids } = bulkIdsSchema.parse(request.body);
 
     const rows = await db
-      .select({ id: contributions.id })
+      .select({ id: contributions.id, userId: contributions.userId, moduleType: contributions.moduleType, status: contributions.status })
       .from(contributions)
       .where(and(inArray(contributions.id, ids), isNull(contributions.deletedAt)));
     if (rows.length === 0) return { deleted: 0 };
 
     await db.update(contributions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(inArray(contributions.id, rows.map((r) => r.id)));
+
+    // Same reversal as the single-item delete above, one per affected
+    // contributor -- run with bounded concurrency rather than sequentially,
+    // same reasoning as the permanent-delete batching (see below).
+    const REVERSAL_CONCURRENCY = 5;
+    for (let i = 0; i < rows.length; i += REVERSAL_CONCURRENCY) {
+      const batch = rows.slice(i, i + REVERSAL_CONCURRENCY);
+      await Promise.all(batch.map((row) => reverseContributionStatsOnDelete(row.userId, row.moduleType, row.status)));
+    }
 
     const actorRole = request.user!.role;
     await writeAuditLogs(
@@ -1238,6 +1477,21 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     ]);
 
     return { items, limit, offset, total: totalRow?.value ?? 0 };
+  });
+
+  /**
+   * Just enough to render a contributor picker. The full list endpoint joins
+   * user_stats, contributor_demographics and tribes and runs a COUNT -- all
+   * of it wasted when the caller only needs "Name (email)" in a <select>,
+   * and it was pulling 500 such rows on every admin contributions page load.
+   */
+  fastify.get("/admin/users/options", { preHandler: requirePermission("users.manage") }, async () => {
+    const items = await db
+      .select({ id: users.id, displayName: users.displayName, email: users.email })
+      .from(users)
+      .where(isNull(users.deletedAt))
+      .orderBy(asc(users.displayName));
+    return { items };
   });
 
   // Everything filled in at signup (contributor_demographics) plus a
@@ -1716,6 +1970,68 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { created: results.length - errors.length, errors };
   });
 
+  // Shared by both the concepts and scenes admin pages -- gated on either
+  // permission since it doesn't touch either table itself, it's read-only
+  // against Openverse's own catalog.
+  fastify.get(
+    "/admin/openverse/search",
+    { preHandler: requireAnyPermission("concepts.manage", "scenes.manage") },
+    async (request) => {
+      const { q, page, pageSize } = openverseSearchQuerySchema.parse(request.query);
+      return searchOpenverseImages(q, { page, pageSize });
+    },
+  );
+
+  // Attaches one image the admin picked from the Openverse search picker --
+  // re-hosted through the same fetch-and-store pipeline as "From URL", plus
+  // the license/creator metadata Openverse's terms require keeping alongside
+  // a redistributed image.
+  fastify.post("/admin/concepts/:id/media/openverse", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { image } = addConceptOpenverseSchema.parse(request.body);
+
+    const media = await addConceptImageFromUrl(id, image.url, attributionFromOpenverse(image));
+    reply.code(201).send(media);
+  });
+
+  // Bulk auto-fill: searches Openverse using each concept's own label and
+  // attaches the top result, for every concept in `ids` (or, if omitted,
+  // every concept in the corpus that currently has no image at all). Each
+  // concept is independent -- a search miss or a bad license on one doesn't
+  // block the rest, same "one bad row doesn't fail the batch" convention as
+  // the CSV/JSON bulk-create and bulk-url endpoints.
+  fastify.post(
+    "/admin/concepts/media/openverse-autofill",
+    { preHandler: requirePermission("concepts.manage") },
+    async (request) => {
+      const { ids } = bulkOpenverseAutofillSchema.parse(request.body);
+      const targets = await conceptsWithoutImage(ids);
+      if (targets.length === 0) return { created: 0, errors: [] };
+
+      const AUTOFILL_CONCURRENCY = 5;
+      const errors: { row: number; message: string }[] = [];
+      let created = 0;
+
+      for (let i = 0; i < targets.length; i += AUTOFILL_CONCURRENCY) {
+        const batch = targets.slice(i, i + AUTOFILL_CONCURRENCY);
+        const outcomes = await Promise.allSettled(
+          batch.map(async (concept) => {
+            const { results } = await searchOpenverseImages(concept.labelEnglish, { pageSize: 1 });
+            const top = results[0];
+            if (!top) throw new Error(`No Openverse results for "${concept.labelEnglish}"`);
+            await addConceptImageFromUrl(concept.id, top.url, attributionFromOpenverse(top));
+          }),
+        );
+        outcomes.forEach((outcome, j) => {
+          if (outcome.status === "fulfilled") created += 1;
+          else errors.push({ row: i + j + 1, message: outcome.reason instanceof Error ? outcome.reason.message : "Failed" });
+        });
+      }
+
+      return { created, errors };
+    },
+  );
+
   /* --------------------------------- Scenes --------------------------------- */
 
   fastify.post("/admin/scenes", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
@@ -1929,6 +2245,47 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     return { created: results.length - errors.length, errors };
   });
+
+  fastify.post("/admin/scenes/:id/media/openverse", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { image } = addSceneOpenverseSchema.parse(request.body);
+
+    const media = await addSceneImageFromUrl(id, image.url, attributionFromOpenverse(image));
+    reply.code(201).send(media);
+  });
+
+  // Same bulk auto-fill idea as concepts, searching Openverse by scene title.
+  fastify.post(
+    "/admin/scenes/media/openverse-autofill",
+    { preHandler: requirePermission("scenes.manage") },
+    async (request) => {
+      const { ids } = bulkOpenverseAutofillSchema.parse(request.body);
+      const targets = await scenesWithoutImage(ids);
+      if (targets.length === 0) return { created: 0, errors: [] };
+
+      const AUTOFILL_CONCURRENCY = 5;
+      const errors: { row: number; message: string }[] = [];
+      let created = 0;
+
+      for (let i = 0; i < targets.length; i += AUTOFILL_CONCURRENCY) {
+        const batch = targets.slice(i, i + AUTOFILL_CONCURRENCY);
+        const outcomes = await Promise.allSettled(
+          batch.map(async (scene) => {
+            const { results } = await searchOpenverseImages(scene.title, { pageSize: 1 });
+            const top = results[0];
+            if (!top) throw new Error(`No Openverse results for "${scene.title}"`);
+            await addSceneImageFromUrl(scene.id, top.url, attributionFromOpenverse(top));
+          }),
+        );
+        outcomes.forEach((outcome, j) => {
+          if (outcome.status === "fulfilled") created += 1;
+          else errors.push({ row: i + j + 1, message: outcome.reason instanceof Error ? outcome.reason.message : "Failed" });
+        });
+      }
+
+      return { created, errors };
+    },
+  );
 
   /* --------------------------- Scene image keywords -------------------------- */
   // ADMIN ONLY: free-text training-data labels. Never exposed to contributors.
@@ -2511,6 +2868,19 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     switch (resourceType) {
       case "contribution":
         await db.update(contributions).set({ ...before, updatedAt: new Date() } as Partial<typeof contributions.$inferInsert>).where(eq(contributions.id, identifier));
+        // Undoing a delete (before.deletedAt === null) must re-apply the
+        // same user_stats increment the delete reversed, or the restored
+        // contribution counts nowhere -- see adjustContributionStats.
+        if (log.action === "admin_contribution_delete" && before.deletedAt === null) {
+          const [restored] = await db
+            .select({ userId: contributions.userId, moduleType: contributions.moduleType, status: contributions.status })
+            .from(contributions)
+            .where(eq(contributions.id, identifier))
+            .limit(1);
+          if (restored) {
+            await adjustContributionStats(restored.userId, restored.moduleType, restored.status, 1);
+          }
+        }
         break;
       case "concept":
         await db.update(concepts).set({ ...before, updatedAt: new Date() } as Partial<typeof concepts.$inferInsert>).where(eq(concepts.id, identifier));

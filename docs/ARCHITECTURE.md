@@ -6,7 +6,7 @@ each other's submissions; points/levels/badges drive engagement; admins moderate
 the corpus. This document describes the system **as currently implemented**, plus the
 non-obvious decisions and bugs behind it, so future work doesn't have to rediscover them.
 
-Last updated: 2026-09-12.
+Last updated: 2026-09-15.
 
 ---
 
@@ -209,9 +209,50 @@ Key sub-features:
   ⚠️ `contributions.total_points` is a **generated column** (`base_points + bonus_points`)
   that nothing ever populates — the real total for a contribution is the sum of its
   `points_transactions` rows (see the My Contributions bug in §4).
-- **Streaks**, **badges**, **leaderboard snapshots**: supporting tables exist
-  (`streaks`, `badges`, `user_badges`, `leaderboard_snapshots`) — badges/leaderboard are
-  fed from `user_stats`.
+- **Streaks** (`services/streak.service.ts`): `updateStreakOnContribution` bumps
+  `streaks.currentStreak` inside the same transaction as a qualifying contribution — but it
+  only ever *runs* on a contribution, so a broken streak stayed showing its last known value
+  on every read (dashboard, profile, leaderboard) until the user's next submission finally
+  recalculated it. A user who built a 10-day streak and then went quiet for a week still saw
+  "10" the whole time. Fixed with a separate, side-effect-free `computeStreakDisplay()`
+  called from every read path (`GET /users/me`, `/users/me/stats`, `/leaderboard`, and the
+  word-retake response) that derives the true-as-of-now number from `lastActivityDate`
+  without writing anything: 0 days stale → `active`; 1 day stale → `grace` (today isn't over
+  yet, the streak survives only if they contribute again today — this is the first thing to
+  ever use the `streak_status` enum's `grace` value, which existed in the schema from the
+  start but nothing previously set); ≥2 days stale → `broken`, displayed as 0. The stored row
+  itself is left untouched by reads; only the write path (`updateStreakOnContribution`)
+  still corrects it, on next contribution.
+- **Badges**, **leaderboard snapshots**: supporting tables exist (`badges`, `user_badges`,
+  `leaderboard_snapshots`) — leaderboard is fed from `user_stats`. ⚠️ **Badges are never
+  actually awarded**: `evaluateAndAwardBadges()` in `gamification.service.ts` is fully
+  implemented (including the push notification) but has **zero callers** anywhere in the
+  backend — found while investigating the streak bug above, not yet fixed. Every seeded
+  badge (including the `streak_days` trigger type, which reads `currentStreak` the same way
+  this section describes) is permanently unreachable until something calls it after a
+  contribution/review completes.
+- ⚠️ **Deleting a contribution never adjusted `user_stats`.** `DELETE /admin/contributions/:id`
+  (and its bulk form) soft-deleted the `contributions` row but left
+  `totalContributions`/the per-module counter/`verifiedContributions` untouched — found live
+  via a mobile-responsiveness screenshot audit: the seeded demo account
+  (farrukh@lexlingo.app) showed "4 contributions" on its dashboard while the `contributions`
+  table had zero live rows for that user, because all 4 had been admin-deleted at some point
+  in earlier testing and nothing had ever decremented the counters. Fixed with
+  `adjustContributionStats(userId, moduleType, status, delta)` (`admin.routes.ts`), called
+  with `-1` from both delete routes and `+1` from the generic Undo path when the reverted
+  action is `admin_contribution_delete` (restoring a deleted contribution without
+  re-incrementing its counters would be the same bug in reverse). Verified live: delete then
+  undo round-trips a real contribution's `user_stats` row back to its exact original values.
+  Deliberately excludes `rejectedContributions` — `reviews.service.ts`'s `invalid` decision
+  only ever decrements `pendingContributions`, it never increments `rejectedContributions`,
+  so that column already sits at 0 for every user regardless of actual rejections (a separate
+  pre-existing bug); adjusting an always-zero counter isn't symmetric once the delete side's
+  `greatest(x-1, 0)` floor kicks in, so it's left alone rather than making it worse. Also
+  deliberately excludes `points_transactions`/`totalPoints` — whether a moderation delete
+  should claw back already-earned points is a separate product decision, not a bug fix.
+  **Not retroactively repaired**: the fix stops future drift; farrukh@lexlingo.app's stats
+  still read 4/10 points with 0 live contributions as of this writing, since correcting
+  already-stored counters is a data change outside the app's normal code path.
 - **Corpus Analytics** (public `/corpus` page): aggregate stats (audio hours, contributor
   count, languages covered) plus a per-language contribution breakdown, both cached.
 
@@ -356,6 +397,84 @@ specifically so this doesn't wait for a Submit click) and
 `apps/backend/src/modules/users/demographics.routes.ts`'s `submitDemographicsSchema`
 (server-side, authoritative). Both currently hardcode `14` as `MINIMUM_SIGNUP_AGE`.
 
+### 3.8 Auth boot cost & the contribute-page header truncation
+
+Two findings from live-testing (Playwright, mobile viewports, against a real Fastify
+instance + Supabase) rather than code review alone:
+
+- **Session restore cost three sequential cross-region round trips.** The access token is
+  memory-only, so after any page reload there isn't one — `loadUser()` called
+  `GET /users/me` bare, let it 401, and relied on the axios interceptor's refresh-and-retry.
+  That's `GET /users/me` (401) → `POST /auth/refresh` → `GET /users/me` again, each a full
+  round trip at the ~2-3s cross-region cost noted in §2.7 — the majority of the time spent
+  behind `<AuthProvider>`'s blocking spinner, and the source of the `users/me:1 401` that
+  showed in the console on every sign-in. Fixed with `ensureAccessToken()` (`lib/api.ts`),
+  which mints the token up front and shares its in-flight promise with the interceptor's
+  retry path, cutting boot to two round trips. Also found and fixed while here: the
+  refresh-token rotation itself (`authService.refreshTokens`) validated with a SELECT and
+  revoked with a separate UPDATE — two concurrent requests carrying the same refresh token
+  could both pass validation before either revoked it, both walking away with valid new
+  token pairs. Now one `UPDATE ... WHERE valid RETURNING`, so the validity check and the
+  rotation are the same atomic statement. Verified live: replay of a used token is rejected,
+  and of two concurrent uses of one still-valid token, exactly one succeeds.
+- **Every `contribute/*` page's header could clip its own title.** `flex items-center gap-3`
+  paired a fixed-width "← Back to Contribute" button with `<h1 className="min-w-0 flex-1
+  truncate">` — at a 320-375px phone width the button (uppercase, `.btn-duo`, never
+  shrinking below its content) left too little room for the title, so "Translate a
+  Sentence" rendered as "Translate a Se…" and "Record a Word" as "Rec…". Not a layout
+  *break* (`truncate` did its job — no horizontal overflow anywhere; a full Playwright sweep
+  of every authenticated page at 320px and 375px found zero instances of content actually
+  exceeding the viewport), just a title reading as unintentionally cut off. Fixed in all
+  four contribute pages (`concept`, `scene`, `translate`, `audio`) two ways together: the
+  back button's label shortens to "← Back" below the `sm` breakpoint (full text at `sm:`
+  and up), and the header row switches from a single `flex-row` to `flex-col` on mobile
+  (back button above, title gets the full line to itself), reverting to the original
+  side-by-side row at `sm:` and up where there was always enough room.
+
+### 3.9 Openverse image sourcing (`services/openverse.service.ts`)
+
+Concept and scene images can now be sourced from [Openverse](https://openverse.org)'s
+aggregated catalog of openly-licensed images (Flickr, Wikimedia Commons, museum
+collections, etc.) instead of only manual upload / "From URL":
+
+- **Search** (`GET /admin/openverse/search`, gated on `concepts.manage` OR `scenes.manage`
+  via a new `requireAnyPermission()` helper since it's shared by both admin pages and
+  touches neither table itself) is filtered to `license_type=commercial,modification` —
+  every stored image gets resized and re-encoded to WebP (`storage.service.ts`), which is a
+  "modification", so a license forbidding that isn't actually usable here even if it
+  surfaced in an unfiltered search.
+- **Attribution is Openverse's own field, used verbatim**, not reconstructed — it already
+  reads e.g. `"Birch Trees" by saaby is licensed under CC BY-SA 2.0. To view a copy of this
+  license, visit https://...`, including the license URL, which is more complete than
+  anything worth rebuilding from the individual title/creator/license fields. Stored in two
+  new nullable columns on `concept_media`/`scene_media` (migration `0027`):
+  `source_provider` ("openverse" or null for a plain upload/URL fetch), `source_url` (the
+  `foreign_landing_url`, i.e. a link back to the original), and `attribution` (the credit
+  line itself). A picked image is re-hosted through the exact same
+  `fetchImageFromUrl` → `insertConceptMedia`/`insertSceneMedia` pipeline as "From URL" — it
+  ends up on our own Supabase Storage CDN either way, just with license metadata attached.
+- **Manual picker** (`AdminOpenversePicker`, shared component): search box defaulting to
+  the concept's label / scene's title, a thumbnail grid with license badges, pagination.
+  Selecting one calls `POST /admin/{concepts,scenes}/:id/media/openverse`.
+- **Bulk auto-fill** (`AdminOpenverseAutofill`, shared component): one button that searches
+  Openverse by each item's own name and attaches the top result to every concept/scene that
+  currently has *no* image at all — either the full corpus or an explicit id list. Runs in
+  batches of 5 concurrent lookups (same bounded-concurrency pattern as the permanent-delete
+  and contribution-stats-reversal batching elsewhere in `admin.routes.ts`), and one bad
+  search miss doesn't block the rest of the batch. Verified live: filled 3 real concepts
+  (Black/Roof/Orange) and 2 real scenes (River Journey/School Day) that had no image,
+  correctly re-hosted and attributed.
+- **Optional higher rate limit**: unauthenticated Openverse search works out of the box
+  (~100 requests/day); setting `OPENVERSE_CLIENT_ID`/`OPENVERSE_CLIENT_SECRET` (free
+  self-serve registration at Openverse) raises it to ~10,000/day via their
+  `client_credentials` OAuth2 flow, with the token cached in memory and refreshed on
+  expiry. Same "missing config degrades gracefully instead of failing" pattern as Firebase
+  push (§2.6/§6) — unset, search just runs anonymously.
+- Client-submitted attribution is trusted rather than re-verified server-side against a
+  fresh Openverse lookup — this is admin-only (`concepts.manage`/`scenes.manage`), so a
+  mismatched credit line would be a data-quality issue, not a security one, the same trust
+  level already extended to an admin's own "From URL" input.
+
 ---
 
 ## 4. Frontend Architecture
@@ -441,6 +560,8 @@ of module — it holds exactly one of `word_recording_id` / `audio_upload_id` /
   Supabase Storage (images, public URLs).
 - **Push**: Firebase Cloud Messaging, optional (`FIREBASE_PROJECT_ID` unset/`"placeholder"`
   → push sending is a no-op logged to console, not an error).
+- **Openverse image search** (§3.9): no config required — `OPENVERSE_CLIENT_ID` /
+  `OPENVERSE_CLIENT_SECRET` are optional, raising the anonymous rate limit if set.
 - Every environment variable is loaded via `dotenv/config` at the top of `src/index.ts`;
   there is **no separate staging/dev database** — all development and testing happens
   against the same production Supabase instance, with disciplined creation/cleanup of
@@ -464,3 +585,17 @@ of module — it holds exactly one of `word_recording_id` / `audio_upload_id` /
   since a generated column can't easily be dropped without checking for any remaining
   reader, but worth knowing this generated value is **not** the real per-contribution point
   total.
+- **`evaluateAndAwardBadges()` is fully implemented but never called** (§2.6) — no badge
+  has ever been auto-awarded in this app's lifetime. Wiring it in means deciding where to
+  call it (after each of the four submit paths, and/or after a review decision) and what the
+  frontend does with a newly-awarded badge, which is more than a one-line fix; noted here
+  rather than done as a drive-by.
+- `user_stats.rejectedContributions` is permanently stuck at 0 for every user — nothing in
+  `reviews.service.ts`'s `invalid` decision path increments it (§2.6). Shown in the admin
+  "Details" modal, so it currently always reads "0 rejected" regardless of reality.
+- Some already-seeded accounts' `user_stats` counters predate the delete-reversal fix
+  (§2.6) and were never retroactively corrected — e.g. the demo account
+  farrukh@lexlingo.app still reads 4 total contributions / 10 points against 0 live
+  `contributions` rows. The fix stops the drift going forward; it doesn't repair history,
+  since that's a direct data change outside the app's normal code path rather than a code
+  fix.

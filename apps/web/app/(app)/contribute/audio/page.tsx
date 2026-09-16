@@ -166,14 +166,15 @@ export default function AudioUploadPage() {
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
         <Link
           href="/contribute"
-          className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+          className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
         >
-          ← Back to Contribute
+          <span className="sm:hidden">← Back</span>
+            <span className="hidden sm:inline">← Back to Contribute</span>
         </Link>
-        <h1 className="min-w-0 flex-1 truncate text-2xl font-bold text-ink">Upload Audio</h1>
+        <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">Upload Audio</h1>
       </div>
 
       <div

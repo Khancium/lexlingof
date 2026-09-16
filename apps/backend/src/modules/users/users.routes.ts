@@ -25,6 +25,7 @@ import {
 import { verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
 import { storageService } from "../../services/storage.service.js";
+import { computeStreakDisplay } from "../../services/streak.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10MB
@@ -52,6 +53,7 @@ async function getOwnProfile(userId: string) {
       lastContributionAt: userStats.lastContributionAt,
       currentStreak: streaks.currentStreak,
       longestStreak: streaks.longestStreak,
+      streakLastActivityDate: streaks.lastActivityDate,
       locationCountry: contributorProfiles.locationCountry,
       locationCity: contributorProfiles.locationCity,
       locationVillage: contributorProfiles.locationVillage,
@@ -78,6 +80,11 @@ async function getOwnProfile(userId: string) {
   }
 
   const hasLocation = Boolean(row.locationCountry || row.locationCity || row.locationVillage);
+  const streak = computeStreakDisplay({
+    currentStreak: row.currentStreak ?? 0,
+    longestStreak: row.longestStreak ?? 0,
+    lastActivityDate: row.streakLastActivityDate,
+  });
 
   return {
     id: row.id,
@@ -89,8 +96,9 @@ async function getOwnProfile(userId: string) {
     totalPoints: row.totalPoints ?? 0,
     verifiedContributions: row.verifiedContributions ?? 0,
     totalContributions: row.totalContributions ?? 0,
-    currentStreak: row.currentStreak ?? 0,
-    longestStreak: row.longestStreak ?? 0,
+    currentStreak: streak.currentStreak,
+    longestStreak: streak.longestStreak,
+    streakStatus: streak.status,
     language: row.languageId
       ? {
           id: row.languageId,
@@ -264,7 +272,14 @@ export default async function usersRoutes(fastify: FastifyInstance) {
       db.select().from(streaks).where(eq(streaks.userId, userId)).limit(1),
     ]);
 
-    return { stats: stats ?? null, streak: streak ?? null };
+    return {
+      stats: stats ?? null,
+      streak: streak
+        ? {
+            ...computeStreakDisplay(streak),
+          }
+        : null,
+    };
   });
 
   fastify.get("/me/contributions", { preHandler: verifyToken }, async (request) => {

@@ -5,7 +5,7 @@ import {
   api,
   getErrorMessage,
   type AdminContributionListItem,
-  type AdminUser,
+  type AdminUserOption,
   type ContributionKeyword,
   type ContributionReviewsResponse,
   type ContributionStatusValue,
@@ -99,7 +99,7 @@ export default function AdminContributionsPage() {
   const [isBulkActing, setIsBulkActing] = useState(false);
 
   // Filter dropdown data sources.
-  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [users, setUsers] = useState<AdminUserOption[]>([]);
   const [languages, setLanguages] = useState<Language[]>([]);
   const [tribes, setTribes] = useState<NamedOption[]>([]);
   const [subTribes, setSubTribes] = useState<NamedOption[]>([]);
@@ -171,7 +171,7 @@ export default function AdminContributionsPage() {
   }, [load]);
 
   useEffect(() => {
-    api.admin.getUsers({ limit: 500 }).then((res) => setUsers(res.items)).catch(() => setUsers([]));
+    api.admin.getUserOptions().then(setUsers).catch(() => setUsers([]));
     api.languages.getAll().then(setLanguages).catch(() => setLanguages([]));
     api.demographics.getTribes().then(setTribes).catch(() => setTribes([]));
   }, []);
