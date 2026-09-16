@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { api, type Category, type ConceptListItem, type OpenverseImageResult } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
+import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
+import { AdminBulkConceptTextCreate } from "@/components/admin-bulk-concept-text-create";
 import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
 import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
@@ -266,11 +268,20 @@ export default function AdminConceptsPage() {
 
       <AdminCreateCategory onCreated={(c) => setCategories((prev) => [...prev, c])} />
 
+      <AdminBulkTextCreate
+        label="Bulk Add Categories by Text"
+        placeholder={"Nature\nTransport\nEmotions"}
+        onSubmit={(names) => api.admin.bulkCreateCategoriesText(names)}
+        onDone={load}
+      />
+
       <AdminBulkUpload
         label="Bulk Upload Concepts"
         onUpload={(file) => api.admin.bulkUploadConcepts(file)}
         onDone={load}
       />
+
+      <AdminBulkConceptTextCreate onSubmit={(items) => api.admin.bulkCreateConceptsText(items)} onDone={load} />
 
       <AdminBulkImageUrlUpload
         label="Bulk Add Concept Images by URL"

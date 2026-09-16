@@ -1297,6 +1297,9 @@ export const api = {
     // / api.scenes.getAll directly instead of duplicating them here.
     createCategory: (data: { nameEnglish: string; icon?: string; sortOrder?: number }) =>
       apiClient.post<Category>("/api/v1/admin/categories", data).then((r) => r.data),
+    /** One category name per line -- slug auto-generated, same as the single-create form above. */
+    bulkCreateCategoriesText: (names: string[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/categories/bulk-text", { names }).then((r) => r.data),
     createConcept: (data: AdminConceptInput) => apiClient.post<ConceptDetail>("/api/v1/admin/concepts", data).then((r) => r.data),
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>
       apiClient.put<ConceptDetail>(`/api/v1/admin/concepts/${id}`, data).then((r) => r.data),
@@ -1334,6 +1337,9 @@ export const api = {
       form.append("file", file);
       return apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/bulk", form).then((r) => r.data);
     },
+    /** "label, category" per line -- lighter-weight sibling of the CSV/JSON upload above, no file required. */
+    bulkCreateConceptsText: (items: { labelEnglish: string; category: string }[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/bulk-text", { items }).then((r) => r.data),
 
     /** Shared by both the concepts and scenes admin pages -- read-only against Openverse's own catalog. */
     searchOpenverse: (q: string, page = 1, pageSize = 20) =>
@@ -1378,6 +1384,9 @@ export const api = {
       form.append("file", file);
       return apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/bulk", form).then((r) => r.data);
     },
+    /** One title per line -- slug auto-generated, no file required. */
+    bulkCreateScenesText: (titles: string[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/bulk-text", { titles }).then((r) => r.data),
     createSceneConcept: (data: AdminSceneConceptInput) =>
       apiClient.post<{ id: string }>("/api/v1/admin/scene-concepts", data).then((r) => r.data),
     getSceneKeywords: (sceneId: string) =>

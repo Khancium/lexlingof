@@ -615,6 +615,58 @@ async function insertBulkInChunks<V extends Record<string, unknown>>(
   }
 }
 
+/**
+ * Shared by both bulk-concept-create routes (CSV/JSON file upload and the
+ * plain-text paste box) -- everything past "how did these rows arrive" is
+ * identical: resolve each row's category by slug or English name, generate
+ * the slug, and validate. `rowNumOffset` lets each caller keep its own
+ * row-numbering convention (a CSV's rows are 1-indexed *after* a header
+ * row; a plain array has no header).
+ */
+async function buildConceptInserts(
+  rows: { labelEnglish?: string; category?: string; description?: string }[],
+  rowNumOffset: number,
+): Promise<{ toInsert: { rowNum: number; value: typeof concepts.$inferInsert }[]; errors: { row: number; message: string }[] }> {
+  const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
+  const categoryByKey = new Map(
+    allCategories.flatMap((c) => [
+      [c.slug.toLowerCase(), c],
+      [c.nameEnglish.toLowerCase(), c],
+    ]),
+  );
+
+  const toInsert: { rowNum: number; value: typeof concepts.$inferInsert }[] = [];
+  const errors: { row: number; message: string }[] = [];
+
+  rows.forEach((row, i) => {
+    const rowNum = i + rowNumOffset;
+    const categoryKey = (row.category ?? "").trim().toLowerCase();
+    const labelEnglish = (row.labelEnglish ?? "").trim();
+
+    const category = categoryByKey.get(categoryKey);
+    if (!category) {
+      errors.push({ row: rowNum, message: `Unknown category "${row.category ?? ""}"` });
+      return;
+    }
+    if (!labelEnglish) {
+      errors.push({ row: rowNum, message: "labelEnglish is required" });
+      return;
+    }
+
+    toInsert.push({
+      rowNum,
+      value: {
+        categoryId: category.id,
+        slug: `${category.slug}-${slugify(labelEnglish)}`,
+        labelEnglish,
+        description: row.description?.trim() || null,
+      },
+    });
+  });
+
+  return { toInsert, errors };
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                   Schemas                                  */
 /* -------------------------------------------------------------------------- */
@@ -790,10 +842,20 @@ const createCategorySchema = z.object({
   sortOrder: z.number().int().optional(),
 });
 
+// Capped at 500, matching insertBulkInChunks' chunk size -- a paste bigger
+// than that belongs in the CSV/JSON upload instead.
+const bulkCategoryTextSchema = z.object({
+  names: z.array(z.string().trim().min(1)).min(1).max(500),
+});
+
 const createConceptSchema = z.object({
   categoryId: z.string().uuid(),
   labelEnglish: z.string().min(1),
   description: z.string().optional(),
+});
+
+const bulkConceptTextSchema = z.object({
+  items: z.array(z.object({ labelEnglish: z.string().trim().min(1), category: z.string().trim().min(1) })).min(1).max(500),
 });
 
 const updateConceptSchema = z
@@ -858,6 +920,13 @@ const createSceneSchema = z.object({
   description: z.string().optional(),
   difficulty: z.enum(sceneDifficulty.enumValues).optional(),
   estimatedDurationSeconds: z.number().int().positive().optional(),
+});
+
+// Unlike the CSV bulk upload, a slug isn't asked for here -- generated from
+// each title instead (with a numeric suffix on collision), since typing a
+// slug for every line defeats the point of a fast paste-a-list box.
+const bulkSceneTextSchema = z.object({
+  titles: z.array(z.string().trim().min(1)).min(1).max(500),
 });
 
 const updateSceneSchema = z
@@ -1744,6 +1813,41 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     },
   );
 
+  // Paste-a-list bulk sibling of the single-category form above -- one name
+  // per line, slug auto-generated the same way. A name colliding with an
+  // existing category (or a duplicate earlier in the same paste) is a
+  // per-row error rather than failing the whole batch, same convention as
+  // every other bulk-* route in this file.
+  fastify.post("/admin/categories/bulk-text", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { names } = bulkCategoryTextSchema.parse(request.body);
+
+    const existingSlugs = new Set(
+      (await db.select({ slug: categories.slug }).from(categories)).map((c) => c.slug),
+    );
+
+    const result: BulkResult = { created: 0, errors: [] };
+    const toInsert: { rowNum: number; value: typeof categories.$inferInsert }[] = [];
+
+    names.forEach((rawName, i) => {
+      const rowNum = i + 1;
+      const nameEnglish = rawName.trim();
+      const slug = slugify(nameEnglish);
+      if (existingSlugs.has(slug)) {
+        result.errors.push({ row: rowNum, message: `A category with slug "${slug}" already exists` });
+        return;
+      }
+      existingSlugs.add(slug); // reserve within this batch too, so two identical pasted names don't both insert
+      toInsert.push({ rowNum, value: { slug, nameEnglish } });
+    });
+
+    // No audit log here, matching /admin/concepts/bulk and /admin/scenes/bulk
+    // just below -- audit_logs.resourceId is a uuid column, and a chunked
+    // multi-row INSERT (insertBulkInChunks) doesn't return per-row ids to
+    // key one against, unlike the single-category route above.
+    await insertBulkInChunks(categories, toInsert, result);
+    return result;
+  });
+
   /* ------------------------------- Concepts ------------------------------- */
 
   fastify.post("/admin/concepts", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
@@ -1779,44 +1883,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // failing the whole batch.
   fastify.post("/admin/concepts/bulk", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const rows = await readBulkRows(request);
-    const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
-    const categoryByKey = new Map(
-      allCategories.flatMap((c) => [
-        [c.slug.toLowerCase(), c],
-        [c.nameEnglish.toLowerCase(), c],
-      ]),
-    );
+    const { toInsert, errors } = await buildConceptInserts(rows, 2); // +1 for 0-index, +1 for the header row
+    const result: BulkResult = { created: 0, errors };
+    await insertBulkInChunks(concepts, toInsert, result);
+    return result;
+  });
 
-    const result: BulkResult = { created: 0, errors: [] };
-    const toInsert: { rowNum: number; value: typeof concepts.$inferInsert }[] = [];
-
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]!;
-      const rowNum = i + 2; // +1 for 0-index, +1 for the header row
-      const categoryKey = (row.category ?? "").trim().toLowerCase();
-      const labelEnglish = (row.labelEnglish ?? "").trim();
-
-      const category = categoryByKey.get(categoryKey);
-      if (!category) {
-        result.errors.push({ row: rowNum, message: `Unknown category "${row.category ?? ""}"` });
-        continue;
-      }
-      if (!labelEnglish) {
-        result.errors.push({ row: rowNum, message: "labelEnglish is required" });
-        continue;
-      }
-
-      toInsert.push({
-        rowNum,
-        value: {
-          categoryId: category.id,
-          slug: `${category.slug}-${slugify(labelEnglish)}`,
-          labelEnglish,
-          description: row.description?.trim() || null,
-        },
-      });
-    }
-
+  // Lighter-weight sibling of the CSV/JSON upload above: paste "label,
+  // category" lines straight into a textarea instead of preparing a file --
+  // parsed client-side into a structured array, so this shares the exact
+  // same row-building/category-matching logic as the file-based route.
+  fastify.post("/admin/concepts/bulk-text", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { items } = bulkConceptTextSchema.parse(request.body);
+    const { toInsert, errors } = await buildConceptInserts(items, 1);
+    const result: BulkResult = { created: 0, errors };
     await insertBulkInChunks(concepts, toInsert, result);
     return result;
   });
@@ -2101,6 +2181,39 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         },
       });
     }
+
+    await insertBulkInChunks(scenes, toInsert, result);
+    return result;
+  });
+
+  // Paste-a-list sibling of the CSV/JSON upload above: one title per line,
+  // no slug required -- generated from the title (deduped against existing
+  // active slugs and against earlier lines in the same paste, appending
+  // -2/-3/... on collision, since two "Market Day" pastes shouldn't fight
+  // over the bare "market-day" slug).
+  fastify.post("/admin/scenes/bulk-text", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { titles } = bulkSceneTextSchema.parse(request.body);
+
+    const existingSlugs = new Set(
+      (await db.select({ slug: scenes.slug }).from(scenes).where(isNull(scenes.deletedAt))).map((r) => r.slug),
+    );
+
+    const result: BulkResult = { created: 0, errors: [] };
+    const toInsert: { rowNum: number; value: typeof scenes.$inferInsert }[] = [];
+
+    titles.forEach((rawTitle, i) => {
+      const rowNum = i + 1;
+      const title = rawTitle.trim();
+      const base = slugify(title);
+      let slug = base;
+      let suffix = 2;
+      while (existingSlugs.has(slug)) {
+        slug = `${base}-${suffix}`;
+        suffix += 1;
+      }
+      existingSlugs.add(slug);
+      toInsert.push({ rowNum, value: { slug, title } });
+    });
 
     await insertBulkInChunks(scenes, toInsert, result);
     return result;

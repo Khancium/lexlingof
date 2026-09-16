@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type ConceptListItem, type OpenverseImageResult, type Scene, type SceneDifficulty, type SceneImageKeyword } from "@/lib/api";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
+import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
 import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
 import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
@@ -567,6 +568,13 @@ export default function AdminScenesPage() {
       </div>
 
       <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
+
+      <AdminBulkTextCreate
+        label="Bulk Add Scenes by Text"
+        placeholder={"Market Day\nRiver Journey\nSchool Morning"}
+        onSubmit={(titles) => api.admin.bulkCreateScenesText(titles)}
+        onDone={load}
+      />
 
       <AdminBulkImageUrlUpload
         label="Bulk Add Scene Images by URL"

@@ -475,6 +475,32 @@ collections, etc.) instead of only manual upload / "From URL":
   mismatched credit line would be a data-quality issue, not a security one, the same trust
   level already extended to an admin's own "From URL" input.
 
+### 3.10 Paste-a-list bulk create (categories, concepts, scenes)
+
+A lighter-weight sibling of the CSV/JSON bulk upload for the common case of just wanting to
+add a handful of names quickly, without preparing a file:
+
+- `POST /admin/categories/bulk-text` — one name per line, slug auto-generated the same way
+  the single-category form does.
+- `POST /admin/concepts/bulk-text` — `"label, category"` per line. Shares its category
+  resolution and row-building logic (`buildConceptInserts()`) with the CSV/JSON route, so a
+  category typo behaves identically either way: that row errors, the rest of the batch
+  still commits.
+- `POST /admin/scenes/bulk-text` — one title per line, **no slug required** (unlike the CSV
+  route, which still asks for one) — generated from the title via the existing `slugify()`
+  helper, with a numeric suffix on collision against both already-existing active scenes
+  and earlier lines in the same paste, since two people independently pasting "Market Day"
+  shouldn't fight over one slug.
+- All three reuse `insertBulkInChunks()` and return the same `{ created, errors: [{row,
+  message}] }` shape as the file-based bulk routes. None of them write an audit log
+  (matching `/admin/concepts/bulk` and `/admin/scenes/bulk`, which don't either) —
+  `audit_logs.resourceId` is a uuid column, and a chunked multi-row `INSERT` doesn't return
+  per-row ids to key one against.
+- Verified live: duplicate category names (both within one paste and against an existing
+  category) each surface as their own row error rather than failing the batch; an unknown
+  concept category does the same; two identical scene titles in one paste correctly get
+  `slug` and `slug-2`.
+
 ---
 
 ## 4. Frontend Architecture
