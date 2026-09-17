@@ -13,6 +13,17 @@ type CategoryWithCount = Awaited<ReturnType<typeof loadActiveCategoriesWithCount
 
 let listCache: { data: CategoryWithCount; expiresAt: number } | null = null;
 
+/**
+ * Call after any admin mutation that changes which concepts exist or which
+ * category they belong to (create/delete/undo/bulk-edit categoryId) --
+ * without this, a category tile's counter and progress bar on
+ * /contribute/concept stayed wrong for up to LIST_CACHE_TTL_MS (30 minutes)
+ * after the change, since the cache had no other invalidation trigger.
+ */
+export function invalidateCategoriesCache(): void {
+  listCache = null;
+}
+
 async function loadActiveCategoriesWithCounts() {
   const categoryRows = await db
     .select()

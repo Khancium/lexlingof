@@ -501,6 +501,73 @@ add a handful of names quickly, without preparing a file:
   concept category does the same; two identical scene titles in one paste correctly get
   `slug` and `slug-2`.
 
+### 3.11 Silent, case-insensitive duplicate handling on every add path
+
+Adding a concept, scene, or sentence — through any of the seven routes that can create one
+(single-item POST, CSV/JSON bulk, and bulk-text where it exists) — now silently no-ops
+against a pre-existing case-insensitive duplicate instead of erroring or creating a second
+copy: `"River"` and `"river"` are the same thing.
+
+- **Concepts**: the duplicate key is the slug itself (`${category.slug}-${slugify(label)}`)
+  — `slugify()` already lowercases, so this was actually the pre-existing behavior at the
+  *database* level (the `uq_concepts_slug_active` unique index already rejected it), just
+  surfaced as a raw unhandled 500 rather than something graceful. The single-create route
+  now pre-checks and hands back the existing concept (`200`, not `201`) instead of hitting
+  that constraint; the bulk routes (shared via `buildConceptInserts()`) check the same way,
+  scoped to just the categories the batch actually touches (not the whole `concepts`
+  table), and also dedupe *within* the batch itself so two "River" rows in one paste don't
+  both attempt to insert.
+- **Scenes and sentences** have no slug to lean on (a scene's slug is caller-supplied, not
+  derived from the title; sentences have no slug at all), so these compare
+  `lower(title)` / `lower(englishText)` directly against two new plain (non-unique)
+  functional indexes, `ix_scenes_title_lower` and `ix_sentences_english_text_lower`
+  (migration `0028`) — plain rather than unique, since the corpus may already contain
+  incidental duplicates from before this check existed, and a unique index would fail to
+  create over those. Bulk routes fetch only the existing rows matching the batch's own
+  candidate texts (`lower(col) in (...)`, drizzle's array-interpolation syntax for this —
+  `= any(...)` with an interpolated JS array does **not** work, it expands to a tuple
+  `($1, $2)` rather than a Postgres array literal, confirmed by a live 500 while testing
+  this) rather than pulling the whole table, which for `sentences` (6000+ rows) would be
+  exactly the "never pull a large row set into Node" mistake documented in §2.7.
+- **Silent** means what it says: a skipped duplicate is not added to a bulk result's
+  `errors` array and does not count toward `created` — the admin sees a clean result with
+  no noise, not a phantom "row N already exists" for something they'd consider a non-event.
+- **Deliberately forward-only.** This governs what happens the next time something is
+  *added* — it does not retroactively scan for and merge/delete duplicates that already
+  exist in the corpus. Doing that safely would mean deciding which of two duplicates to
+  keep (recordings/reviews/points may already be attached to either one) and is a
+  meaningfully more invasive, harder-to-reverse operation than declining to create a new
+  one going forward.
+- Verified live: a same-slug concept (any case) returns the pre-existing row from all three
+  concept-add paths; a mixed-case duplicate scene title is silently skipped from both the
+  CSV and bulk-text routes; a mixed-case duplicate sentence is silently skipped from both
+  the single-create and CSV bulk routes.
+
+### 3.12 Category tiles: staleness and empty categories
+
+Two related bugs on the same page (`/contribute/concept`'s category grid), both found via
+the same user report:
+
+- **Stale counters.** `GET /categories` (`categories.routes.ts`) caches its
+  category-list-with-concept-counts for 30 minutes (`LIST_CACHE_TTL_MS`), and until now had
+  no invalidation trigger at all — adding, editing, deleting, undoing, or bulk-editing a
+  concept's category never touched it, so a category tile's "X / Y objects" counter and
+  progress bar could read up to 30 minutes stale after any of those. Fixed with an exported
+  `invalidateCategoriesCache()`, called from every concept-mutating route in
+  `admin.routes.ts` (both single-item and bulk forms, plus the generic Undo path's
+  `"concept"` case). Verified live: a freshly bulk-created concept's category shows its
+  incremented count on the very next `GET /categories`, no wait.
+- **Empty categories stayed visible.** A category with zero live concepts (all deleted, or
+  never populated) still rendered as a tile reading "0 / 0 objects" — a dead end with
+  nothing to record. Categories still need to exist and be visible for admin management
+  (creating new concepts into them, including ones deliberately created empty — see §2.5's
+  category-creation note), so this is filtered client-side, only on the contributor-facing
+  page: `apps/web/app/(app)/contribute/concept/page.tsx` drops any category with
+  `conceptCount === 0` before rendering the grid. Verified live against 7 categories in the
+  actual corpus that already had zero concepts (Animals, Food, Transport, Actions, Health,
+  Objects, People) — all seven correctly disappear from the contributor page's category
+  grid while the admin's own category list (which needs to manage them) is untouched.
+
 ---
 
 ## 4. Frontend Architecture

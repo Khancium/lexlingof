@@ -347,7 +347,15 @@ export const sentences = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
-  (t) => [index("ix_sentences_fts").using("gin", sql`to_tsvector('english', ${t.englishText})`)],
+  (t) => [
+    index("ix_sentences_fts").using("gin", sql`to_tsvector('english', ${t.englishText})`),
+    // Backs the case-insensitive duplicate check on every sentence-add path
+    // (admin.routes.ts) -- a plain (non-unique) index rather than a unique
+    // constraint, since the corpus may already contain incidental
+    // duplicates from before this check existed and a unique index would
+    // fail to create over those.
+    index("ix_sentences_english_text_lower").using("btree", sql`lower(${t.englishText})`).where(sql`${t.deletedAt} is null`),
+  ],
 );
 
 export const scenes = pgTable(
@@ -372,6 +380,10 @@ export const scenes = pgTable(
     uniqueIndex("uq_scenes_slug_active")
       .on(t.slug)
       .where(sql`${t.deletedAt} is null`),
+    // Backs the case-insensitive duplicate-title check on every scene-add
+    // path -- see the identical sentences index above for why this is a
+    // plain index, not a unique constraint.
+    index("ix_scenes_title_lower").using("btree", sql`lower(${t.title})`).where(sql`${t.deletedAt} is null`),
   ],
 );
 

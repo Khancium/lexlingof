@@ -51,6 +51,7 @@ import { buildAttribution, searchOpenverseImages } from "../../services/openvers
 import { deleteUserAccount } from "../../services/account.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/level.service.js";
+import { invalidateCategoriesCache } from "../categories/categories.routes.js";
 import { storageService } from "../../services/storage.service.js";
 import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -502,6 +503,7 @@ async function runPermanentDelete(request: FastifyRequest, kind: ContentKind, id
   }
 
   await logPermanentDelete(request, kind, id);
+  if (kind === "concept") invalidateCategoriesCache();
   return { id, deleted: true, permanent: true };
 }
 
@@ -533,6 +535,7 @@ async function runBulkPermanentDelete(request: FastifyRequest, kind: ContentKind
   // is the existing bulk form and turns N round trips into one.
   if (deleted.length > 0) {
     await logPermanentDeletes(request, kind, deleted);
+    if (kind === "concept") invalidateCategoriesCache();
   }
 
   return { deleted: deleted.length, skipped };
@@ -638,6 +641,25 @@ async function buildConceptInserts(
   const toInsert: { rowNum: number; value: typeof concepts.$inferInsert }[] = [];
   const errors: { row: number; message: string }[] = [];
 
+  // Duplicate check is slug-based (case-insensitive by construction --
+  // slugify() lowercases) rather than a separate lower(label) comparison,
+  // matching the single-create route. Existing slugs are fetched once,
+  // scoped to touched categories only rather than the whole concepts table,
+  // and then grown in-memory as the batch itself queues up slugs -- so two
+  // "River" / "river" rows in the SAME paste are caught too, not just
+  // against what's already in the database.
+  const touchedCategoryIds = [...new Set(rows.map((r) => categoryByKey.get((r.category ?? "").trim().toLowerCase())?.id).filter(Boolean))] as string[];
+  const existingSlugs = new Set(
+    touchedCategoryIds.length
+      ? (
+          await db
+            .select({ slug: concepts.slug })
+            .from(concepts)
+            .where(and(inArray(concepts.categoryId, touchedCategoryIds), isNull(concepts.deletedAt)))
+        ).map((c) => c.slug)
+      : [],
+  );
+
   rows.forEach((row, i) => {
     const rowNum = i + rowNumOffset;
     const categoryKey = (row.category ?? "").trim().toLowerCase();
@@ -653,11 +675,20 @@ async function buildConceptInserts(
       return;
     }
 
+    const slug = `${category.slug}-${slugify(labelEnglish)}`;
+    // Silently skip -- no error, no created count -- rather than surfacing
+    // a "row N: already exists" error for what the admin almost certainly
+    // considers a non-event (they just tried to add something already there).
+    if (existingSlugs.has(slug)) {
+      return;
+    }
+    existingSlugs.add(slug);
+
     toInsert.push({
       rowNum,
       value: {
         categoryId: category.id,
-        slug: `${category.slug}-${slugify(labelEnglish)}`,
+        slug,
         labelEnglish,
         description: row.description?.trim() || null,
       },
@@ -1861,7 +1892,23 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     // concepts.slug is NOT NULL and globally unique; the request body has no
     // slug field, so this derives one from the category + label, matching
     // the convention used by the database seed (category-prefixed slug).
+    // slugify() lowercases, so "River" and "river" in the same category
+    // already collide on this same slug -- exactly the case-insensitive
+    // duplicate this is meant to catch.
     const slug = `${category.slug}-${slugify(body.labelEnglish)}`;
+
+    // Silently hand back the existing concept instead of a duplicate --
+    // this used to fall straight through to the DB's unique-index
+    // violation on a repeat label, surfacing as a raw 500.
+    const [duplicate] = await db
+      .select()
+      .from(concepts)
+      .where(and(eq(concepts.slug, slug), isNull(concepts.deletedAt)))
+      .limit(1);
+    if (duplicate) {
+      reply.code(200).send(duplicate);
+      return;
+    }
 
     const [concept] = await db
       .insert(concepts)
@@ -1873,6 +1920,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       })
       .returning();
 
+    invalidateCategoriesCache();
     reply.code(201).send(concept);
   });
 
@@ -1886,6 +1934,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { toInsert, errors } = await buildConceptInserts(rows, 2); // +1 for 0-index, +1 for the header row
     const result: BulkResult = { created: 0, errors };
     await insertBulkInChunks(concepts, toInsert, result);
+    if (result.created > 0) invalidateCategoriesCache();
     return result;
   });
 
@@ -1898,6 +1947,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { toInsert, errors } = await buildConceptInserts(items, 1);
     const result: BulkResult = { created: 0, errors };
     await insertBulkInChunks(concepts, toInsert, result);
+    if (result.created > 0) invalidateCategoriesCache();
     return result;
   });
 
@@ -1926,6 +1976,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       afterState: body,
     });
 
+    invalidateCategoriesCache();
     return updated;
   });
 
@@ -1949,6 +2000,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       })),
     );
 
+    invalidateCategoriesCache();
     return { deleted: rows.length };
   });
 
@@ -1973,6 +2025,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       })),
     );
 
+    invalidateCategoriesCache();
     return { updated: rows.length };
   });
 
@@ -1996,6 +2049,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       afterState: { isActive: false },
     });
 
+    invalidateCategoriesCache();
     return { id, deleted: true };
   });
 
@@ -2117,6 +2171,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const body = createSceneSchema.parse(request.body);
 
+    // Silently hand back the existing scene instead of a case-insensitive
+    // duplicate title -- scenes.slug is caller-supplied here (unlike
+    // concepts, where it's derived from the label), so two different slugs
+    // could otherwise carry the identical title.
+    const [duplicate] = await db
+      .select()
+      .from(scenes)
+      .where(and(sql`lower(${scenes.title}) = lower(${body.title})`, isNull(scenes.deletedAt)))
+      .limit(1);
+    if (duplicate) {
+      reply.code(200).send(duplicate);
+      return;
+    }
+
     const [scene] = await db
       .insert(scenes)
       .values({
@@ -2142,6 +2210,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const result: BulkResult = { created: 0, errors: [] };
     const toInsert: { rowNum: number; value: typeof scenes.$inferInsert }[] = [];
 
+    // Bounded to this batch's own titles, same reasoning as the sentences
+    // bulk route's existingLower check.
+    const candidateLower = [...new Set(rows.map((r) => (r.title ?? "").trim().toLowerCase()).filter(Boolean))];
+    const existingLowerTitles = new Set(
+      candidateLower.length
+        ? (
+            await db
+              .select({ title: scenes.title })
+              .from(scenes)
+              .where(and(sql`lower(${scenes.title}) in ${candidateLower}`, isNull(scenes.deletedAt)))
+          ).map((s) => s.title.toLowerCase())
+        : [],
+    );
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
       const rowNum = i + 2;
@@ -2156,6 +2238,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         result.errors.push({ row: rowNum, message: "title is required" });
         continue;
       }
+      // Silently skip a case-insensitive duplicate title -- no error, no
+      // created count, same convention as concepts/sentences above.
+      const lowerTitle = title.toLowerCase();
+      if (existingLowerTitles.has(lowerTitle)) {
+        continue;
+      }
+      existingLowerTitles.add(lowerTitle);
+
       const difficultyRaw = (row.difficulty ?? "medium").trim().toLowerCase();
       if (!sceneDifficulty.enumValues.includes(difficultyRaw as (typeof sceneDifficulty.enumValues)[number])) {
         result.errors.push({
@@ -2194,9 +2284,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes/bulk-text", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { titles } = bulkSceneTextSchema.parse(request.body);
 
-    const existingSlugs = new Set(
-      (await db.select({ slug: scenes.slug }).from(scenes).where(isNull(scenes.deletedAt))).map((r) => r.slug),
-    );
+    const existingScenes = await db.select({ slug: scenes.slug, title: scenes.title }).from(scenes).where(isNull(scenes.deletedAt));
+    const existingSlugs = new Set(existingScenes.map((r) => r.slug));
+    const existingLowerTitles = new Set(existingScenes.map((r) => r.title.toLowerCase()));
 
     const result: BulkResult = { created: 0, errors: [] };
     const toInsert: { rowNum: number; value: typeof scenes.$inferInsert }[] = [];
@@ -2204,6 +2294,15 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     titles.forEach((rawTitle, i) => {
       const rowNum = i + 1;
       const title = rawTitle.trim();
+
+      // Silently skip a case-insensitive duplicate title -- no error, no
+      // created count, same convention as every other bulk-add route.
+      const lowerTitle = title.toLowerCase();
+      if (existingLowerTitles.has(lowerTitle)) {
+        return;
+      }
+      existingLowerTitles.add(lowerTitle);
+
       const base = slugify(title);
       let slug = base;
       let suffix = 2;
@@ -2574,6 +2673,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request, reply) => {
     const body = createSentenceSchema.parse(request.body);
 
+    // Silently hand back the existing sentence instead of a case-insensitive
+    // duplicate -- sentences have no unique constraint to fall back on the
+    // way concepts/scenes do, so this is the only thing stopping "Hello!"
+    // and "hello!" from both existing.
+    const [duplicate] = await db
+      .select()
+      .from(sentences)
+      .where(and(sql`lower(${sentences.englishText}) = lower(${body.englishText})`, isNull(sentences.deletedAt)))
+      .limit(1);
+    if (duplicate) {
+      reply.code(200).send(duplicate);
+      return;
+    }
+
     const [sentence] = await db
       .insert(sentences)
       .values({ englishText: body.englishText, categoryId: body.categoryId ?? null })
@@ -2597,6 +2710,23 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const result: BulkResult = { created: 0, errors: [] };
     const toInsert: { rowNum: number; value: typeof sentences.$inferInsert }[] = [];
 
+    // Bounded to this batch's own candidate texts (via the lower(english_text)
+    // index added alongside this check) rather than pulling the whole
+    // sentences table -- with 6000+ rows and cross-region latency, that would
+    // be exactly the "never pull a large row set into Node" mistake this
+    // codebase has already been burned by once (see ARCHITECTURE.md §2.7).
+    const candidateLower = [...new Set(rows.map((r) => (r.englishText ?? "").trim().toLowerCase()).filter(Boolean))];
+    const existingLower = new Set(
+      candidateLower.length
+        ? (
+            await db
+              .select({ englishText: sentences.englishText })
+              .from(sentences)
+              .where(and(sql`lower(${sentences.englishText}) in ${candidateLower}`, isNull(sentences.deletedAt)))
+          ).map((s) => s.englishText.toLowerCase())
+        : [],
+    );
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
       const rowNum = i + 2;
@@ -2616,6 +2746,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         }
         categoryId = category.id;
       }
+
+      // Silently skip -- no error, no created count -- same convention as
+      // the concept duplicate check above.
+      const lower = englishText.toLowerCase();
+      if (existingLower.has(lower)) {
+        continue;
+      }
+      existingLower.add(lower);
 
       toInsert.push({ rowNum, value: { englishText, categoryId } });
     }
@@ -2997,6 +3135,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         break;
       case "concept":
         await db.update(concepts).set({ ...before, updatedAt: new Date() } as Partial<typeof concepts.$inferInsert>).where(eq(concepts.id, identifier));
+        invalidateCategoriesCache();
         break;
       case "scene":
         await db.update(scenes).set({ ...before, updatedAt: new Date() } as Partial<typeof scenes.$inferInsert>).where(eq(scenes.id, identifier));

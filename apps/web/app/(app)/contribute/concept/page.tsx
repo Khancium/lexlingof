@@ -72,7 +72,14 @@ function ConceptPageInner() {
 
   useEffect(() => {
     api.categories.getAll().then((all) => {
-      setCategories(userId ? seededShuffle(all, userId) : all);
+      // A category an admin has emptied out (deleted every concept in it)
+      // has nothing left to record here -- hide the tile rather than
+      // showing a dead end with "0 / 0 objects". Categories still exist for
+      // admin management purposes (adding new concepts into them later);
+      // this filter is purely a display concern for the contributor-facing
+      // page, not something the backend or the admin categories list applies.
+      const nonEmpty = all.filter((c) => c.conceptCount > 0);
+      setCategories(userId ? seededShuffle(nonEmpty, userId) : nonEmpty);
     });
   }, [userId]);
 

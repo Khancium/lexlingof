@@ -1,0 +1,2 @@
+CREATE INDEX "ix_scenes_title_lower" ON "scenes" USING btree (lower("title")) WHERE "scenes"."deleted_at" is null;--> statement-breakpoint
+CREATE INDEX "ix_sentences_english_text_lower" ON "sentences" USING btree (lower("english_text")) WHERE "sentences"."deleted_at" is null;
