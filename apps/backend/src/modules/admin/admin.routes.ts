@@ -50,6 +50,7 @@ import {
 import { hasPermission, invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { buildAttribution, searchOpenverseImages } from "../../services/openverse.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
+import { authService } from "../auth/auth.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/level.service.js";
 import { invalidateCategoriesCache } from "../categories/categories.routes.js";
@@ -868,6 +869,16 @@ const bulkReportSchema = z.object({
 const suspendUserSchema = z.object({ reason: z.string().min(1) });
 const cooloffUserSchema = z.object({ reason: z.string().min(1), days: z.coerce.number().int().min(1).max(365) });
 const restrictUserSchema = z.object({ reason: z.string().min(1) });
+
+const adminSetCredentialsSchema = z
+  .object({
+    email: z.string().trim().email().min(1).optional(),
+    password: z.string().min(8).optional(),
+    displayName: z.string().trim().min(1).max(120).optional(),
+  })
+  .refine((b) => b.email !== undefined || b.password !== undefined || b.displayName !== undefined, {
+    message: "Provide at least one of email, password, or displayName",
+  });
 
 const createCategorySchema = z.object({
   nameEnglish: z.string().trim().min(1),
@@ -2102,6 +2113,58 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return { id, isSuspended: false };
+  });
+
+  // Lets an admin/super_admin reset a user's email, password, and/or display
+  // name -- e.g. a user locked out with no working recovery email. Changing
+  // an admin or super_admin's own credentials this way would be a privilege-
+  // escalation shortcut (reset their password, log in as them), so that's
+  // restricted to super_admin acting on another admin; nobody can use this
+  // route on a super_admin at all -- that account manages its own
+  // credentials via the normal self-service change-password flow.
+  fastify.post("/admin/users/:id/credentials", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const body = adminSetCredentialsSchema.parse(request.body);
+    const actor = request.user!;
+
+    const [target] = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+
+    if (target.role === "super_admin") {
+      throw new HttpError(403, "FORBIDDEN", "A super_admin's credentials can't be changed from this panel");
+    }
+    if (target.role === "admin" && actor.role !== "super_admin") {
+      throw new HttpError(403, "FORBIDDEN", "Only a super_admin can change another admin's credentials");
+    }
+
+    if (body.email && body.email.toLowerCase() !== target.email.toLowerCase()) {
+      const [existing] = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.email, body.email), isNull(users.deletedAt)))
+        .limit(1);
+      if (existing) {
+        throw new HttpError(409, "EMAIL_TAKEN", "Another account already uses this email");
+      }
+    }
+
+    const updated = await authService.adminUpdateCredentials(id, body);
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: actor.id,
+      actorRole: actor.role,
+      action: "admin_user_credentials_update",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { email: target.email },
+      // The new password itself is never logged -- only whether one was set.
+      afterState: { email: updated.email, displayName: updated.displayName, passwordChanged: body.password !== undefined },
+    });
+
+    return updated;
   });
 
   // "Banning" a user IS deleting their account (per product decision) --

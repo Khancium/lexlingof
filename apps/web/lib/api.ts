@@ -1372,6 +1372,11 @@ export const api = {
       apiClient.post<{ id: string; isSuspended: boolean }>(`/api/v1/admin/users/${id}/suspend`, { reason }).then((r) => r.data),
     unsuspendUser: (id: string) =>
       apiClient.post<{ id: string; isSuspended: boolean }>(`/api/v1/admin/users/${id}/unsuspend`).then((r) => r.data),
+    /** Any subset of email/password/displayName -- omit a field to leave it unchanged. Not usable on a super_admin target; changing another admin's credentials requires the actor to be a super_admin themselves. */
+    updateUserCredentials: (id: string, data: { email?: string; password?: string; displayName?: string }) =>
+      apiClient
+        .post<{ id: string; email: string; displayName: string }>(`/api/v1/admin/users/${id}/credentials`, data)
+        .then((r) => r.data),
     banUser: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/users/${id}`).then((r) => r.data),
 
     getAudioDownloadUrl: (audioFileId: string) =>

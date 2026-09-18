@@ -16,12 +16,14 @@ import {
   type UserStatusFilter,
 } from "@/lib/api";
 import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS } from "@/lib/demographics-constants";
+import { useAuthStore } from "@/lib/store";
 import { LEVEL_COLOR } from "@/lib/level";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 import { AdminMultiSelect } from "@/components/admin-multi-select";
 import { AdminUserActionModal } from "@/components/admin-user-action-modal";
 import { AdminUserDetailsModal } from "@/components/admin-user-details-modal";
+import { AdminUserCredentialsModal } from "@/components/admin-user-credentials-modal";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -136,6 +138,7 @@ function dedupeById<T extends { id: string }>(lists: T[][]): T[] {
 }
 
 export default function AdminUsersPage() {
+  const currentUser = useAuthStore((s) => s.user);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
@@ -146,6 +149,7 @@ export default function AdminUsersPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionUser, setActionUser] = useState<AdminUser | null>(null);
   const [detailsUserId, setDetailsUserId] = useState<string | null>(null);
+  const [credentialsUser, setCredentialsUser] = useState<AdminUser | null>(null);
   const [showFilters, setShowFilters] = useState(false);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -699,6 +703,15 @@ export default function AdminUsersPage() {
                         >
                           Details
                         </button>
+                        {u.role !== "super_admin" && (u.role !== "admin" || currentUser?.role === "super_admin") ? (
+                          <button
+                            onClick={() => setCredentialsUser(u)}
+                            disabled={isBusy}
+                            className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border disabled:opacity-50"
+                          >
+                            Credentials
+                          </button>
+                        ) : null}
                         <button
                           onClick={() => downloadIndividual(u, "csv")}
                           disabled={isBusy}
@@ -784,6 +797,9 @@ export default function AdminUsersPage() {
       ) : null}
       {detailsUserId ? (
         <AdminUserDetailsModal userId={detailsUserId} onClose={() => setDetailsUserId(null)} />
+      ) : null}
+      {credentialsUser ? (
+        <AdminUserCredentialsModal user={credentialsUser} onClose={() => setCredentialsUser(null)} onDone={load} />
       ) : null}
     </div>
   );

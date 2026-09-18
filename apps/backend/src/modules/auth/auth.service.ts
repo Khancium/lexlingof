@@ -199,6 +199,39 @@ class AuthService {
     await db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
   }
 
+  /**
+   * Admin-initiated credential change -- unlike changePassword() above, there's
+   * no current-password check (the admin already had to clear a permission
+   * gate to call this at all). A password change still revokes every one of
+   * the target's active sessions, same as a self-service change, so a
+   * compromised account doesn't stay logged in elsewhere after the reset.
+   */
+  async adminUpdateCredentials(
+    userId: string,
+    updates: { email?: string; password?: string; displayName?: string },
+  ): Promise<{ id: string; email: string; displayName: string }> {
+    const setValues: { updatedAt: Date; email?: string; displayName?: string; passwordHash?: string } = { updatedAt: new Date() };
+    if (updates.email !== undefined) setValues.email = updates.email;
+    if (updates.displayName !== undefined) setValues.displayName = updates.displayName;
+    if (updates.password !== undefined) setValues.passwordHash = await bcrypt.hash(updates.password, PASSWORD_SALT_ROUNDS);
+
+    const [updated] = await db
+      .update(users)
+      .set(setValues)
+      .where(eq(users.id, userId))
+      .returning({ id: users.id, email: users.email, displayName: users.displayName });
+
+    if (!updated) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+
+    if (updates.password !== undefined) {
+      await db.update(refreshTokens).set({ revokedAt: new Date() }).where(and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt)));
+    }
+
+    return updated;
+  }
+
   private async generateTokens(userId: string, email: string, role: string): Promise<TokenPair> {
     const accessToken = jwt.sign({ sub: userId, email, role }, process.env.JWT_SECRET!, {
       expiresIn: ACCESS_TOKEN_EXPIRY,
