@@ -151,17 +151,33 @@ class StorageService {
   // directly (a cache hit, an email, a native mobile client).
   private static readonly IMAGE_WEBP_QUALITY = 82;
 
-  async uploadSceneImage(
+  // Concept tiles and scene images are shown at fixed aspect ratios in the
+  // contribute UI -- 1:1 for a concept's object photo, 16:9 for a scene's
+  // wide establishing shot. Letting arbitrary source dimensions through (the
+  // old behavior, `fit: "inside"`, only capped the longest edge and left the
+  // ratio whatever the source was) meant the frontend's fixed-ratio image
+  // boxes either letterboxed or stretched every image that didn't already
+  // happen to match. `fit: "cover"` crops to exactly the target ratio;
+  // `position: "attention"` is sharp's saliency-based smart crop (biased
+  // toward the most visually "interesting" region) rather than a naive
+  // centre crop, so it's a reasonable unattended default -- an admin who
+  // isn't happy with where it landed can still crop manually afterward
+  // (see cropAndUploadImage below).
+  private static readonly CONCEPT_IMAGE_SIZE = { width: 1200, height: 1200 };
+  private static readonly SCENE_IMAGE_SIZE = { width: 1600, height: 900 };
+
+  private async uploadImageWithTargetRatio(
     fileBuffer: Buffer,
     filename: string,
+    target: { width: number; height: number },
   ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
     const resized = await sharp(fileBuffer)
       .rotate() // apply EXIF orientation before stripping metadata below
       .resize({
-        width: StorageService.IMAGE_MAX_DIMENSION,
-        height: StorageService.IMAGE_MAX_DIMENSION,
-        fit: "inside",
-        withoutEnlargement: true,
+        width: target.width,
+        height: target.height,
+        fit: "cover",
+        position: "attention",
       })
       .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
       .toBuffer();
@@ -170,7 +186,7 @@ class StorageService {
 
     const { data, error } = await supabase.storage
       .from(IMAGE_BUCKET)
-      .upload(webpFilename, resized, { contentType: "image/webp" });
+      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
 
     if (error) {
       throw error;
@@ -179,6 +195,61 @@ class StorageService {
     const publicUrl = this.getImagePublicUrl(data.path);
 
     return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
+  }
+
+  /** 1:1 -- concept object photos. */
+  async uploadConceptImage(fileBuffer: Buffer, filename: string) {
+    return this.uploadImageWithTargetRatio(fileBuffer, filename, StorageService.CONCEPT_IMAGE_SIZE);
+  }
+
+  /** 16:9 -- scene establishing shots. */
+  async uploadSceneImage(fileBuffer: Buffer, filename: string) {
+    return this.uploadImageWithTargetRatio(fileBuffer, filename, StorageService.SCENE_IMAGE_SIZE);
+  }
+
+  /**
+   * Manual crop: the admin has already chosen the exact rectangle (client-side,
+   * against the image's own already-CORS-friendly Supabase URL or a freshly
+   * selected local file), so this re-encodes at the target ratio's resolution
+   * without re-cropping -- `fit: "fill"` because the incoming buffer is
+   * already cropped to the right ratio by the browser's canvas; resizing
+   * again with "cover" here would silently re-crop a manually-chosen
+   * rectangle, defeating the whole point of the manual step.
+   */
+  private async uploadPrecroppedImage(
+    fileBuffer: Buffer,
+    filename: string,
+    target: { width: number; height: number },
+  ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
+    const resized = await sharp(fileBuffer)
+      .rotate()
+      .resize({ width: target.width, height: target.height, fit: "fill" })
+      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
+      .toBuffer();
+
+    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
+
+    const { data, error } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
+
+    if (error) {
+      throw error;
+    }
+
+    const publicUrl = this.getImagePublicUrl(data.path);
+
+    return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
+  }
+
+  /** Store a concept image the admin already cropped client-side -- see uploadPrecroppedImage. */
+  async uploadPrecroppedConceptImage(fileBuffer: Buffer, filename: string) {
+    return this.uploadPrecroppedImage(fileBuffer, filename, StorageService.CONCEPT_IMAGE_SIZE);
+  }
+
+  /** Store a scene image the admin already cropped client-side -- see uploadPrecroppedImage. */
+  async uploadPrecroppedSceneImage(fileBuffer: Buffer, filename: string) {
+    return this.uploadPrecroppedImage(fileBuffer, filename, StorageService.SCENE_IMAGE_SIZE);
   }
 
   /**

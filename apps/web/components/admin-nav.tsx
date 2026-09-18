@@ -4,6 +4,15 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuthStore } from "@/lib/store";
 
+// A volunteer only ever sees the three content-editing pages -- no Users,
+// Contributions, Suggestions, or (obviously) Volunteers link, even though the
+// layout guard lets their role reach /admin/* at all.
+const VOLUNTEER_LINKS = [
+  { href: "/admin/concepts", label: "Concepts" },
+  { href: "/admin/scenes", label: "Scenes" },
+  { href: "/admin/sentences", label: "Sentences" },
+];
+
 const LINKS = [
   { href: "/admin/dashboard", label: "Dashboard" },
   { href: "/admin/users", label: "Users" },
@@ -11,6 +20,7 @@ const LINKS = [
   { href: "/admin/concepts", label: "Concepts" },
   { href: "/admin/scenes", label: "Scenes" },
   { href: "/admin/sentences", label: "Sentences" },
+  { href: "/admin/volunteers", label: "Volunteers" },
   { href: "/admin/suggestions", label: "Suggestions" },
 ];
 
@@ -24,8 +34,9 @@ export default function AdminNav() {
   const user = useAuthStore((state) => state.user);
   const pathname = usePathname();
   const isSuperAdmin = user?.role === "super_admin";
+  const isVolunteer = user?.role === "volunteer";
 
-  const links = isSuperAdmin ? [...LINKS, ...SUPER_ADMIN_LINKS] : LINKS;
+  const links = isVolunteer ? VOLUNTEER_LINKS : isSuperAdmin ? [...LINKS, ...SUPER_ADMIN_LINKS] : LINKS;
 
   return (
     <aside className="w-full shrink-0 border-b border-border bg-surface p-4 md:w-56 md:border-b-0 md:border-r">

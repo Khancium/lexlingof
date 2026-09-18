@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, ilike, isNull, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -10,6 +10,17 @@ import { HttpError } from "../../utils/http-error.js";
 const listQuerySchema = z.object({
   categoryId: z.string().uuid().optional(),
   search: z.string().min(1).optional(),
+  // Admin-only in practice (the contributor browse UI has no date picker),
+  // but kept on the shared public endpoint rather than a separate
+  // admin-only list route -- see the module-level note in admin.routes.ts
+  // about not duplicating concept/scene listing.
+  createdFrom: z.string().datetime().optional(),
+  createdTo: z.string().datetime().optional(),
+  hasImage: z.enum(["yes", "no"]).optional(),
+  // Volunteer's "my own additions" filter -- true restricts the list to
+  // concepts this caller themselves created (concepts.createdBy). Same
+  // convention as the scene/sentence list routes.
+  mine: z.coerce.boolean().optional(),
   // 1000 (not 200) so admin pages can fetch the full concept list in one
   // request for client-side matching (e.g. the bulk-add-images-by-URL and
   // scene-coverage pickers) without paginating just to build a lookup map.
@@ -21,14 +32,34 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 
 export default async function conceptsRoutes(fastify: FastifyInstance) {
   fastify.get("/concepts", { preHandler: verifyToken }, async (request) => {
-    const { categoryId, search, limit, offset } = listQuerySchema.parse(request.query);
+    const { categoryId, search, createdFrom, createdTo, hasImage, mine, limit, offset } = listQuerySchema.parse(request.query);
 
     const conditions = [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
     if (categoryId) {
       conditions.push(eq(concepts.categoryId, categoryId));
     }
+    if (mine) {
+      conditions.push(eq(concepts.createdBy, request.user!.id));
+    }
     if (search) {
       conditions.push(ilike(concepts.labelEnglish, `%${search}%`));
+    }
+    if (createdFrom) {
+      conditions.push(gte(concepts.createdAt, new Date(createdFrom)));
+    }
+    if (createdTo) {
+      conditions.push(lte(concepts.createdAt, new Date(createdTo)));
+    }
+    // Literal, table-qualified SQL text rather than interpolating
+    // ${concepts.id} -- drizzle renders an interpolated column as a bare,
+    // unqualified name, and concept_media has its own "id" column too, so a
+    // bare "id" inside this subquery would resolve to concept_media.id
+    // instead of the outer concepts.id (comparing a row against itself),
+    // exactly the pitfall documented in ARCHITECTURE.md §2.7.
+    if (hasImage === "yes") {
+      conditions.push(sql`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`);
+    } else if (hasImage === "no") {
+      conditions.push(sql`not exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`);
     }
 
     const [rows, [totalRow]] = await Promise.all([
@@ -40,7 +71,10 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
           slug: concepts.slug,
           labelEnglish: concepts.labelEnglish,
           description: concepts.description,
+          createdAt: concepts.createdAt,
+          createdBy: concepts.createdBy,
           imageUrl: conceptMedia.publicUrl,
+          imageMediaId: conceptMedia.id,
           // Tile shading needs a per-user "have I already recorded this
           // concept" signal -- computed here in the list query itself so the
           // tile grid doesn't need N follow-up requests to find out.

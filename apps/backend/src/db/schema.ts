@@ -31,7 +31,14 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 /*                                    Enums                                   */
 /* -------------------------------------------------------------------------- */
 
-export const userRole = pgEnum("user_role", ["super_admin", "admin", "contributor"]);
+// "volunteer" sits between contributor and admin: granted concepts.manage /
+// scenes.manage / sentences.manage (the same permission codes admin already
+// has for those three pages -- see role_permissions), but every create/delete
+// they perform through those routes is intercepted into pending_changes for
+// admin approval instead of applying immediately (see
+// services/pending-changes.service.ts), unless the admin has flipped
+// users.autoApproveVolunteer on for them.
+export const userRole = pgEnum("user_role", ["super_admin", "admin", "volunteer", "contributor"]);
 
 export const contributionModule = pgEnum("contribution_module", [
   "WORD",
@@ -164,6 +171,8 @@ export const users = pgTable(
     autoLoadNext: boolean("auto_load_next").default(true).notNull(),
     /** Preference only -- doesn't touch device_tokens; sendPushToUser checks this before sending regardless of what tokens are registered. */
     pushNotificationsEnabled: boolean("push_notifications_enabled").default(true).notNull(),
+    /** Meaningless for any role but "volunteer" -- when true, that volunteer's concept/scene/sentence/category/image create-and-delete actions apply immediately instead of queuing in pending_changes. */
+    autoApproveVolunteer: boolean("auto_approve_volunteer").default(false).notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -304,6 +313,13 @@ export const concepts = pgTable(
     description: text("description"),
     isActive: boolean("is_active").default(true).notNull(),
     sortOrder: integer("sort_order").default(0).notNull(),
+    // Null for every row created before this column existed (admin-created,
+    // no single author) and for anything an admin/super_admin creates going
+    // forward -- only ever populated for a volunteer's own creation, so the
+    // admin concepts/scenes/sentences pages' "my additions" filter (gating
+    // when a volunteer is allowed to see a delete button at all) has
+    // something to filter on.
+    createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -343,6 +359,8 @@ export const sentences = pgTable(
     categoryId: uuid("category_id").references(() => categories.id),
     isActive: boolean("is_active").default(true).notNull(),
     usageCount: integer("usage_count").default(0).notNull(),
+    // See concepts.createdBy for why this exists and when it's populated.
+    createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -372,6 +390,8 @@ export const scenes = pgTable(
     dailyDate: date("daily_date"),
     version: integer("version").default(1).notNull(),
     conceptCount: integer("concept_count").default(0).notNull(),
+    // See concepts.createdBy for why this exists and when it's populated.
+    createdBy: uuid("created_by").references(() => users.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -1198,6 +1218,54 @@ export const auditLogs = pgTable(
     index("ix_audit_logs_actor").on(t.actorId),
     index("ix_audit_logs_resource").on(t.resourceType, t.resourceId),
     index("ix_audit_logs_created_at").on(t.createdAt),
+  ],
+);
+
+export const pendingChangeTargetType = pgEnum("pending_change_target_type", [
+  "category",
+  "concept",
+  "scene",
+  "sentence",
+  "concept_media",
+  "scene_media",
+]);
+export const pendingChangeAction = pgEnum("pending_change_action", ["create", "delete"]);
+export const pendingChangeStatus = pgEnum("pending_change_status", ["pending", "approved", "rejected"]);
+
+/**
+ * A volunteer's create/delete on the corpus (concepts/scenes/sentences/
+ * categories/images), captured instead of applied -- unless
+ * users.autoApproveVolunteer is on for them, in which case it's applied
+ * immediately and never rows here at all (see
+ * services/pending-changes.service.ts). `payload` carries everything
+ * needed to actually perform the action once approved: for a "create", the
+ * fields the corresponding admin creation route would have inserted; for a
+ * "delete", `{ id }` of the target row.
+ */
+export const pendingChanges = pgTable(
+  "pending_changes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    volunteerId: uuid("volunteer_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    targetType: pendingChangeTargetType("target_type").notNull(),
+    action: pendingChangeAction("action").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    status: pendingChangeStatus("status").default("pending").notNull(),
+    reviewedBy: uuid("reviewed_by").references(() => users.id),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+    rejectionReason: text("rejection_reason"),
+    // Set once approved+applied for a "create" -- the id of the row that
+    // actually landed in concepts/scenes/sentences/etc. Null for "delete"
+    // (nothing new was created) and for anything still pending/rejected.
+    resultResourceId: uuid("result_resource_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    index("ix_pending_changes_volunteer").on(t.volunteerId),
+    index("ix_pending_changes_status").on(t.status),
+    index("ix_pending_changes_target_type").on(t.targetType),
   ],
 );
 

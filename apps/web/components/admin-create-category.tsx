@@ -3,20 +3,33 @@
 import { useState } from "react";
 import { api, getErrorMessage, type Category } from "@/lib/api";
 
-/** Lets an admin add a brand-new category on its own -- no concept (or, on the scenes page, scene) has to exist yet. Shared by the Concepts and Scenes admin pages, since both let an admin pick a category for something. */
+/**
+ * Lets an admin (or a volunteer -- volunteers get full access to this form
+ * too) add a brand-new category on its own -- no concept (or, on the scenes
+ * page, scene) has to exist yet. Shared by the Concepts and Scenes admin
+ * pages, since both let the caller pick a category for something.
+ */
 export function AdminCreateCategory({ onCreated }: { onCreated: (category: Category) => void }) {
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
 
   async function handleCreate() {
     if (name.trim().length === 0) return;
     setIsCreating(true);
     setError(null);
+    setInfo(null);
     try {
-      const created = await api.admin.createCategory({ nameEnglish: name.trim(), icon: icon.trim() || undefined });
-      onCreated(created);
+      const result = await api.admin.createCategory({ nameEnglish: name.trim(), icon: icon.trim() || undefined });
+      if ("pending" in result) {
+        // A volunteer without auto-approve -- nothing was actually created
+        // yet, so there's no Category to hand back to the caller.
+        setInfo(result.message);
+      } else {
+        onCreated(result);
+      }
       setName("");
       setIcon("");
     } catch (err) {
@@ -53,6 +66,7 @@ export function AdminCreateCategory({ onCreated }: { onCreated: (category: Categ
         </button>
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {info ? <p className="text-sm text-emerald-600">{info}</p> : null}
     </div>
   );
 }

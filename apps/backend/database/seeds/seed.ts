@@ -124,6 +124,7 @@ const PERMISSIONS: { code: string; description: string }[] = [
   { code: "gamification.manage", description: "Configure points, levels and badges" },
   { code: "admins.manage", description: "Grant or revoke admin and super-admin roles" },
   { code: "system.manage", description: "Configure system-wide settings and feature flags" },
+  { code: "volunteers.manage", description: "Assign the volunteer role, review their pending changes, and toggle auto-approve" },
   { code: "exports.create", description: "Request a data export" },
   { code: "exports.manage", description: "Manage and fulfil data export requests" },
   { code: "analytics.read", description: "View analytics and reporting dashboards" },
@@ -138,6 +139,20 @@ const CONTRIBUTOR_PERMISSION_CODES = [
   "users.read",
   "users.update.own",
 ];
+
+/**
+ * Deliberately the exact same three codes admin holds for the concepts/
+ * scenes/sentences pages -- a volunteer gets full route-level access to
+ * those admin pages for free through the existing requirePermission()
+ * checks. What's different isn't which routes a volunteer can call, it's
+ * what those routes *do* for them: pending-changes.service.ts intercepts
+ * every create/delete on those three routes (plus categories and concept/
+ * scene image-add, which are gated on these same codes) and queues them for
+ * admin approval instead of applying immediately, unless
+ * users.autoApproveVolunteer is on. See §1 of the volunteer feature notes
+ * in ARCHITECTURE.md.
+ */
+const VOLUNTEER_PERMISSION_CODES = ["concepts.manage", "scenes.manage", "sentences.manage"];
 
 const ADMIN_PERMISSION_CODES = [
   "contributions.create",
@@ -163,6 +178,7 @@ const ADMIN_PERMISSION_CODES = [
   "exports.manage",
   "analytics.read",
   "audit.read",
+  "volunteers.manage",
 ];
 
 /**
@@ -172,8 +188,9 @@ const ADMIN_PERMISSION_CODES = [
  */
 const SUPER_ADMIN_PERMISSION_CODES = [...new Set([...ADMIN_PERMISSION_CODES, "admins.manage", "system.manage"])];
 
-const ROLE_PERMISSION_CODES: Record<"contributor" | "admin" | "super_admin", string[]> = {
+const ROLE_PERMISSION_CODES: Record<"contributor" | "volunteer" | "admin" | "super_admin", string[]> = {
   contributor: CONTRIBUTOR_PERMISSION_CODES,
+  volunteer: VOLUNTEER_PERMISSION_CODES,
   admin: ADMIN_PERMISSION_CODES,
   super_admin: SUPER_ADMIN_PERMISSION_CODES,
 };

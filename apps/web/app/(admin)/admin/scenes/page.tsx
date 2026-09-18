@@ -1,11 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type ConceptListItem, type OpenverseImageResult, type Scene, type SceneDifficulty, type SceneImageKeyword } from "@/lib/api";
+import {
+  api,
+  type Category,
+  type ConceptListItem,
+  type OpenverseImageResult,
+  type Scene,
+  type SceneDifficulty,
+  type SceneImageKeyword,
+} from "@/lib/api";
+import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
 import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
+import { AdminMediaManager } from "@/components/admin-media-manager";
+import { ImageCropper } from "@/components/image-cropper";
 import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
@@ -71,6 +82,9 @@ function ConceptMultiSelect({
 }
 
 export default function AdminScenesPage() {
+  const user = useAuthStore((s) => s.user);
+  const isVolunteer = user?.role === "volunteer";
+
   const [scenes, setScenes] = useState<Scene[]>([]);
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
   // Unpaginated, used only to resolve titles typed into the bulk-by-URL textarea.
@@ -80,6 +94,15 @@ export default function AdminScenesPage() {
   const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+
+  const [createdFrom, setCreatedFrom] = useState("");
+  const [createdTo, setCreatedTo] = useState("");
+  const [filterCategoryId, setFilterCategoryId] = useState("");
+  const [filterHasImage, setFilterHasImage] = useState<"" | "yes" | "no">("");
+  const [categories, setCategories] = useState<Category[]>([]);
+  // Volunteer-only "my own additions" filter -- also unlocks their per-row
+  // Delete button (see the delete-visibility rule near the list below).
+  const [onlyMine, setOnlyMine] = useState(false);
 
   const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
@@ -93,6 +116,7 @@ export default function AdminScenesPage() {
   const [newConceptFilter, setNewConceptFilter] = useState("");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [createInfo, setCreateInfo] = useState<string | null>(null);
 
   const [coverageSceneId, setCoverageSceneId] = useState<string | null>(null);
   const [coverageConceptIds, setCoverageConceptIds] = useState<Set<string>>(new Set());
@@ -110,6 +134,8 @@ export default function AdminScenesPage() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
   const [openverseSceneId, setOpenverseSceneId] = useState<string | null>(null);
+  const [imagesSceneId, setImagesSceneId] = useState<string | null>(null);
+  const [cropTarget, setCropTarget] = useState<{ sceneId: string; url: string } | null>(null);
   // A file the admin has chosen but not yet confirmed -- lets them type
   // keywords for it before the actual upload+tag round trips fire.
   const [pendingUploads, setPendingUploads] = useState<Record<string, { file: File; keywordsText: string }>>({});
@@ -126,15 +152,29 @@ export default function AdminScenesPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [sceneRes, conceptRes, allSceneRes] = await Promise.all([
-        api.scenes.getAll({ limit, offset }),
+      // An end date is inclusive of the whole day -- see the identical note
+      // on the concepts admin page.
+      const createdFromIso = createdFrom ? new Date(createdFrom).toISOString() : undefined;
+      const createdToIso = createdTo ? new Date(`${createdTo}T23:59:59.999Z`).toISOString() : undefined;
+      const [sceneRes, conceptRes, allSceneRes, cats] = await Promise.all([
+        api.scenes.getAll({
+          limit,
+          offset,
+          createdFrom: createdFromIso,
+          createdTo: createdToIso,
+          categoryId: filterCategoryId || undefined,
+          hasImage: filterHasImage || undefined,
+          mine: isVolunteer && onlyMine ? true : undefined,
+        }),
         api.concepts.getAll({ limit: 200 }),
         api.scenes.getAll({ limit: 1000 }),
+        api.categories.getAll(),
       ]);
       setScenes(sceneRes.items);
       setTotal(sceneRes.total);
       setConcepts(conceptRes.items);
       setAllScenes(allSceneRes.items);
+      setCategories(cats);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load scenes");
     } finally {
@@ -145,7 +185,7 @@ export default function AdminScenesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, limit]);
+  }, [offset, limit, createdFrom, createdTo, filterCategoryId, filterHasImage, onlyMine]);
 
   function handleLimitChange(newLimit: number) {
     setLimit(newLimit);
@@ -156,14 +196,33 @@ export default function AdminScenesPage() {
     if (slug.trim().length === 0 || title.trim().length === 0) return;
     setIsCreating(true);
     setCreateError(null);
+    setCreateInfo(null);
     try {
-      const scene = await api.admin.createScene({
+      const result = await api.admin.createScene({
         slug: slug.trim(),
         title: title.trim(),
         description: description.trim() || undefined,
         difficulty,
         estimatedDurationSeconds: estimatedSeconds ? Number(estimatedSeconds) : undefined,
       });
+
+      if ("pending" in result) {
+        // No scene actually exists yet (a volunteer submission awaiting
+        // admin approval), so there's nothing to attach an image or concept
+        // coverage to -- surface the message and stop here.
+        setCreateInfo(result.message);
+        setSlug("");
+        setTitle("");
+        setDescription("");
+        setEstimatedSeconds("");
+        setNewImageFile(null);
+        setNewImageUrl("");
+        setNewKeywordsText("");
+        setNewConceptIds(new Set());
+        setNewConceptFilter("");
+        return;
+      }
+      const scene = result;
 
       // Image upload (plus its keywords, which need the resulting media id)
       // and concept coverage rows are all independent of each other once the
@@ -180,6 +239,9 @@ export default function AdminScenesPage() {
       if (imageUpload) {
         tasks.push(
           imageUpload.then((media) => {
+            // A pending media submission has no real media row yet -- there's
+            // nothing to tag keywords onto until an admin approves it.
+            if ("pending" in media) return;
             const keywordList = newKeywordsText
               .split(",")
               .map((k) => k.trim())
@@ -214,8 +276,15 @@ export default function AdminScenesPage() {
     }
   }
 
+  // A picked file is cropped client-side (16:9, matching the server's own
+  // auto-crop target) before it's staged into pendingUploads -- see the
+  // identical comment in the concepts admin page.
   function selectFileForUpload(sceneId: string, file: File | undefined) {
     if (!file) return;
+    setCropTarget({ sceneId, url: URL.createObjectURL(file) });
+  }
+
+  function stageCroppedUpload(sceneId: string, file: File) {
     setUploadMessage(null);
     setPendingUrlUploads((prev) => {
       const next = { ...prev };
@@ -225,12 +294,20 @@ export default function AdminScenesPage() {
     setPendingUploads((prev) => ({ ...prev, [sceneId]: { file, keywordsText: "" } }));
   }
 
+  function handleCropApply(blob: Blob) {
+    if (!cropTarget) return;
+    const { sceneId, url } = cropTarget;
+    URL.revokeObjectURL(url);
+    setCropTarget(null);
+    stageCroppedUpload(sceneId, new File([blob], "cropped.jpg", { type: "image/jpeg" }));
+  }
+
   async function handleAddImageOpenverse(sceneId: string, image: OpenverseImageResult) {
     setUploadingId(sceneId);
     setUploadMessage(null);
     try {
-      await api.admin.addSceneMediaOpenverse(sceneId, image);
-      setUploadMessage({ id: sceneId, text: "Image added from Openverse" });
+      const result = await api.admin.addSceneMediaOpenverse(sceneId, image);
+      setUploadMessage({ id: sceneId, text: "pending" in result ? result.message : "Image added from Openverse" });
     } catch (err) {
       setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
       throw err;
@@ -272,6 +349,12 @@ export default function AdminScenesPage() {
     setUploadMessage(null);
     try {
       const media = await api.admin.addSceneMediaUrl(sceneId, pending.url.trim());
+
+      if ("pending" in media) {
+        setUploadMessage({ id: sceneId, text: media.message });
+        cancelPendingUrlUpload(sceneId);
+        return;
+      }
 
       const keywordList = pending.keywordsText
         .split(",")
@@ -315,6 +398,12 @@ export default function AdminScenesPage() {
     try {
       const media = await api.admin.uploadSceneMedia(sceneId, pending.file);
 
+      if ("pending" in media) {
+        setUploadMessage({ id: sceneId, text: media.message });
+        cancelPendingUpload(sceneId);
+        return;
+      }
+
       const keywordList = pending.keywordsText
         .split(",")
         .map((k) => k.trim())
@@ -346,7 +435,8 @@ export default function AdminScenesPage() {
     if (!confirm(`Delete "${scene.title}"? This cannot be undone from here.`)) return;
     setDeletingId(scene.id);
     try {
-      await api.admin.deleteScene(scene.id);
+      const result = await api.admin.deleteScene(scene.id);
+      if ("pending" in result) alert(result.message);
       await load();
     } finally {
       setDeletingId(null);
@@ -565,57 +655,145 @@ export default function AdminScenesPage() {
           {isCreating ? "Adding..." : "Add Scene"}
         </button>
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
+        {createInfo ? <p className="text-sm text-emerald-600">{createInfo}</p> : null}
       </div>
 
-      <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
+      {/* Bulk CSV/paste-a-list create and bulk-delete are admin-only -- a
+         volunteer's access is single-item create/delete only, per the
+         explicit scoping decision, so none of these widgets render for them. */}
+      {!isVolunteer ? (
+        <>
+          <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
 
-      <AdminBulkTextCreate
-        label="Bulk Add Scenes by Text"
-        placeholder={"Market Day\nRiver Journey\nSchool Morning"}
-        onSubmit={(titles) => api.admin.bulkCreateScenesText(titles)}
-        onDone={load}
-      />
+          <AdminBulkTextCreate
+            label="Bulk Add Scenes by Text"
+            placeholder={"Market Day\nRiver Journey\nSchool Morning"}
+            onSubmit={(titles) => api.admin.bulkCreateScenesText(titles)}
+            onDone={load}
+          />
 
-      <AdminBulkImageUrlUpload
-        label="Bulk Add Scene Images by URL"
-        matchItems={allScenes}
-        matchLabel={(s) => s.title}
-        onSubmit={(pairs) => api.admin.bulkAddSceneMediaUrl(pairs.map((p) => ({ sceneId: p.id, imageUrl: p.imageUrl })))}
-        onDone={load}
-      />
+          <AdminBulkImageUrlUpload
+            label="Bulk Add Scene Images by URL"
+            matchItems={allScenes}
+            matchLabel={(s) => s.title}
+            onSubmit={(pairs) => api.admin.bulkAddSceneMediaUrl(pairs.map((p) => ({ sceneId: p.id, imageUrl: p.imageUrl })))}
+            onDone={load}
+          />
 
-      <AdminOpenverseAutofill
-        label="Auto-fill Missing Scene Images from Openverse"
-        onSubmit={() => api.admin.bulkOpenverseAutofillScenes()}
-        onDone={load}
-      />
+          <AdminOpenverseAutofill
+            label="Auto-fill Missing Scene Images from Openverse"
+            onSubmit={() => api.admin.bulkOpenverseAutofillScenes()}
+            onDone={load}
+          />
 
-      <AdminBulkBar
-        count={selected.size}
-        onClear={() => setSelected(new Set())}
-        onDelete={handleBulkDelete}
-        onPermanentDelete={handleBulkPermanentDelete}
-      >
+          <AdminBulkBar
+            count={selected.size}
+            onClear={() => setSelected(new Set())}
+            onDelete={handleBulkDelete}
+            onPermanentDelete={handleBulkPermanentDelete}
+          >
+            <select
+              value={bulkDifficulty}
+              onChange={(e) => setBulkDifficulty(e.target.value as SceneDifficulty)}
+              className="rounded-full bg-surface-card px-4 py-2 text-sm text-ink ring-1 ring-border"
+            >
+              <option value="">Set difficulty...</option>
+              {DIFFICULTIES.map((d) => (
+                <option key={d} value={d} className="capitalize">
+                  {d}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={handleBulkSetDifficulty}
+              disabled={!bulkDifficulty || isBulkEditing}
+              className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+            >
+              {isBulkEditing ? "Applying..." : "Apply"}
+            </button>
+          </AdminBulkBar>
+        </>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-3">
+        {isVolunteer ? (
+          <label className="flex items-center gap-2 text-sm text-ink-muted">
+            <input
+              type="checkbox"
+              checked={onlyMine}
+              onChange={(e) => {
+                setOnlyMine(e.target.checked);
+                setOffset(0);
+              }}
+            />
+            Show only my additions
+          </label>
+        ) : null}
         <select
-          value={bulkDifficulty}
-          onChange={(e) => setBulkDifficulty(e.target.value as SceneDifficulty)}
-          className="rounded-full bg-surface-card px-4 py-2 text-sm text-ink ring-1 ring-border"
+          value={filterCategoryId}
+          onChange={(e) => {
+            setFilterCategoryId(e.target.value);
+            setOffset(0);
+          }}
+          className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
         >
-          <option value="">Set difficulty...</option>
-          {DIFFICULTIES.map((d) => (
-            <option key={d} value={d} className="capitalize">
-              {d}
+          <option value="">All categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nameEnglish}
             </option>
           ))}
         </select>
-        <button
-          onClick={handleBulkSetDifficulty}
-          disabled={!bulkDifficulty || isBulkEditing}
-          className="btn-duo bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+        <select
+          value={filterHasImage}
+          onChange={(e) => {
+            setFilterHasImage(e.target.value as "" | "yes" | "no");
+            setOffset(0);
+          }}
+          className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
         >
-          {isBulkEditing ? "Applying..." : "Apply"}
-        </button>
-      </AdminBulkBar>
+          <option value="">Image: any</option>
+          <option value="yes">Has image</option>
+          <option value="no">No image</option>
+        </select>
+        <label className="flex items-center gap-2 text-sm text-ink-muted">
+          Added
+          <input
+            type="date"
+            value={createdFrom}
+            onChange={(e) => {
+              setCreatedFrom(e.target.value);
+              setOffset(0);
+            }}
+            className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
+          />
+          to
+          <input
+            type="date"
+            value={createdTo}
+            onChange={(e) => {
+              setCreatedTo(e.target.value);
+              setOffset(0);
+            }}
+            className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
+          />
+        </label>
+        {createdFrom || createdTo || filterCategoryId || filterHasImage ? (
+          <button
+            type="button"
+            onClick={() => {
+              setCreatedFrom("");
+              setCreatedTo("");
+              setFilterCategoryId("");
+              setFilterHasImage("");
+              setOffset(0);
+            }}
+            className="text-sm font-semibold text-brand hover:underline"
+          >
+            Clear
+          </button>
+        ) : null}
+      </div>
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
@@ -623,7 +801,7 @@ export default function AdminScenesPage() {
         <p className="text-red-600">{loadError}</p>
       ) : (
         <div className="space-y-3">
-          {scenes.length > 0 && (
+          {scenes.length > 0 && !isVolunteer && (
             <label className="flex items-center gap-2 text-sm text-ink-muted">
               <input type="checkbox" checked={selected.size === scenes.length} onChange={toggleSelectAll} />
               Select all
@@ -633,11 +811,22 @@ export default function AdminScenesPage() {
             <div key={scene.id} className="card-duo rounded-2xl bg-surface p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <input type="checkbox" checked={selected.has(scene.id)} onChange={() => toggleSelected(scene.id)} />
+                  {!isVolunteer ? (
+                    <input type="checkbox" checked={selected.has(scene.id)} onChange={() => toggleSelected(scene.id)} />
+                  ) : null}
                   <div>
-                    <p className="font-semibold text-ink">{scene.title}</p>
+                    <p className="flex items-center gap-2 font-semibold text-ink">
+                      {scene.title}
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${
+                          scene.imageUrl ? "bg-emerald-100 text-emerald-700" : "bg-surface-card text-ink-muted ring-1 ring-border"
+                        }`}
+                      >
+                        {scene.imageUrl ? "✓ Image" : "No image"}
+                      </span>
+                    </p>
                     <p className="text-xs capitalize text-ink-muted">
-                      {scene.slug} · {scene.difficulty}
+                      {scene.slug} · {scene.difficulty} · Added {new Date(scene.createdAt).toLocaleDateString()}
                     </p>
                   </div>
                 </div>
@@ -679,17 +868,30 @@ export default function AdminScenesPage() {
                     {keywordsSceneId === scene.id ? "Close Keywords" : "Keywords"}
                   </button>
                   <button
-                    onClick={() => handleDelete(scene)}
-                    disabled={deletingId === scene.id}
-                    className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                    onClick={() => setImagesSceneId(imagesSceneId === scene.id ? null : scene.id)}
+                    className="text-xs font-semibold text-brand hover:underline"
                   >
-                    {deletingId === scene.id ? "Deleting..." : "Delete"}
+                    {imagesSceneId === scene.id ? "Close Images" : "Images"}
                   </button>
-                  <AdminPermanentDeleteButton
-                    itemLabel={scene.title}
-                    onDelete={() => api.admin.permanentlyDeleteScene(scene.id)}
-                    onDone={load}
-                  />
+                  {/* A volunteer may only delete (or request deletion of) their own
+                     past additions, and only while the "my own additions" filter is
+                     active -- otherwise the button doesn't render at all for them. */}
+                  {!isVolunteer || (onlyMine && scene.createdBy === user?.id) ? (
+                    <button
+                      onClick={() => handleDelete(scene)}
+                      disabled={deletingId === scene.id}
+                      className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
+                    >
+                      {deletingId === scene.id ? "Deleting..." : "Delete"}
+                    </button>
+                  ) : null}
+                  {!isVolunteer ? (
+                    <AdminPermanentDeleteButton
+                      itemLabel={scene.title}
+                      onDelete={() => api.admin.permanentlyDeleteScene(scene.id)}
+                      onDone={load}
+                    />
+                  ) : null}
                   <AdminUndoButton
                     resourceType="scene"
                     identifier={scene.id}
@@ -856,6 +1058,21 @@ export default function AdminScenesPage() {
                   {keywordError ? <p className="text-sm text-red-600">{keywordError}</p> : null}
                 </div>
               ) : null}
+
+              {imagesSceneId === scene.id ? (
+                <div className="mt-4 border-t border-border pt-4">
+                  <AdminMediaManager
+                    itemId={scene.id}
+                    aspectRatio={16 / 9}
+                    outputWidth={1600}
+                    outputHeight={900}
+                    getMedia={api.admin.getSceneMedia}
+                    deleteMedia={api.admin.deleteSceneMedia}
+                    cropMedia={api.admin.cropSceneMedia}
+                    onChanged={load}
+                  />
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
@@ -868,6 +1085,21 @@ export default function AdminScenesPage() {
           defaultQuery={scenes.find((s) => s.id === openverseSceneId)?.title ?? ""}
           onSelect={(image) => handleAddImageOpenverse(openverseSceneId, image)}
           onClose={() => setOpenverseSceneId(null)}
+        />
+      ) : null}
+
+      {cropTarget ? (
+        <ImageCropper
+          imageSrc={cropTarget.url}
+          aspectRatio={16 / 9}
+          outputWidth={1600}
+          outputHeight={900}
+          title="Crop image (16:9)"
+          onCancel={() => {
+            URL.revokeObjectURL(cropTarget.url);
+            setCropTarget(null);
+          }}
+          onApply={handleCropApply}
         />
       ) : null}
     </div>

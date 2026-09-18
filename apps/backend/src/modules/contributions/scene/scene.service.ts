@@ -1,4 +1,4 @@
-import { and, eq, ilike, isNull, ne, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, ne, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
 import {
@@ -59,14 +59,51 @@ function sceneSelection() {
     difficulty: scenes.difficulty,
     estimatedDurationSeconds: scenes.estimatedDurationSeconds,
     isDaily: scenes.isDaily,
+    createdAt: scenes.createdAt,
+    createdBy: scenes.createdBy,
     imageUrl: sceneMedia.publicUrl,
+    imageMediaId: sceneMedia.id,
   };
 }
 
-export async function getScenes(limit: number, offset: number, userId: string, search?: string) {
-  const whereClause = search
-    ? and(eq(scenes.isActive, true), isNull(scenes.deletedAt), ilike(scenes.title, `%${search}%`))
-    : and(eq(scenes.isActive, true), isNull(scenes.deletedAt));
+export async function getScenes(
+  limit: number,
+  offset: number,
+  userId: string,
+  filters: {
+    search?: string;
+    createdFrom?: string;
+    createdTo?: string;
+    categoryId?: string;
+    hasImage?: "yes" | "no";
+    // A caller id -- when set, restricts the list to scenes that caller
+    // themselves created (scenes.createdBy). Named after the "mine" query
+    // param that sets it, not after what it holds.
+    mine?: string;
+  } = {},
+) {
+  const { search, createdFrom, createdTo, categoryId, hasImage, mine } = filters;
+  const conditions = [eq(scenes.isActive, true), isNull(scenes.deletedAt)];
+  if (search) conditions.push(ilike(scenes.title, `%${search}%`));
+  if (mine) conditions.push(eq(scenes.createdBy, mine));
+  if (createdFrom) conditions.push(gte(scenes.createdAt, new Date(createdFrom)));
+  if (createdTo) conditions.push(lte(scenes.createdAt, new Date(createdTo)));
+  // Literal, table-qualified SQL text rather than interpolating ${scenes.id}
+  // -- see the identical note in concepts.routes.ts: scene_concepts and
+  // scene_media both have their own "id" columns, so a bare unqualified "id"
+  // here could silently bind to the wrong one instead of the outer scenes.id.
+  if (categoryId) {
+    conditions.push(sql`exists (
+      select 1 from scene_concepts
+      where scene_concepts.scene_id = scenes.id and scene_concepts.category_id = ${categoryId}
+    )`);
+  }
+  if (hasImage === "yes") {
+    conditions.push(sql`exists (select 1 from scene_media where scene_media.scene_id = scenes.id)`);
+  } else if (hasImage === "no") {
+    conditions.push(sql`not exists (select 1 from scene_media where scene_media.scene_id = scenes.id)`);
+  }
+  const whereClause = and(...conditions);
 
   const [items, [totalRow]] = await Promise.all([
     db

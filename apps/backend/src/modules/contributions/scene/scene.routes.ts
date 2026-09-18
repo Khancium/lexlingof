@@ -6,6 +6,18 @@ import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneCont
 
 const listQuerySchema = z.object({
   search: z.string().min(1).optional(),
+  // Admin-only in practice -- see the identical note in concepts.routes.ts.
+  createdFrom: z.string().datetime().optional(),
+  createdTo: z.string().datetime().optional(),
+  // Scenes have no direct category column -- this matches scenes that have
+  // at least one scene_concepts coverage annotation in the given category
+  // (scene_concepts carries its own categoryId for exactly this kind of
+  // lookup). Admin-only in practice, same as the date filters above.
+  categoryId: z.string().uuid().optional(),
+  hasImage: z.enum(["yes", "no"]).optional(),
+  // Volunteer's "my own additions" filter -- true restricts the list to
+  // scenes this caller themselves created (scenes.createdBy).
+  mine: z.coerce.boolean().optional(),
   // 1000 (not 200) so admin pages can fetch the full scene list in one
   // request for client-side matching (bulk-add-images-by-URL) without
   // paginating just to build a lookup map.
@@ -27,8 +39,15 @@ const submitSchema = z.object({
 
 export default async function sceneRoutes(fastify: FastifyInstance) {
   fastify.get("/", { preHandler: verifyToken }, async (request) => {
-    const { search, limit, offset } = listQuerySchema.parse(request.query);
-    return getScenes(limit, offset, request.user!.id, search);
+    const { search, createdFrom, createdTo, categoryId, hasImage, mine, limit, offset } = listQuerySchema.parse(request.query);
+    return getScenes(limit, offset, request.user!.id, {
+      search,
+      createdFrom,
+      createdTo,
+      categoryId,
+      hasImage,
+      mine: mine ? request.user!.id : undefined,
+    });
   });
 
   fastify.get("/daily", { preHandler: verifyToken }, async () => getDailyScene());

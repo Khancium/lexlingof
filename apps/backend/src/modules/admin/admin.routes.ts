@@ -26,6 +26,7 @@ import {
   languages,
   featureFlags,
   auditLogs,
+  pendingChanges,
   quarters,
   reviews,
   scenes,
@@ -52,6 +53,7 @@ import { deleteUserAccount } from "../../services/account.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/level.service.js";
 import { invalidateCategoriesCache } from "../categories/categories.routes.js";
+import { gateVolunteerAction, getPendingChangeById, requirePendingRow, markApproved, markRejected, listPendingChanges, countPendingByVolunteer, setAutoApprove, isAutoApproved } from "../../services/pending-changes.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -110,7 +112,7 @@ type MediaAttribution = { sourceProvider: string; sourceUrl: string; attribution
 async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: string, source?: MediaAttribution) {
   const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
   const storageFilename = `concepts/${conceptId}/${randomUUID()}.${ext}`;
-  const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadSceneImage(buffer, storageFilename);
+  const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadConceptImage(buffer, storageFilename);
 
   const [existingCount] = await db
     .select({ value: sql<number>`count(*)`.mapWith(Number) })
@@ -994,9 +996,14 @@ const annotateSceneConceptSchema = z.object({
 
 const addSceneImageKeywordSchema = z.object({ keyword: z.string().trim().min(1).max(100) });
 const sceneKeywordParamSchema = z.object({ id: z.string().uuid(), keywordId: z.string().uuid() });
-const sceneMediaIdParamSchema = z.object({ mediaId: z.string().uuid() });
+const mediaIdParamSchema = z.object({ mediaId: z.string().uuid() });
 
 const sentencesQuerySchema = z.object({
+  createdFrom: z.string().datetime().optional(),
+  createdTo: z.string().datetime().optional(),
+  // Volunteer's "my own additions" filter -- true restricts the list to
+  // sentences this caller themselves created (sentences.createdBy).
+  mine: z.coerce.boolean().optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -1022,6 +1029,323 @@ const auditLogsQuerySchema = z.object({
   action: z.string().optional(),
   resource_type: z.string().optional(),
   search: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(1000).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+/* -------------------------------------------------------------------------- */
+/*                    Volunteer-gated create/delete appliers                  */
+/* -------------------------------------------------------------------------- */
+// The actual insert/update logic for every action a volunteer's submission
+// can represent -- called directly by the live route for an admin (or an
+// auto-approved volunteer), and replayed with the same payload by the
+// pending-changes approval route once an admin approves it. Keeping this in
+// one function per action means the "apply now" and "apply on approval"
+// paths can never drift apart.
+
+async function applyCreateCategory(body: z.infer<typeof createCategorySchema>, actor: { id: string; role: string }) {
+  const slug = slugify(body.nameEnglish);
+
+  const [existing] = await db.select({ id: categories.id }).from(categories).where(eq(categories.slug, slug)).limit(1);
+  if (existing) {
+    throw new HttpError(409, "ALREADY_EXISTS", `A category with slug "${slug}" already exists`);
+  }
+
+  const [category] = await db
+    .insert(categories)
+    .values({ slug, nameEnglish: body.nameEnglish, icon: body.icon ?? null, sortOrder: body.sortOrder ?? 0 })
+    .returning();
+
+  await writeAuditLog({
+    actorId: actor.id,
+    actorRole: actor.role as (typeof userRole.enumValues)[number],
+    action: "admin_category_create",
+    resourceType: "category",
+    resourceId: category!.id,
+    afterState: { nameEnglish: body.nameEnglish, slug },
+  });
+
+  return category!;
+}
+
+async function applyCreateConcept(body: z.infer<typeof createConceptSchema>, actor: { id: string; role: string }, createdBy: string | null) {
+  const [category] = await db.select({ slug: categories.slug }).from(categories).where(eq(categories.id, body.categoryId)).limit(1);
+  if (!category) {
+    throw new HttpError(404, "NOT_FOUND", "Category not found");
+  }
+
+  const slug = `${category.slug}-${slugify(body.labelEnglish)}`;
+
+  const [duplicate] = await db
+    .select()
+    .from(concepts)
+    .where(and(eq(concepts.slug, slug), isNull(concepts.deletedAt)))
+    .limit(1);
+  if (duplicate) {
+    return duplicate;
+  }
+
+  const [concept] = await db
+    .insert(concepts)
+    .values({
+      categoryId: body.categoryId,
+      slug,
+      labelEnglish: body.labelEnglish,
+      description: body.description ?? null,
+      createdBy,
+    })
+    .returning();
+
+  invalidateCategoriesCache();
+  return concept!;
+}
+
+async function applyCreateScene(body: z.infer<typeof createSceneSchema>, actor: { id: string; role: string }, createdBy: string | null) {
+  const [duplicate] = await db
+    .select()
+    .from(scenes)
+    .where(and(sql`lower(${scenes.title}) = lower(${body.title})`, isNull(scenes.deletedAt)))
+    .limit(1);
+  if (duplicate) {
+    return duplicate;
+  }
+
+  const [scene] = await db
+    .insert(scenes)
+    .values({
+      slug: body.slug,
+      title: body.title,
+      description: body.description ?? null,
+      difficulty: body.difficulty ?? "medium",
+      estimatedDurationSeconds: body.estimatedDurationSeconds ?? null,
+      createdBy,
+    })
+    .returning();
+
+  return scene!;
+}
+
+async function applyCreateSentence(body: z.infer<typeof createSentenceSchema>, actor: { id: string; role: string }, createdBy: string | null) {
+  const [duplicate] = await db
+    .select()
+    .from(sentences)
+    .where(and(sql`lower(${sentences.englishText}) = lower(${body.englishText})`, isNull(sentences.deletedAt)))
+    .limit(1);
+  if (duplicate) {
+    return duplicate;
+  }
+
+  const [sentence] = await db
+    .insert(sentences)
+    .values({ englishText: body.englishText, categoryId: body.categoryId ?? null, createdBy })
+    .returning();
+
+  return sentence!;
+}
+
+/**
+ * Shared by both the live delete route (admin, or a volunteer with
+ * auto-approve on) and the pending-changes approval route. `requireOwner`
+ * is set only when a volunteer submitted the delete themselves -- enforced
+ * again here (not just in the route) so an approved pending_changes row can
+ * never apply against a row a different volunteer created in the meantime.
+ */
+async function applyDeleteConcept(id: string, actor: { id: string; role: string }, requireOwner?: string) {
+  const [existing] = await db
+    .select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt, createdBy: concepts.createdBy })
+    .from(concepts)
+    .where(eq(concepts.id, id))
+    .limit(1);
+  if (!existing) {
+    throw new HttpError(404, "NOT_FOUND", "Concept not found");
+  }
+  if (requireOwner && existing.createdBy !== requireOwner) {
+    throw new HttpError(403, "FORBIDDEN", "You can only delete concepts you added yourself");
+  }
+
+  await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(eq(concepts.id, id));
+
+  await writeAuditLog({
+    actorId: actor.id,
+    actorRole: actor.role as (typeof userRole.enumValues)[number],
+    action: "admin_concept_delete",
+    resourceType: "concept",
+    resourceId: id,
+    beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
+    afterState: { isActive: false },
+  });
+
+  invalidateCategoriesCache();
+  return { id, deleted: true };
+}
+
+async function applyDeleteScene(id: string, actor: { id: string; role: string }, requireOwner?: string) {
+  const [existing] = await db
+    .select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt, createdBy: scenes.createdBy })
+    .from(scenes)
+    .where(eq(scenes.id, id))
+    .limit(1);
+  if (!existing) {
+    throw new HttpError(404, "NOT_FOUND", "Scene not found");
+  }
+  if (requireOwner && existing.createdBy !== requireOwner) {
+    throw new HttpError(403, "FORBIDDEN", "You can only delete scenes you added yourself");
+  }
+
+  await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(eq(scenes.id, id));
+
+  await writeAuditLog({
+    actorId: actor.id,
+    actorRole: actor.role as (typeof userRole.enumValues)[number],
+    action: "admin_scene_delete",
+    resourceType: "scene",
+    resourceId: id,
+    beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
+    afterState: { isActive: false },
+  });
+
+  return { id, deleted: true };
+}
+
+async function applyDeleteSentence(id: string, actor: { id: string; role: string }, requireOwner?: string) {
+  const [existing] = await db
+    .select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt, createdBy: sentences.createdBy })
+    .from(sentences)
+    .where(eq(sentences.id, id))
+    .limit(1);
+  if (!existing) {
+    throw new HttpError(404, "NOT_FOUND", "Sentence not found");
+  }
+  if (requireOwner && existing.createdBy !== requireOwner) {
+    throw new HttpError(403, "FORBIDDEN", "You can only delete sentences you added yourself");
+  }
+
+  await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(eq(sentences.id, id));
+
+  await writeAuditLog({
+    actorId: actor.id,
+    actorRole: actor.role as (typeof userRole.enumValues)[number],
+    action: "admin_sentence_delete",
+    resourceType: "sentence",
+    resourceId: id,
+    beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
+    afterState: { isActive: false },
+  });
+
+  return { id, deleted: true };
+}
+
+/**
+ * The three ways an image reaches a concept/scene -- upload, "From URL", and
+ * Openverse -- funnel into one shape here so pending_changes only needs one
+ * targetType ("concept_media"/"scene_media") for all three, distinguished by
+ * `source`. A raw upload's bytes are base64'd into the JSON payload rather
+ * than staged as a separate temp file: simpler (no extra storage lifecycle
+ * to clean up if the request is later rejected), at the cost of the
+ * pending_changes row being noticeably larger for that one source until it's
+ * reviewed -- acceptable given volunteer image submissions are expected to
+ * be reviewed promptly, not accumulate indefinitely.
+ */
+type MediaCreatePayload = { targetId: string } & (
+  | { source: "upload"; bufferBase64: string; filename: string }
+  | { source: "url"; imageUrl: string }
+  | { source: "openverse"; image: { url: string; foreignLandingUrl: string; attribution: string } }
+);
+
+async function applyCreateConceptMedia(payload: MediaCreatePayload) {
+  const conceptId = payload.targetId;
+  if (payload.source === "upload") {
+    return insertConceptMedia(conceptId, Buffer.from(payload.bufferBase64, "base64"), payload.filename);
+  }
+  if (payload.source === "url") {
+    return addConceptImageFromUrl(conceptId, payload.imageUrl);
+  }
+  return addConceptImageFromUrl(conceptId, payload.image.url, attributionFromOpenverse(payload.image));
+}
+
+async function applyCreateSceneMedia(payload: MediaCreatePayload) {
+  const sceneId = payload.targetId;
+  if (payload.source === "upload") {
+    return insertSceneMedia(sceneId, Buffer.from(payload.bufferBase64, "base64"), payload.filename);
+  }
+  if (payload.source === "url") {
+    return addSceneImageFromUrl(sceneId, payload.imageUrl);
+  }
+  return addSceneImageFromUrl(sceneId, payload.image.url, attributionFromOpenverse(payload.image));
+}
+
+/**
+ * Replays one pending_changes row against the real tables -- the single
+ * place that knows how to turn every (targetType, action) combination back
+ * into a call to the same apply* function the live route would have used.
+ * Domain-level validity (does the referenced category/concept/scene still
+ * exist, is there now a duplicate, etc.) is deliberately re-checked here
+ * rather than trusted from submission time -- time may have passed, and the
+ * corpus may have changed underneath the pending request.
+ */
+async function applyPendingChange(row: typeof pendingChanges.$inferSelect): Promise<string | null> {
+  const volunteerActor = { id: row.volunteerId, role: "volunteer" };
+  const ownerId = row.volunteerId;
+
+  switch (row.targetType) {
+    case "category": {
+      const body = createCategorySchema.parse(row.payload);
+      const result = await applyCreateCategory(body, volunteerActor);
+      return result.id;
+    }
+    case "concept": {
+      if (row.action === "create") {
+        const body = createConceptSchema.parse(row.payload);
+        const result = await applyCreateConcept(body, volunteerActor, ownerId);
+        return result.id;
+      }
+      const { id } = row.payload as { id: string };
+      await applyDeleteConcept(id, volunteerActor, ownerId);
+      return null;
+    }
+    case "scene": {
+      if (row.action === "create") {
+        const body = createSceneSchema.parse(row.payload);
+        const result = await applyCreateScene(body, volunteerActor, ownerId);
+        return result.id;
+      }
+      const { id } = row.payload as { id: string };
+      await applyDeleteScene(id, volunteerActor, ownerId);
+      return null;
+    }
+    case "sentence": {
+      if (row.action === "create") {
+        const body = createSentenceSchema.parse(row.payload);
+        const result = await applyCreateSentence(body, volunteerActor, ownerId);
+        return result.id;
+      }
+      const { id } = row.payload as { id: string };
+      await applyDeleteSentence(id, volunteerActor, ownerId);
+      return null;
+    }
+    case "concept_media": {
+      const result = await applyCreateConceptMedia(row.payload as MediaCreatePayload);
+      return result!.id;
+    }
+    case "scene_media": {
+      const result = await applyCreateSceneMedia(row.payload as MediaCreatePayload);
+      return result!.id;
+    }
+    default: {
+      const _exhaustive: never = row.targetType;
+      throw new HttpError(400, "UNKNOWN_TARGET_TYPE", `Unknown target type: ${String(_exhaustive)}`);
+    }
+  }
+}
+
+const setAutoApproveSchema = z.object({ enabled: z.boolean() });
+const rejectPendingChangeSchema = z.object({ reason: z.string().optional() });
+const bulkPendingIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(200) });
+const setVolunteerSchema = z.object({ enabled: z.boolean() });
+const pendingChangesQuerySchema = z.object({
+  volunteerId: z.string().uuid().optional(),
+  targetType: z.enum(["category", "concept", "scene", "sentence", "concept_media", "scene_media"]).optional(),
+  status: z.enum(["pending", "approved", "rejected"]).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -1819,28 +2143,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     { preHandler: requirePermission("concepts.manage") },
     async (request, reply) => {
       const body = createCategorySchema.parse(request.body);
-      const slug = slugify(body.nameEnglish);
 
-      const [existing] = await db.select({ id: categories.id }).from(categories).where(eq(categories.slug, slug)).limit(1);
-      if (existing) {
-        throw new HttpError(409, "ALREADY_EXISTS", `A category with slug "${slug}" already exists`);
+      const outcome = await gateVolunteerAction(
+        request.user!,
+        "category",
+        "create",
+        { nameEnglish: body.nameEnglish, icon: body.icon ?? null, sortOrder: body.sortOrder ?? 0 },
+        () => applyCreateCategory(body, request.user!),
+      );
+
+      if (outcome.pending) {
+        reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+        return;
       }
-
-      const [category] = await db
-        .insert(categories)
-        .values({ slug, nameEnglish: body.nameEnglish, icon: body.icon ?? null, sortOrder: body.sortOrder ?? 0 })
-        .returning();
-
-      await writeAuditLog({
-        actorId: request.user!.id,
-        actorRole: request.user!.role,
-        action: "admin_category_create",
-        resourceType: "category",
-        resourceId: category!.id,
-        afterState: { nameEnglish: body.nameEnglish, slug },
-      });
-
-      reply.code(201).send(category);
+      reply.code(201).send(outcome.result);
     },
   );
 
@@ -1883,45 +2199,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/concepts", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
     const body = createConceptSchema.parse(request.body);
+    const actor = request.user!;
+    const createdBy = actor.role === "volunteer" ? actor.id : null;
 
-    const [category] = await db.select({ slug: categories.slug }).from(categories).where(eq(categories.id, body.categoryId)).limit(1);
-    if (!category) {
-      throw new HttpError(404, "NOT_FOUND", "Category not found");
-    }
+    const outcome = await gateVolunteerAction(actor, "concept", "create", body, () => applyCreateConcept(body, actor, createdBy));
 
-    // concepts.slug is NOT NULL and globally unique; the request body has no
-    // slug field, so this derives one from the category + label, matching
-    // the convention used by the database seed (category-prefixed slug).
-    // slugify() lowercases, so "River" and "river" in the same category
-    // already collide on this same slug -- exactly the case-insensitive
-    // duplicate this is meant to catch.
-    const slug = `${category.slug}-${slugify(body.labelEnglish)}`;
-
-    // Silently hand back the existing concept instead of a duplicate --
-    // this used to fall straight through to the DB's unique-index
-    // violation on a repeat label, surfacing as a raw 500.
-    const [duplicate] = await db
-      .select()
-      .from(concepts)
-      .where(and(eq(concepts.slug, slug), isNull(concepts.deletedAt)))
-      .limit(1);
-    if (duplicate) {
-      reply.code(200).send(duplicate);
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
       return;
     }
-
-    const [concept] = await db
-      .insert(concepts)
-      .values({
-        categoryId: body.categoryId,
-        slug,
-        labelEnglish: body.labelEnglish,
-        description: body.description ?? null,
-      })
-      .returning();
-
-    invalidateCategoriesCache();
-    reply.code(201).send(concept);
+    reply.code(201).send(outcome.result);
   });
 
   // Bulk create from a CSV or JSON file. Expected row fields: category
@@ -2029,28 +2316,31 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { updated: rows.length };
   });
 
-  fastify.delete("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.delete("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
+    const actor = request.user!;
 
-    const [existing] = await db.select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt }).from(concepts).where(eq(concepts.id, id)).limit(1);
-    if (!existing) {
-      throw new HttpError(404, "NOT_FOUND", "Concept not found");
+    // A volunteer may only ever delete (or request deletion of) a concept
+    // they added themselves -- checked here up front, for an immediate,
+    // honest error, and again inside applyDeleteConcept at approval time in
+    // case a different volunteer's edit landed on this row in the meantime.
+    if (actor.role === "volunteer") {
+      const [target] = await db.select({ createdBy: concepts.createdBy }).from(concepts).where(eq(concepts.id, id)).limit(1);
+      if (!target) throw new HttpError(404, "NOT_FOUND", "Concept not found");
+      if (target.createdBy !== actor.id) {
+        throw new HttpError(403, "FORBIDDEN", "You can only delete concepts you added yourself");
+      }
     }
 
-    await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(eq(concepts.id, id));
+    const outcome = await gateVolunteerAction(actor, "concept", "delete", { id }, () =>
+      applyDeleteConcept(id, actor, actor.role === "volunteer" ? actor.id : undefined),
+    );
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_concept_delete",
-      resourceType: "concept",
-      resourceId: id,
-      beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
-      afterState: { isActive: false },
-    });
-
-    invalidateCategoriesCache();
-    return { id, deleted: true };
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.send(outcome.result);
   });
 
   fastify.delete("/admin/concepts/:id/permanent", { preHandler: requirePermission("concepts.manage") }, async (request) => {
@@ -2065,6 +2355,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/concepts/:id/media", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
+    const actor = request.user!;
 
     const [concept] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, id)).limit(1);
     if (!concept) {
@@ -2072,9 +2363,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     const { buffer, filename } = await readImageFile(request);
-    const media = await insertConceptMedia(id, buffer, filename);
+    const payload: MediaCreatePayload = { targetId: id, source: "upload", bufferBase64: buffer.toString("base64"), filename };
+    const outcome = await gateVolunteerAction(actor, "concept_media", "create", payload, () => applyCreateConceptMedia(payload));
 
-    reply.code(201).send(media);
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
   });
 
   // Same as above but the image is fetched server-side from a third-party
@@ -2083,9 +2379,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/concepts/:id/media/url", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const { imageUrl } = imageUrlSchema.parse(request.body);
+    const actor = request.user!;
 
-    const media = await addConceptImageFromUrl(id, imageUrl);
-    reply.code(201).send(media);
+    const payload: MediaCreatePayload = { targetId: id, source: "url", imageUrl };
+    const outcome = await gateVolunteerAction(actor, "concept_media", "create", payload, () => applyCreateConceptMedia(payload));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
   });
 
   // Bulk variant: a JSON array of {conceptId, imageUrl} pairs, one row per
@@ -2103,6 +2406,104 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     return { created: results.length - errors.length, errors };
   });
+
+  // Every image on a concept, however it got there (multipart upload, "From
+  // URL", or Openverse) -- all three funnel through insertConceptMedia, so
+  // one list/delete pair here covers every source.
+  fastify.get("/admin/concepts/:id/media", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const items = await db.select().from(conceptMedia).where(eq(conceptMedia.conceptId, id)).orderBy(desc(conceptMedia.isPrimary), asc(conceptMedia.createdAt));
+    return { items };
+  });
+
+  fastify.delete(
+    "/admin/concepts/:id/media/:mediaId",
+    { preHandler: requirePermission("concepts.manage") },
+    async (request) => {
+      const { id } = idParamSchema.parse(request.params);
+      const { mediaId } = mediaIdParamSchema.parse(request.params);
+
+      const [media] = await db
+        .select({ id: conceptMedia.id, storageKey: conceptMedia.storageKey, isPrimary: conceptMedia.isPrimary })
+        .from(conceptMedia)
+        .where(and(eq(conceptMedia.id, mediaId), eq(conceptMedia.conceptId, id)))
+        .limit(1);
+      if (!media) {
+        throw new HttpError(404, "NOT_FOUND", "Image not found on this concept");
+      }
+
+      await db.delete(conceptMedia).where(eq(conceptMedia.id, mediaId));
+
+      // The primary image just went away but others remain -- promote the
+      // oldest survivor so the concept isn't left with zero primary image
+      // while other, now-orphaned images still exist for it.
+      if (media.isPrimary) {
+        const [next] = await db
+          .select({ id: conceptMedia.id })
+          .from(conceptMedia)
+          .where(eq(conceptMedia.conceptId, id))
+          .orderBy(asc(conceptMedia.createdAt))
+          .limit(1);
+        if (next) {
+          await db.update(conceptMedia).set({ isPrimary: true }).where(eq(conceptMedia.id, next.id));
+        }
+      }
+
+      // DB row is gone either way; a storage failure here is logged, not
+      // thrown -- same "delete already succeeded, an orphaned file is a
+      // much smaller problem" reasoning as the permanent-delete path.
+      try {
+        await storageService.deleteImage(media.storageKey);
+      } catch (err) {
+        console.error(`[admin] concept ${id} image ${mediaId} row deleted but storage object could not be removed:`, err);
+      }
+
+      return { id: mediaId, deleted: true };
+    },
+  );
+
+  // Replaces this exact image with a manually-cropped version -- the crop
+  // itself happened client-side (a canvas, against either a freshly-picked
+  // local file or this same image's own already-CORS-enabled Supabase
+  // public URL), so the server's job is just to re-encode and swap it in,
+  // not to crop again. The row's id/isPrimary/source metadata are untouched;
+  // only the image itself and its storage key change.
+  fastify.put(
+    "/admin/concepts/:id/media/:mediaId/crop",
+    { preHandler: requirePermission("concepts.manage") },
+    async (request, reply) => {
+      const { id } = idParamSchema.parse(request.params);
+      const { mediaId } = mediaIdParamSchema.parse(request.params);
+
+      const [existing] = await db
+        .select({ id: conceptMedia.id, storageKey: conceptMedia.storageKey })
+        .from(conceptMedia)
+        .where(and(eq(conceptMedia.id, mediaId), eq(conceptMedia.conceptId, id)))
+        .limit(1);
+      if (!existing) {
+        throw new HttpError(404, "NOT_FOUND", "Image not found on this concept");
+      }
+
+      const { buffer, filename } = await readImageFile(request);
+      const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+      const storageFilename = `concepts/${id}/${randomUUID()}.${ext}`;
+      const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadPrecroppedConceptImage(buffer, storageFilename);
+
+      const [updated] = await db
+        .update(conceptMedia)
+        .set({ storageKey: path, publicUrl, mimeType, fileSizeBytes })
+        .where(eq(conceptMedia.id, mediaId))
+        .returning();
+
+      try {
+        await storageService.deleteImage(existing.storageKey);
+      } catch (err) {
+        console.error(`[admin] concept ${id} image ${mediaId} re-cropped but old storage object could not be removed:`, err);
+      }
+
+      reply.send(updated);
+    },
+  );
 
   // Shared by both the concepts and scenes admin pages -- gated on either
   // permission since it doesn't touch either table itself, it's read-only
@@ -2123,9 +2524,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/concepts/:id/media/openverse", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const { image } = addConceptOpenverseSchema.parse(request.body);
+    const actor = request.user!;
 
-    const media = await addConceptImageFromUrl(id, image.url, attributionFromOpenverse(image));
-    reply.code(201).send(media);
+    const payload: MediaCreatePayload = { targetId: id, source: "openverse", image };
+    const outcome = await gateVolunteerAction(actor, "concept_media", "create", payload, () => applyCreateConceptMedia(payload));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
   });
 
   // Bulk auto-fill: searches Openverse using each concept's own label and
@@ -2170,33 +2578,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/scenes", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const body = createSceneSchema.parse(request.body);
+    const actor = request.user!;
+    const createdBy = actor.role === "volunteer" ? actor.id : null;
 
-    // Silently hand back the existing scene instead of a case-insensitive
-    // duplicate title -- scenes.slug is caller-supplied here (unlike
-    // concepts, where it's derived from the label), so two different slugs
-    // could otherwise carry the identical title.
-    const [duplicate] = await db
-      .select()
-      .from(scenes)
-      .where(and(sql`lower(${scenes.title}) = lower(${body.title})`, isNull(scenes.deletedAt)))
-      .limit(1);
-    if (duplicate) {
-      reply.code(200).send(duplicate);
+    const outcome = await gateVolunteerAction(actor, "scene", "create", body, () => applyCreateScene(body, actor, createdBy));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
       return;
     }
-
-    const [scene] = await db
-      .insert(scenes)
-      .values({
-        slug: body.slug,
-        title: body.title,
-        description: body.description ?? null,
-        difficulty: body.difficulty ?? "medium",
-        estimatedDurationSeconds: body.estimatedDurationSeconds ?? null,
-      })
-      .returning();
-
-    reply.code(201).send(scene);
+    reply.code(201).send(outcome.result);
   });
 
   // Bulk create from a CSV or JSON file. Expected row fields: slug
@@ -2395,27 +2786,27 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { updated: rows.length };
   });
 
-  fastify.delete("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.delete("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
+    const actor = request.user!;
 
-    const [existing] = await db.select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt }).from(scenes).where(eq(scenes.id, id)).limit(1);
-    if (!existing) {
-      throw new HttpError(404, "NOT_FOUND", "Scene not found");
+    if (actor.role === "volunteer") {
+      const [target] = await db.select({ createdBy: scenes.createdBy }).from(scenes).where(eq(scenes.id, id)).limit(1);
+      if (!target) throw new HttpError(404, "NOT_FOUND", "Scene not found");
+      if (target.createdBy !== actor.id) {
+        throw new HttpError(403, "FORBIDDEN", "You can only delete scenes you added yourself");
+      }
     }
 
-    await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(eq(scenes.id, id));
+    const outcome = await gateVolunteerAction(actor, "scene", "delete", { id }, () =>
+      applyDeleteScene(id, actor, actor.role === "volunteer" ? actor.id : undefined),
+    );
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_scene_delete",
-      resourceType: "scene",
-      resourceId: id,
-      beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
-      afterState: { isActive: false },
-    });
-
-    return { id, deleted: true };
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.send(outcome.result);
   });
 
   fastify.delete("/admin/scenes/:id/permanent", { preHandler: requirePermission("scenes.manage") }, async (request) => {
@@ -2425,6 +2816,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/scenes/:id/media", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
+    const actor = request.user!;
 
     const [scene] = await db.select({ id: scenes.id }).from(scenes).where(eq(scenes.id, id)).limit(1);
     if (!scene) {
@@ -2432,17 +2824,29 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     const { buffer, filename } = await readImageFile(request);
-    const media = await insertSceneMedia(id, buffer, filename);
+    const payload: MediaCreatePayload = { targetId: id, source: "upload", bufferBase64: buffer.toString("base64"), filename };
+    const outcome = await gateVolunteerAction(actor, "scene_media", "create", payload, () => applyCreateSceneMedia(payload));
 
-    reply.code(201).send(media);
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
   });
 
   fastify.post("/admin/scenes/:id/media/url", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const { imageUrl } = imageUrlSchema.parse(request.body);
+    const actor = request.user!;
 
-    const media = await addSceneImageFromUrl(id, imageUrl);
-    reply.code(201).send(media);
+    const payload: MediaCreatePayload = { targetId: id, source: "url", imageUrl };
+    const outcome = await gateVolunteerAction(actor, "scene_media", "create", payload, () => applyCreateSceneMedia(payload));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
   });
 
   // Bulk variant: a JSON array of {sceneId, imageUrl} pairs. Each item is
@@ -2461,9 +2865,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes/:id/media/openverse", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const { image } = addSceneOpenverseSchema.parse(request.body);
+    const actor = request.user!;
 
-    const media = await addSceneImageFromUrl(id, image.url, attributionFromOpenverse(image));
-    reply.code(201).send(media);
+    const payload: MediaCreatePayload = { targetId: id, source: "openverse", image };
+    const outcome = await gateVolunteerAction(actor, "scene_media", "create", payload, () => applyCreateSceneMedia(payload));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
   });
 
   // Same bulk auto-fill idea as concepts, searching Openverse by scene title.
@@ -2499,6 +2910,89 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     },
   );
 
+  // Same as the concepts pair above -- every scene image, however it got
+  // there (upload, "From URL", or Openverse), lives in sceneMedia and is
+  // covered by one list/delete pair here.
+  fastify.get("/admin/scenes/:id/media", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const items = await db.select().from(sceneMedia).where(eq(sceneMedia.sceneId, id)).orderBy(desc(sceneMedia.isPrimary), asc(sceneMedia.createdAt));
+    return { items };
+  });
+
+  fastify.delete("/admin/scenes/:id/media/:mediaId", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { mediaId } = mediaIdParamSchema.parse(request.params);
+
+    const [media] = await db
+      .select({ id: sceneMedia.id, storageKey: sceneMedia.storageKey, isPrimary: sceneMedia.isPrimary })
+      .from(sceneMedia)
+      .where(and(eq(sceneMedia.id, mediaId), eq(sceneMedia.sceneId, id)))
+      .limit(1);
+    if (!media) {
+      throw new HttpError(404, "NOT_FOUND", "Image not found on this scene");
+    }
+
+    // scene_image_keywords cascades on the DB side (onDelete: "cascade"),
+    // so no manual cleanup needed for those.
+    await db.delete(sceneMedia).where(eq(sceneMedia.id, mediaId));
+
+    if (media.isPrimary) {
+      const [next] = await db
+        .select({ id: sceneMedia.id })
+        .from(sceneMedia)
+        .where(eq(sceneMedia.sceneId, id))
+        .orderBy(asc(sceneMedia.createdAt))
+        .limit(1);
+      if (next) {
+        await db.update(sceneMedia).set({ isPrimary: true }).where(eq(sceneMedia.id, next.id));
+      }
+    }
+
+    try {
+      await storageService.deleteImage(media.storageKey);
+    } catch (err) {
+      console.error(`[admin] scene ${id} image ${mediaId} row deleted but storage object could not be removed:`, err);
+    }
+
+    return { id: mediaId, deleted: true };
+  });
+
+  // See the identical concept-image crop route above for the reasoning --
+  // the crop already happened client-side, this just re-encodes and swaps
+  // the file in place.
+  fastify.put("/admin/scenes/:id/media/:mediaId/crop", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { mediaId } = mediaIdParamSchema.parse(request.params);
+
+    const [existing] = await db
+      .select({ id: sceneMedia.id, storageKey: sceneMedia.storageKey })
+      .from(sceneMedia)
+      .where(and(eq(sceneMedia.id, mediaId), eq(sceneMedia.sceneId, id)))
+      .limit(1);
+    if (!existing) {
+      throw new HttpError(404, "NOT_FOUND", "Image not found on this scene");
+    }
+
+    const { buffer, filename } = await readImageFile(request);
+    const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+    const storageFilename = `scenes/${id}/${randomUUID()}.${ext}`;
+    const { path, publicUrl, mimeType } = await storageService.uploadPrecroppedSceneImage(buffer, storageFilename);
+
+    const [updated] = await db
+      .update(sceneMedia)
+      .set({ storageKey: path, publicUrl, mimeType })
+      .where(eq(sceneMedia.id, mediaId))
+      .returning();
+
+    try {
+      await storageService.deleteImage(existing.storageKey);
+    } catch (err) {
+      console.error(`[admin] scene ${id} image ${mediaId} re-cropped but old storage object could not be removed:`, err);
+    }
+
+    reply.send(updated);
+  });
+
   /* --------------------------- Scene image keywords -------------------------- */
   // ADMIN ONLY: free-text training-data labels. Never exposed to contributors.
 
@@ -2508,7 +3002,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // whichever image is primary, which would silently tag the wrong image
   // if used right after uploading a second one.
   fastify.post("/admin/scenes/media/:mediaId/keywords", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
-    const { mediaId } = sceneMediaIdParamSchema.parse(request.params);
+    const { mediaId } = mediaIdParamSchema.parse(request.params);
     const body = addSceneImageKeywordSchema.parse(request.body);
 
     const [media] = await db.select({ id: sceneMedia.id }).from(sceneMedia).where(eq(sceneMedia.id, mediaId)).limit(1);
@@ -2654,17 +3148,17 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // exposes a random single sentence and get-by-id, neither of which can
   // enumerate all sentences for an admin list view.
   fastify.get("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request) => {
-    const { limit, offset } = sentencesQuerySchema.parse(request.query);
+    const { createdFrom, createdTo, mine, limit, offset } = sentencesQuerySchema.parse(request.query);
+
+    const conditions = [isNull(sentences.deletedAt)];
+    if (createdFrom) conditions.push(gte(sentences.createdAt, new Date(createdFrom)));
+    if (createdTo) conditions.push(lte(sentences.createdAt, new Date(createdTo)));
+    if (mine) conditions.push(eq(sentences.createdBy, request.user!.id));
+    const whereClause = and(...conditions);
 
     const [items, [totalRow]] = await Promise.all([
-      db
-        .select()
-        .from(sentences)
-        .where(isNull(sentences.deletedAt))
-        .orderBy(desc(sentences.createdAt))
-        .limit(limit)
-        .offset(offset),
-      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(isNull(sentences.deletedAt)),
+      db.select().from(sentences).where(whereClause).orderBy(desc(sentences.createdAt)).limit(limit).offset(offset),
+      db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(whereClause),
     ]);
 
     return { items, limit, offset, total: totalRow?.value ?? 0 };
@@ -2672,27 +3166,16 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request, reply) => {
     const body = createSentenceSchema.parse(request.body);
+    const actor = request.user!;
+    const createdBy = actor.role === "volunteer" ? actor.id : null;
 
-    // Silently hand back the existing sentence instead of a case-insensitive
-    // duplicate -- sentences have no unique constraint to fall back on the
-    // way concepts/scenes do, so this is the only thing stopping "Hello!"
-    // and "hello!" from both existing.
-    const [duplicate] = await db
-      .select()
-      .from(sentences)
-      .where(and(sql`lower(${sentences.englishText}) = lower(${body.englishText})`, isNull(sentences.deletedAt)))
-      .limit(1);
-    if (duplicate) {
-      reply.code(200).send(duplicate);
+    const outcome = await gateVolunteerAction(actor, "sentence", "create", body, () => applyCreateSentence(body, actor, createdBy));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
       return;
     }
-
-    const [sentence] = await db
-      .insert(sentences)
-      .values({ englishText: body.englishText, categoryId: body.categoryId ?? null })
-      .returning();
-
-    reply.code(201).send(sentence);
+    reply.code(201).send(outcome.result);
   });
 
   // Bulk create from a CSV or JSON file. Expected row fields: englishText
@@ -2814,27 +3297,27 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { updated: rows.length };
   });
 
-  fastify.delete("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.delete("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
+    const actor = request.user!;
 
-    const [existing] = await db.select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt }).from(sentences).where(eq(sentences.id, id)).limit(1);
-    if (!existing) {
-      throw new HttpError(404, "NOT_FOUND", "Sentence not found");
+    if (actor.role === "volunteer") {
+      const [target] = await db.select({ createdBy: sentences.createdBy }).from(sentences).where(eq(sentences.id, id)).limit(1);
+      if (!target) throw new HttpError(404, "NOT_FOUND", "Sentence not found");
+      if (target.createdBy !== actor.id) {
+        throw new HttpError(403, "FORBIDDEN", "You can only delete sentences you added yourself");
+      }
     }
 
-    await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(eq(sentences.id, id));
+    const outcome = await gateVolunteerAction(actor, "sentence", "delete", { id }, () =>
+      applyDeleteSentence(id, actor, actor.role === "volunteer" ? actor.id : undefined),
+    );
 
-    await writeAuditLog({
-      actorId: request.user!.id,
-      actorRole: request.user!.role,
-      action: "admin_sentence_delete",
-      resourceType: "sentence",
-      resourceId: id,
-      beforeState: { isActive: existing.isActive, deletedAt: existing.deletedAt },
-      afterState: { isActive: false },
-    });
-
-    return { id, deleted: true };
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.send(outcome.result);
   });
 
   fastify.delete("/admin/sentences/:id/permanent", { preHandler: requirePermission("sentences.manage") }, async (request) => {
@@ -3269,6 +3752,283 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return updated;
+  });
+
+  /* -------------------------------------------------------------------------- */
+  /*                                  Volunteers                                */
+  /* -------------------------------------------------------------------------- */
+  // "volunteer" is a role, but everything about running the program (who
+  // holds it, whether their work auto-applies, and reviewing what they've
+  // submitted) is gated on its own permission -- volunteers.manage -- kept
+  // separate from users.manage since an admin could reasonably hold one
+  // without the other.
+
+  // Toggling a contributor into/out of the volunteer role. Deliberately
+  // narrower than a generic "set role" endpoint -- this can only move
+  // between "contributor" and "volunteer", never touch admin/super_admin,
+  // so it can't be used as a side door to self-escalate.
+  fastify.post("/admin/users/:id/volunteer", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { enabled } = setVolunteerSchema.parse(request.body);
+
+    const [target] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    if (target.role !== "contributor" && target.role !== "volunteer") {
+      throw new HttpError(400, "INVALID_ROLE", "Only a contributor can be made a volunteer");
+    }
+
+    const newRole = enabled ? "volunteer" : "contributor";
+    await db.update(users).set({ role: newRole, updatedAt: new Date() }).where(eq(users.id, id));
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: enabled ? "admin_grant_volunteer" : "admin_revoke_volunteer",
+      resourceType: "user",
+      resourceId: id,
+      beforeState: { role: target.role },
+      afterState: { role: newRole },
+    });
+
+    return { id, role: newRole };
+  });
+
+  // List of everyone currently holding the volunteer role, with a live
+  // pending-approval count per volunteer -- the Volunteers panel's landing
+  // list, one row expandable into that volunteer's full activity.
+  fastify.get("/admin/volunteers", { preHandler: requirePermission("volunteers.manage") }, async () => {
+    const rows = await db
+      .select({
+        id: users.id,
+        email: users.email,
+        displayName: users.displayName,
+        autoApproveVolunteer: users.autoApproveVolunteer,
+        createdAt: users.createdAt,
+        totalPoints: userStats.totalPoints,
+      })
+      .from(users)
+      .leftJoin(userStats, eq(userStats.userId, users.id))
+      .where(and(eq(users.role, "volunteer"), isNull(users.deletedAt)))
+      .orderBy(desc(users.createdAt));
+
+    const pendingCounts = await countPendingByVolunteer(rows.map((r) => r.id));
+
+    return {
+      items: rows.map((r) => ({ ...r, pendingCount: pendingCounts.get(r.id) ?? 0 })),
+    };
+  });
+
+  fastify.post("/admin/volunteers/:id/auto-approve", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { enabled } = setAutoApproveSchema.parse(request.body);
+
+    const [target] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target || target.role !== "volunteer") {
+      throw new HttpError(404, "NOT_FOUND", "Volunteer not found");
+    }
+
+    await setAutoApprove(id, enabled);
+    invalidateUserCache(id);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_set_volunteer_auto_approve",
+      resourceType: "user",
+      resourceId: id,
+      afterState: { autoApproveVolunteer: enabled },
+    });
+
+    return { id, autoApproveVolunteer: enabled };
+  });
+
+  // A human-readable label for a pending change, resolved from its payload
+  // -- so the review panel can show "River (Nature)" instead of a bare
+  // targetType + a JSON blob. Best-effort: a delete's payload only has an
+  // id, so this looks the current row up; if that row is already gone
+  // (deleted some other way in the meantime) this falls back to the id.
+  async function describePendingChange(row: typeof pendingChanges.$inferSelect): Promise<string> {
+    const payload = row.payload as Record<string, unknown>;
+    if (row.action === "create") {
+      switch (row.targetType) {
+        case "category":
+          return String(payload.nameEnglish ?? "(category)");
+        case "concept":
+          return String(payload.labelEnglish ?? "(concept)");
+        case "scene":
+          return String(payload.title ?? "(scene)");
+        case "sentence":
+          return String(payload.englishText ?? "(sentence)");
+        case "concept_media":
+        case "scene_media":
+          return "(image)";
+      }
+    }
+    // Delete: payload is just { id } -- look up the current label.
+    const targetId = String(payload.id ?? "");
+    if (row.targetType === "concept") {
+      const [c] = await db.select({ labelEnglish: concepts.labelEnglish }).from(concepts).where(eq(concepts.id, targetId)).limit(1);
+      return c ? `Delete: ${c.labelEnglish}` : `Delete: ${targetId}`;
+    }
+    if (row.targetType === "scene") {
+      const [s] = await db.select({ title: scenes.title }).from(scenes).where(eq(scenes.id, targetId)).limit(1);
+      return s ? `Delete: ${s.title}` : `Delete: ${targetId}`;
+    }
+    if (row.targetType === "sentence") {
+      const [s] = await db.select({ englishText: sentences.englishText }).from(sentences).where(eq(sentences.id, targetId)).limit(1);
+      return s ? `Delete: ${s.englishText}` : `Delete: ${targetId}`;
+    }
+    return targetId;
+  }
+
+  // Every pending change for one volunteer (or, without volunteerId, across
+  // all of them) -- filterable by targetType/status so the panel can group
+  // into the four categories the admin reviews separately (images, modules
+  // [concepts+scenes], categories, titles [sentences]).
+  fastify.get("/admin/pending-changes", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const query = pendingChangesQuerySchema.parse(request.query);
+    const rows = await listPendingChanges(query);
+    const items = await Promise.all(rows.map(async (row) => ({ ...row, label: await describePendingChange(row) })));
+    return { items };
+  });
+
+  fastify.post("/admin/pending-changes/:id/approve", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const row = await requirePendingRow(id);
+
+    let resultResourceId: string | null;
+    try {
+      resultResourceId = await applyPendingChange(row);
+    } catch (err) {
+      // Domain-level failure at approval time (duplicate now exists,
+      // referenced category/concept/scene is gone, etc.) -- surfaced to the
+      // admin as a normal error rather than silently marking it approved
+      // when nothing actually happened. The row stays "pending" so the
+      // admin can still reject it (or retry once the underlying issue is
+      // fixed) instead of it being stuck in limbo.
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(500, "APPROVE_FAILED", err instanceof Error ? err.message : "Could not apply this change");
+    }
+
+    await markApproved(id, request.user!.id, resultResourceId);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_pending_change_approve",
+      resourceType: "pending_change",
+      resourceId: id,
+      afterState: { targetType: row.targetType, action: row.action, resultResourceId },
+    });
+
+    return { id, status: "approved", resultResourceId };
+  });
+
+  fastify.post("/admin/pending-changes/:id/reject", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    await requirePendingRow(id);
+    const { reason } = rejectPendingChangeSchema.parse(request.body);
+
+    await markRejected(id, request.user!.id, reason);
+
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_pending_change_reject",
+      resourceType: "pending_change",
+      resourceId: id,
+      afterState: { reason: reason ?? null },
+    });
+
+    return { id, status: "rejected" };
+  });
+
+  // Bulk forms: each id is independent -- one already-reviewed or
+  // now-invalid item doesn't block the rest of the batch, same convention
+  // as every other bulk-* admin route in this file.
+  fastify.post("/admin/pending-changes/bulk-approve", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { ids } = bulkPendingIdsSchema.parse(request.body);
+    const results: { id: string; status: "approved" | "error"; message?: string }[] = [];
+
+    for (const id of ids) {
+      try {
+        const row = await requirePendingRow(id);
+        const resultResourceId = await applyPendingChange(row);
+        await markApproved(id, request.user!.id, resultResourceId);
+        results.push({ id, status: "approved" });
+      } catch (err) {
+        results.push({ id, status: "error", message: err instanceof Error ? err.message : "Failed" });
+      }
+    }
+
+    await writeAuditLogs(
+      results
+        .filter((r) => r.status === "approved")
+        .map((r) => ({
+          actorId: request.user!.id,
+          actorRole: request.user!.role,
+          action: "admin_pending_change_approve",
+          resourceType: "pending_change",
+          resourceId: r.id,
+        })),
+    );
+
+    return { approved: results.filter((r) => r.status === "approved").length, errors: results.filter((r) => r.status === "error") };
+  });
+
+  fastify.post("/admin/pending-changes/bulk-reject", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { ids } = bulkPendingIdsSchema.parse(request.body);
+    const { reason } = rejectPendingChangeSchema.parse(request.body);
+    const results: { id: string; status: "rejected" | "error"; message?: string }[] = [];
+
+    for (const id of ids) {
+      try {
+        await requirePendingRow(id);
+        await markRejected(id, request.user!.id, reason);
+        results.push({ id, status: "rejected" });
+      } catch (err) {
+        results.push({ id, status: "error", message: err instanceof Error ? err.message : "Failed" });
+      }
+    }
+
+    await writeAuditLogs(
+      results
+        .filter((r) => r.status === "rejected")
+        .map((r) => ({
+          actorId: request.user!.id,
+          actorRole: request.user!.role,
+          action: "admin_pending_change_reject",
+          resourceType: "pending_change",
+          resourceId: r.id,
+          afterState: { reason: reason ?? null },
+        })),
+    );
+
+    return { rejected: results.filter((r) => r.status === "rejected").length, errors: results.filter((r) => r.status === "error") };
+  });
+
+  // A volunteer's own "logs" panel data -- their full audit trail (every
+  // auto-approved or already-approved action) plus their pending/rejected
+  // history, for the admin's per-volunteer expanded view.
+  fastify.get("/admin/volunteers/:id/activity", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+
+    const [target] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    if (!target || target.role !== "volunteer") {
+      throw new HttpError(404, "NOT_FOUND", "Volunteer not found");
+    }
+
+    const [pendingRows, auditRows] = await Promise.all([
+      listPendingChanges({ volunteerId: id, limit: 500, offset: 0 }),
+      db.select().from(auditLogs).where(eq(auditLogs.actorId, id)).orderBy(desc(auditLogs.createdAt)).limit(200),
+    ]);
+
+    const pendingWithLabels = await Promise.all(pendingRows.map(async (row) => ({ ...row, label: await describePendingChange(row) })));
+
+    return { pendingChanges: pendingWithLabels, auditLog: auditRows };
   });
 
   fastify.post("/superadmin/admins", { preHandler: requirePermission("system.manage") }, async (request) => {

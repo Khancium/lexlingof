@@ -25,7 +25,7 @@ import { AdminUserDetailsModal } from "@/components/admin-user-details-modal";
 
 const DEFAULT_PAGE_SIZE = 20;
 
-const ROLE_OPTIONS = ["contributor", "reviewer", "admin", "super_admin"] as const;
+const ROLE_OPTIONS = ["contributor", "volunteer", "reviewer", "admin", "super_admin"] as const;
 const STATUS_OPTIONS: UserStatusFilter[] = ["active", "restricted", "suspended"];
 const LEVEL_OPTIONS: ContributorLevel[] = ["BRONZE", "SILVER", "GOLD", "PLATINUM"];
 
@@ -330,6 +330,18 @@ export default function AdminUsersPage() {
       load();
     } catch (err) {
       alert(getErrorMessage(err, "Failed to lift suspension"));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleSetVolunteer(u: AdminUser, enabled: boolean) {
+    setBusyId(u.id);
+    try {
+      await api.admin.setVolunteer(u.id, enabled);
+      load();
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to update volunteer status"));
     } finally {
       setBusyId(null);
     }
@@ -725,6 +737,19 @@ export default function AdminUsersPage() {
                             className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border disabled:opacity-50"
                           >
                             Unrestrict
+                          </button>
+                        ) : null}
+                        {u.role === "contributor" || u.role === "volunteer" ? (
+                          <button
+                            onClick={() => handleSetVolunteer(u, u.role !== "volunteer")}
+                            disabled={isBusy}
+                            className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50 ${
+                              u.role === "volunteer"
+                                ? "bg-surface-card text-ink hover:bg-border"
+                                : "bg-emerald-600 text-white hover:bg-emerald-500"
+                            }`}
+                          >
+                            {u.role === "volunteer" ? "Revoke volunteer" : "Make volunteer"}
                           </button>
                         ) : null}
                         {u.role !== "super_admin" ? (

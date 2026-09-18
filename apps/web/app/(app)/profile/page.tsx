@@ -17,6 +17,7 @@ import {
 import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
 import { EDUCATION_LEVEL_OPTIONS } from "@/lib/demographics-constants";
 import { ConfirmDialog } from "@/components/confirm-dialog";
+import { ImageCropper } from "@/components/image-cropper";
 
 export default function ProfilePage() {
   const user = useAuthStore((state) => state.user);
@@ -37,6 +38,7 @@ export default function ProfilePage() {
   const [bioError, setBioError] = useState<string | null>(null);
 
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarCropUrl, setAvatarCropUrl] = useState<string | null>(null);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const [avatarVersion, setAvatarVersion] = useState(0);
 
@@ -144,8 +146,20 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleAvatarChange(file: File | undefined) {
+  // A picked file opens the crop tool (1:1, matching the server's own
+  // AVATAR_MAX_DIMENSION square) before it's uploaded -- the server still
+  // center-crops to square as a safety net (storage.service.ts), but this
+  // lets the user pick their own framing instead of whatever a dumb centre
+  // crop of an arbitrary photo lands on.
+  function handleAvatarFileSelected(file: File | undefined) {
     if (!file) return;
+    setAvatarCropUrl(URL.createObjectURL(file));
+  }
+
+  async function handleAvatarCropApply(blob: Blob) {
+    if (avatarCropUrl) URL.revokeObjectURL(avatarCropUrl);
+    setAvatarCropUrl(null);
+    const file = new File([blob], "avatar.jpg", { type: "image/jpeg" });
     setIsUploadingAvatar(true);
     setAvatarError(null);
     try {
@@ -211,7 +225,7 @@ export default function ProfilePage() {
               className="hidden"
               disabled={isUploadingAvatar}
               onChange={(e) => {
-                handleAvatarChange(e.target.files?.[0]);
+                handleAvatarFileSelected(e.target.files?.[0]);
                 e.target.value = "";
               }}
             />
@@ -473,6 +487,21 @@ export default function ProfilePage() {
         onConfirm={handleDeleteAccount}
         onCancel={() => setConfirmingDelete(false)}
       />
+
+      {avatarCropUrl ? (
+        <ImageCropper
+          imageSrc={avatarCropUrl}
+          aspectRatio={1}
+          outputWidth={512}
+          outputHeight={512}
+          title="Crop profile picture"
+          onCancel={() => {
+            URL.revokeObjectURL(avatarCropUrl);
+            setAvatarCropUrl(null);
+          }}
+          onApply={handleAvatarCropApply}
+        />
+      ) : null}
     </div>
   );
 }

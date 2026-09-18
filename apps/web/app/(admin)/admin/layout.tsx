@@ -12,17 +12,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const user = useAuthStore((state) => state.user);
   const router = useRouter();
 
-  const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  // Volunteers reach /admin/* too (Concepts/Scenes/Sentences only -- the nav
+  // itself hides everything else from them), so the guard admits their role
+  // alongside admin/super_admin rather than gating on those two alone.
+  const canAccessAdmin = user?.role === "admin" || user?.role === "super_admin" || user?.role === "volunteer";
 
   useEffect(() => {
     if (!user) {
       router.replace("/login");
-    } else if (!isAdmin) {
+    } else if (!canAccessAdmin) {
       router.replace("/dashboard");
     }
-  }, [user, isAdmin, router]);
+  }, [user, canAccessAdmin, router]);
 
-  if (!user || !isAdmin) {
+  if (!user || !canAccessAdmin) {
     return null;
   }
 

@@ -347,7 +347,17 @@ export type Category = {
   contributedCount: number;
 };
 
-export type ConceptsQuery = { categoryId?: string; search?: string; limit?: number; offset?: number };
+export type ConceptsQuery = {
+  categoryId?: string;
+  search?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  hasImage?: "yes" | "no";
+  /** Volunteer's "my own additions" filter -- true restricts the list to concepts this caller created. */
+  mine?: boolean;
+  limit?: number;
+  offset?: number;
+};
 export type ConceptListItem = {
   id: string;
   categoryId: string;
@@ -355,7 +365,10 @@ export type ConceptListItem = {
   slug: string;
   labelEnglish: string;
   description: string | null;
+  createdAt: string;
+  createdBy: string | null;
   imageUrl: string | null;
+  imageMediaId: string | null;
   hasContributed: boolean;
 };
 export type ConceptsResponse = { items: ConceptListItem[]; limit: number; offset: number; total: number };
@@ -535,7 +548,10 @@ export type Scene = {
   difficulty: SceneDifficulty;
   estimatedDurationSeconds: number | null;
   isDaily: boolean;
+  createdAt: string;
+  createdBy: string | null;
   imageUrl: string | null;
+  imageMediaId: string | null;
   hasContributed?: boolean;
 };
 export type ScenesResponse = { items: Scene[]; limit: number; offset: number; total: number };
@@ -929,6 +945,34 @@ export type OpenverseImageResult = {
 };
 
 export type OpenverseSearchResponse = { results: OpenverseImageResult[]; resultCount: number; pageCount: number; page: number };
+
+/** One row of concept_media/scene_media -- sourceProvider/sourceUrl/attribution are only ever populated for an Openverse-sourced image. */
+export type ConceptMedia = {
+  id: string;
+  conceptId: string;
+  storageKey: string;
+  publicUrl: string | null;
+  mimeType: string;
+  fileSizeBytes: number | null;
+  isPrimary: boolean;
+  sourceProvider: string | null;
+  sourceUrl: string | null;
+  attribution: string | null;
+  createdAt: string;
+};
+
+export type SceneMedia = {
+  id: string;
+  sceneId: string;
+  storageKey: string;
+  publicUrl: string | null;
+  mimeType: string;
+  isPrimary: boolean;
+  sourceProvider: string | null;
+  sourceUrl: string | null;
+  attribution: string | null;
+  createdAt: string;
+};
 export type AdminSentence = {
   id: string;
   englishText: string;
@@ -936,6 +980,7 @@ export type AdminSentence = {
   isActive: boolean;
   usageCount: number;
   createdAt: string;
+  createdBy: string | null;
 };
 export type BulkEditSentencesInput = { ids: string[]; categoryId?: string; isActive?: boolean };
 export type AdminSentencesResponse = { items: AdminSentence[]; limit: number; offset: number; total: number };
@@ -976,6 +1021,46 @@ export type AuditLog = {
 };
 
 export type AuditLogsResponse = { items: AuditLog[]; limit: number; offset: number; total: number };
+
+/**
+ * Returned (with a 202) instead of the normal create/delete response body
+ * whenever a volunteer without auto-approve submits a gated action --
+ * narrow with `"pending" in result` before treating the result as the real
+ * created/deleted resource.
+ */
+export type PendingResult = { pending: true; id: string; message: string };
+
+export type PendingTargetType = "category" | "concept" | "scene" | "sentence" | "concept_media" | "scene_media";
+export type PendingAction = "create" | "delete";
+export type PendingStatus = "pending" | "approved" | "rejected";
+
+export type PendingChange = {
+  id: string;
+  volunteerId: string;
+  targetType: PendingTargetType;
+  action: PendingAction;
+  payload: Record<string, unknown>;
+  status: PendingStatus;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  rejectionReason: string | null;
+  resultResourceId: string | null;
+  createdAt: string;
+  /** Human-readable description of the change, e.g. a concept's label or "Delete: X". */
+  label: string;
+};
+
+export type VolunteerListItem = {
+  id: string;
+  email: string;
+  displayName: string;
+  autoApproveVolunteer: boolean;
+  createdAt: string;
+  totalPoints: number | null;
+  pendingCount: number;
+};
+
+export type VolunteerActivity = { pendingChanges: PendingChange[]; auditLog: AuditLog[] };
 
 /* -------------------------------------------------------------------------- */
 /*                                     API                                    */
@@ -1155,8 +1240,17 @@ export const api = {
   },
 
   scenes: {
-    getAll: (params?: { search?: string; limit?: number; offset?: number }) =>
-      apiClient.get<ScenesResponse>("/api/v1/scenes", { params }).then((r) => r.data),
+    getAll: (params?: {
+      search?: string;
+      createdFrom?: string;
+      createdTo?: string;
+      categoryId?: string;
+      hasImage?: "yes" | "no";
+      /** Volunteer's "my own additions" filter -- true restricts the list to scenes this caller created. */
+      mine?: boolean;
+      limit?: number;
+      offset?: number;
+    }) => apiClient.get<ScenesResponse>("/api/v1/scenes", { params }).then((r) => r.data),
     getDaily: () => apiClient.get<Scene>("/api/v1/scenes/daily").then((r) => r.data),
     getRandom: (excludeId?: string) =>
       apiClient.get<Scene>("/api/v1/scenes/random", { params: excludeId ? { exclude: excludeId } : undefined }).then((r) => r.data),
@@ -1296,14 +1390,16 @@ export const api = {
     // and return everything needed, so admin pages reuse api.concepts.getAll
     // / api.scenes.getAll directly instead of duplicating them here.
     createCategory: (data: { nameEnglish: string; icon?: string; sortOrder?: number }) =>
-      apiClient.post<Category>("/api/v1/admin/categories", data).then((r) => r.data),
+      apiClient.post<Category | PendingResult>("/api/v1/admin/categories", data).then((r) => r.data),
     /** One category name per line -- slug auto-generated, same as the single-create form above. */
     bulkCreateCategoriesText: (names: string[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/categories/bulk-text", { names }).then((r) => r.data),
-    createConcept: (data: AdminConceptInput) => apiClient.post<ConceptDetail>("/api/v1/admin/concepts", data).then((r) => r.data),
+    createConcept: (data: AdminConceptInput) =>
+      apiClient.post<ConceptDetail | PendingResult>("/api/v1/admin/concepts", data).then((r) => r.data),
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>
       apiClient.put<ConceptDetail>(`/api/v1/admin/concepts/${id}`, data).then((r) => r.data),
-    deleteConcept: (id: string) => apiClient.delete(`/api/v1/admin/concepts/${id}`).then((r) => r.data),
+    deleteConcept: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean } | PendingResult>(`/api/v1/admin/concepts/${id}`).then((r) => r.data),
     bulkDeleteConcepts: (ids: string[]) =>
       apiClient.post<{ deleted: number }>("/api/v1/admin/concepts/bulk-delete", { ids }).then((r) => r.data),
     permanentlyDeleteConcept: (id: string) =>
@@ -1316,19 +1412,30 @@ export const api = {
       const form = new FormData();
       form.append("file", file);
       return apiClient
-        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media`, form)
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/concepts/${id}/media`, form)
         .then((r) => r.data);
     },
     addConceptMediaUrl: (id: string, imageUrl: string) =>
       apiClient
-        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media/url`, { imageUrl })
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/concepts/${id}/media/url`, { imageUrl })
         .then((r) => r.data),
     bulkAddConceptMediaUrl: (items: { conceptId: string; imageUrl: string }[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/bulk-url", { items }).then((r) => r.data),
     addConceptMediaOpenverse: (id: string, image: OpenverseImageResult) =>
       apiClient
-        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/concepts/${id}/media/openverse`, { image })
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/concepts/${id}/media/openverse`, { image })
         .then((r) => r.data),
+    /** Every image on this concept, however it got there (upload, URL, or Openverse). */
+    getConceptMedia: (id: string) =>
+      apiClient.get<{ items: ConceptMedia[] }>(`/api/v1/admin/concepts/${id}/media`).then((r) => r.data.items),
+    deleteConceptMedia: (id: string, mediaId: string) =>
+      apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/concepts/${id}/media/${mediaId}`).then((r) => r.data),
+    /** Replaces this exact image with a manually-cropped version -- id/isPrimary/attribution are unchanged, only the image itself. */
+    cropConceptMedia: (id: string, mediaId: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.put<ConceptMedia>(`/api/v1/admin/concepts/${id}/media/${mediaId}/crop`, form).then((r) => r.data);
+    },
     /** Searches Openverse by each concept's own label and attaches the top result -- omit `ids` to target every concept in the corpus with no image at all. */
     bulkOpenverseAutofillConcepts: (ids?: string[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/openverse-autofill", { ids }).then((r) => r.data),
@@ -1347,10 +1454,12 @@ export const api = {
         .get<OpenverseSearchResponse>("/api/v1/admin/openverse/search", { params: { q, page, pageSize } })
         .then((r) => r.data),
 
-    createScene: (data: AdminSceneInput) => apiClient.post<Scene>("/api/v1/admin/scenes", data).then((r) => r.data),
+    createScene: (data: AdminSceneInput) =>
+      apiClient.post<Scene | PendingResult>("/api/v1/admin/scenes", data).then((r) => r.data),
     updateScene: (id: string, data: AdminSceneUpdateInput) =>
       apiClient.put<Scene>(`/api/v1/admin/scenes/${id}`, data).then((r) => r.data),
-    deleteScene: (id: string) => apiClient.delete(`/api/v1/admin/scenes/${id}`).then((r) => r.data),
+    deleteScene: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean } | PendingResult>(`/api/v1/admin/scenes/${id}`).then((r) => r.data),
     bulkDeleteScenes: (ids: string[]) =>
       apiClient.post<{ deleted: number }>("/api/v1/admin/scenes/bulk-delete", { ids }).then((r) => r.data),
     permanentlyDeleteScene: (id: string) =>
@@ -1363,19 +1472,30 @@ export const api = {
       const form = new FormData();
       form.append("file", file);
       return apiClient
-        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media`, form)
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/scenes/${id}/media`, form)
         .then((r) => r.data);
     },
     addSceneMediaUrl: (id: string, imageUrl: string) =>
       apiClient
-        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media/url`, { imageUrl })
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/scenes/${id}/media/url`, { imageUrl })
         .then((r) => r.data),
     bulkAddSceneMediaUrl: (items: { sceneId: string; imageUrl: string }[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/bulk-url", { items }).then((r) => r.data),
     addSceneMediaOpenverse: (id: string, image: OpenverseImageResult) =>
       apiClient
-        .post<{ id: string; publicUrl: string }>(`/api/v1/admin/scenes/${id}/media/openverse`, { image })
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/scenes/${id}/media/openverse`, { image })
         .then((r) => r.data),
+    /** Every image on this scene, however it got there (upload, URL, or Openverse). */
+    getSceneMedia: (id: string) =>
+      apiClient.get<{ items: SceneMedia[] }>(`/api/v1/admin/scenes/${id}/media`).then((r) => r.data.items),
+    deleteSceneMedia: (id: string, mediaId: string) =>
+      apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/scenes/${id}/media/${mediaId}`).then((r) => r.data),
+    /** Replaces this exact image with a manually-cropped version -- see cropConceptMedia. */
+    cropSceneMedia: (id: string, mediaId: string, file: File) => {
+      const form = new FormData();
+      form.append("file", file);
+      return apiClient.put<SceneMedia>(`/api/v1/admin/scenes/${id}/media/${mediaId}/crop`, form).then((r) => r.data);
+    },
     /** Searches Openverse by each scene's own title and attaches the top result -- omit `ids` to target every scene with no image at all. */
     bulkOpenverseAutofillScenes: (ids?: string[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/openverse-autofill", { ids }).then((r) => r.data),
@@ -1398,10 +1518,12 @@ export const api = {
     deleteSceneKeyword: (sceneId: string, keywordId: string) =>
       apiClient.delete(`/api/v1/admin/scenes/${sceneId}/keywords/${keywordId}`).then((r) => r.data),
 
-    getSentences: (params?: { limit?: number; offset?: number }) =>
+    getSentences: (params?: { createdFrom?: string; createdTo?: string; mine?: boolean; limit?: number; offset?: number }) =>
       apiClient.get<AdminSentencesResponse>("/api/v1/admin/sentences", { params }).then((r) => r.data),
-    createSentence: (data: AdminSentenceInput) => apiClient.post<AdminSentence>("/api/v1/admin/sentences", data).then((r) => r.data),
-    deleteSentence: (id: string) => apiClient.delete(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
+    createSentence: (data: AdminSentenceInput) =>
+      apiClient.post<AdminSentence | PendingResult>("/api/v1/admin/sentences", data).then((r) => r.data),
+    deleteSentence: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean } | PendingResult>(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
     bulkDeleteSentences: (ids: string[]) =>
       apiClient.post<{ deleted: number }>("/api/v1/admin/sentences/bulk-delete", { ids }).then((r) => r.data),
     permanentlyDeleteSentence: (id: string) =>
@@ -1415,6 +1537,37 @@ export const api = {
       form.append("file", file);
       return apiClient.post<BulkUploadResult>("/api/v1/admin/sentences/bulk", form).then((r) => r.data);
     },
+
+    /* ----------------------------- Volunteers ----------------------------- */
+    /** Promotes a contributor to volunteer (enabled: true) or demotes a volunteer back to contributor (enabled: false). */
+    setVolunteer: (userId: string, enabled: boolean) =>
+      apiClient.post<{ id: string; role: string }>(`/api/v1/admin/users/${userId}/volunteer`, { enabled }).then((r) => r.data),
+    listVolunteers: () =>
+      apiClient.get<{ items: VolunteerListItem[] }>("/api/v1/admin/volunteers").then((r) => r.data.items),
+    setVolunteerAutoApprove: (id: string, enabled: boolean) =>
+      apiClient
+        .post<{ id: string; autoApproveVolunteer: boolean }>(`/api/v1/admin/volunteers/${id}/auto-approve`, { enabled })
+        .then((r) => r.data),
+    getVolunteerActivity: (id: string) =>
+      apiClient.get<VolunteerActivity>(`/api/v1/admin/volunteers/${id}/activity`).then((r) => r.data),
+    getPendingChanges: (params?: { volunteerId?: string; targetType?: PendingTargetType; status?: PendingStatus; limit?: number; offset?: number }) =>
+      apiClient.get<{ items: PendingChange[] }>("/api/v1/admin/pending-changes", { params }).then((r) => r.data.items),
+    approvePendingChange: (id: string) =>
+      apiClient
+        .post<{ id: string; status: "approved"; resultResourceId: string | null }>(`/api/v1/admin/pending-changes/${id}/approve`)
+        .then((r) => r.data),
+    rejectPendingChange: (id: string, reason?: string) =>
+      apiClient
+        .post<{ id: string; status: "rejected" }>(`/api/v1/admin/pending-changes/${id}/reject`, { reason })
+        .then((r) => r.data),
+    bulkApprovePendingChanges: (ids: string[]) =>
+      apiClient
+        .post<{ approved: number; errors: { id: string; message?: string }[] }>("/api/v1/admin/pending-changes/bulk-approve", { ids })
+        .then((r) => r.data),
+    bulkRejectPendingChanges: (ids: string[], reason?: string) =>
+      apiClient
+        .post<{ rejected: number; errors: { id: string; message?: string }[] }>("/api/v1/admin/pending-changes/bulk-reject", { ids, reason })
+        .then((r) => r.data),
   },
 
   superadmin: {

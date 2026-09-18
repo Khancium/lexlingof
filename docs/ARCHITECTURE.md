@@ -568,6 +568,114 @@ the same user report:
   Objects, People) — all seven correctly disappear from the contributor page's category
   grid while the admin's own category list (which needs to manage them) is untouched.
 
+### 3.13 Per-image deletion (concepts and scenes)
+
+Every image on a concept or scene, regardless of how it got there (multipart upload,
+"From URL", or Openverse — all three funnel through the same `insertConceptMedia`/
+`insertSceneMedia`), can now be individually removed. There was previously no way to
+remove one image without deleting the entire concept/scene (which cascades its media as a
+side effect of a much bigger, unrelated action).
+
+- `GET`/`DELETE /admin/concepts/:id/media/:mediaId` and the identical pair for scenes.
+  Deleting the DB row and the Supabase Storage object are two separate steps — the DB
+  delete happens first, and a storage failure is logged rather than thrown, same "the
+  delete already succeeded, an orphaned file is a much smaller problem" reasoning as the
+  permanent-delete path (§2.5).
+- **Primary reassignment**: if the deleted image was the primary one and others remain,
+  the oldest survivor is promoted to primary — otherwise the concept/scene would keep
+  other images on file while having none marked as its cover image.
+- `scene_image_keywords` cascades on the DB side (`onDelete: "cascade"` on its FK to
+  `scene_media`), so removing a scene image auto-removes its keywords with no extra query.
+  Nothing references `concept_media` by FK, so no equivalent cleanup is needed there.
+- **Frontend**: a new shared `AdminMediaManager` component (thumbnail grid, a "Remove"
+  button per image, a "Primary" badge, the source provider if it came from Openverse) is
+  wired into both admin pages behind an "Images" toggle — the same expand/collapse
+  convention already used for the scenes page's "Keywords" panel. Concepts previously
+  showed no thumbnail of an assigned image at all (only "Upload / From URL / Openverse"
+  buttons); this is also the first time an admin can actually *see* a concept's image
+  without leaving the page.
+- Verified live: deleting a concept's primary image while a second remains correctly
+  promotes the second to primary and confirms the deleted file is actually gone via the
+  Supabase Storage `list` API (not just the public URL, which can be stale from CDN
+  caching — see the permanent-delete note in §2.5 on why that check specifically isn't
+  trustworthy); deleting a scene's only remaining image correctly leaves it with none.
+
+### 3.14 Date-added filters (concepts, scenes, sentences)
+
+`createdFrom`/`createdTo` (ISO datetime, end-inclusive of the whole day) are now accepted
+by the public `GET /concepts` and `GET /scenes` list endpoints and the admin-only
+`GET /admin/sentences` — added to the existing endpoints rather than duplicating a
+separate admin-only list route, consistent with this module's existing "admin pages reuse
+the public list endpoints" design (§2.5's module-map note). The contributor-facing browse
+UI has no date picker and never sends these params; only the admin pages' new "Added
+[date] to [date]" filter bar does. Sort order is untouched by this filter (scenes still
+order by difficulty for contributor browsing) — the filter narrows the `WHERE` clause
+only, it doesn't introduce a new default ordering that would affect contributor browsing.
+Verified live against real corpus data for all three: total vs. "created today or later"
+vs. "created before 2020" (0, as expected) counts all matched.
+
+### 3.15 Has-image badge, category/image-status filters, and image cropping
+
+- **Has-image badge**: a small "✓ IMAGE" / "NO IMAGE" tag on every concept/scene row —
+  purely a frontend read of the `imageUrl` field the list endpoints already returned; no
+  backend change needed for the badge itself.
+- **Filters**: `hasImage=yes|no` added to both `GET /concepts` and `GET /scenes`, via an
+  `exists`/`not exists` subquery against `concept_media`/`scene_media` — written with
+  literal, table-qualified SQL text (`concept_media.concept_id = concepts.id`, not
+  `${concepts.id}` interpolated) for the same reason as the sentence/scene duplicate
+  checks in §3.11: the inner table has its own `id` column, and an unqualified reference
+  can silently bind to the wrong one. **Scenes have no direct category column** — a
+  `categoryId` filter here matches scenes with at least one `scene_concepts` coverage
+  annotation in that category (`scene_concepts` already carries its own `category_id` for
+  exactly this). `getScenes()` was refactored from positional parameters to a `filters`
+  options object once it grew past four. Verified live: `hasImage=yes` went from 0 → 1
+  immediately after attaching a test image; a `categoryId` filter correctly matched only
+  after inserting a real `scene_concepts` row pointing a scene at that category (the table
+  was empty in this corpus, so a temporary row was inserted and removed to prove the join).
+- **Auto-crop, every source, every path**: `storageService.uploadConceptImage()` (1:1) and
+  `uploadSceneImage()` (16:9) now both use `fit: "cover"` with `position: "attention"`
+  (sharp's saliency-based smart crop) instead of the previous `fit: "inside"`, which only
+  capped the longest edge and left whatever aspect ratio the source happened to have —
+  meaning concept/scene images were never actually the ratio the frontend's fixed-ratio
+  image boxes assumed. Both functions share one private `uploadImageWithTargetRatio()`
+  helper; since `insertConceptMedia`/`insertSceneMedia` are the single choke point every
+  source (upload, "From URL", Openverse) already funnels through, this one change covers
+  all three uniformly. Verified live: a freshly-attached Openverse image came back at
+  exactly 1200×1200.
+- **Manual crop**: a from-scratch canvas cropper (`components/image-cropper.tsx`) — no
+  third-party crop library; React 19 compatibility risk for one wasn't worth it against a
+  fairly small amount of drag/resize math. A fixed-aspect-ratio box can be dragged (move)
+  and resized (bottom-right handle, ratio-locked), starting centered at the largest box of
+  the target ratio that fits (the on-screen equivalent of the server's own auto-crop, so
+  "Reset to auto-crop" and the initial state are the same thing). On Apply it draws the
+  selected region onto an offscreen canvas at the caller's target resolution and hands back
+  a Blob.
+  - **Where it's wired in**: the "Upload" file picker on both admin pages now opens the
+    cropper before the file ever reaches `uploadConceptMedia`/`uploadSceneMedia` (1:1 /
+    16:9 respectively); the profile page's avatar picker opens it too (1:1, 512×512,
+    matching `AVATAR_MAX_DIMENSION`). A new "Crop" button in `AdminMediaManager` (next to
+    "Remove") lets an admin re-crop *any already-stored* image regardless of how it got
+    there — including "From URL" and Openverse sources, which never pass through the
+    browser as a raw file. This works because the cropper loads the image from its own
+    Supabase Storage `publicUrl`, and Supabase Storage's public objects are already served
+    with permissive CORS headers, so `crossOrigin="anonymous"` never taints the canvas —
+    no proxy or preview-before-commit step needed.
+  - **Backend**: `PUT /admin/{concepts,scenes}/:id/media/:mediaId/crop` (multipart) accepts
+    the already-cropped image and re-encodes it with `fit: "fill"`
+    (`uploadPrecroppedImage`/its two wrappers) rather than `"cover"` — re-cropping an
+    image the admin already manually framed would silently override their choice, which is
+    exactly the bug this route exists to avoid. The row's `id`/`isPrimary`/attribution are
+    untouched; only `storageKey`/`publicUrl`/`mimeType` change, and the old storage object
+    is deleted after the new one is confirmed (logged, not thrown, on delete failure — same
+    convention as every other storage cleanup in this file).
+  - Verified live end-to-end through the actual browser UI (not just curl): picked a
+    concept's stored image, opened the crop modal, dragged the resize handle, clicked
+    Apply, confirmed the `PUT .../crop` request returned 200, and confirmed the resulting
+    stored file was exactly 1200×1200. Also verified directly against a scene image
+    (simulating a browser-cropped 16:9 buffer) that the same-row id and `isPrimary` survive
+    the swap and the previous storage object is actually gone (`storage.list`, not just the
+    public URL, which can be stale from CDN caching per the permanent-delete note in §2.5).
+
 ---
 
 ## 4. Frontend Architecture
