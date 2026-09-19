@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { api, getErrorMessage, type RandomSentence, type SentenceGroup } from "@/lib/api";
+import { api, getErrorMessage, type RandomSentence, type SentenceGroup, type SentenceSourceLanguage } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
@@ -21,6 +21,19 @@ const MAX_DURATION_MS = 60000;
 const GROUPS_DEFAULT_PAGE_SIZE = 20;
 
 const emptyDraft: Draft = { transcription: "", romanization: "", ipa: "", recording: null };
+
+// Urdu and Persian are both right-to-left scripts -- rendered ltr (the
+// default), word order and punctuation come out backwards.
+function textDirection(lang: SentenceSourceLanguage): "rtl" | "ltr" {
+  return lang === "urdu" || lang === "persian" ? "rtl" : "ltr";
+}
+
+const SOURCE_LANGUAGE_OPTIONS: { value: SentenceSourceLanguage | ""; label: string }[] = [
+  { value: "", label: "All languages" },
+  { value: "english", label: "English" },
+  { value: "urdu", label: "Urdu" },
+  { value: "persian", label: "Persian" },
+];
 
 export default function TranslatePage() {
   return (
@@ -41,6 +54,12 @@ function TranslatePageInner() {
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
   const [step, setStep] = useState<Step>("groups");
+
+  // Which language a sentence's prompt text is written in -- lets a
+  // contributor who reads Urdu or Persian better than English work from
+  // prompts in that language instead. Empty string means no filter (every
+  // language mixed together, same as before this existed).
+  const [sourceLanguage, setSourceLanguage] = useState<SentenceSourceLanguage | "">("");
 
   // Sentences are bucketed server-side into fixed groups of at most 50 --
   // shown here as tiles, each with a progress bar for how many of that
@@ -92,14 +111,14 @@ function TranslatePageInner() {
     setLoadingGroups(true);
     setGroupsError(null);
     api.contributions
-      .getSentenceGroups({ limit: groupsLimit, offset: groupsOffset })
+      .getSentenceGroups({ limit: groupsLimit, offset: groupsOffset, sourceLanguage: sourceLanguage || undefined })
       .then((res) => {
         setGroups(res.items);
         setGroupsTotal(res.total);
       })
       .catch((err) => setGroupsError(getErrorMessage(err, "Failed to load sentence groups")))
       .finally(() => setLoadingGroups(false));
-  }, [groupsLimit, groupsOffset]);
+  }, [groupsLimit, groupsOffset, sourceLanguage]);
 
   useEffect(() => {
     if (step !== "groups") return;
@@ -120,7 +139,7 @@ function TranslatePageInner() {
     setLoadingGroup(true);
     setStep("group");
     api.contributions
-      .getSentenceGroup(groupIndex)
+      .getSentenceGroup(groupIndex, sourceLanguage || undefined)
       .then((res) => setGroupItems(userId ? seededShuffle(res.items, userId) : res.items))
       .catch((err) => setGroupError(getErrorMessage(err, "Failed to load this group")))
       .finally(() => setLoadingGroup(false));
@@ -132,7 +151,7 @@ function TranslatePageInner() {
       setSentenceError(null);
       setDetailsOpen(false);
       try {
-        const next = await api.contributions.getRandomSentence(forLanguageId);
+        const next = await api.contributions.getRandomSentence(forLanguageId, sourceLanguage || undefined);
         setHistory((prev) => {
           const updated = [...prev, next];
           setHistoryIndex(updated.length - 1);
@@ -145,7 +164,7 @@ function TranslatePageInner() {
         setLoadingSentence(false);
       }
     },
-    [],
+    [sourceLanguage],
   );
 
   // "Translate Randomly" scoped to the currently open group -- picks from
@@ -285,6 +304,24 @@ function TranslatePageInner() {
           <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">Translate a Sentence</h1>
         </div>
 
+        <label className="flex items-center gap-2 text-sm text-ink-muted">
+          Translate sentences from
+          <select
+            value={sourceLanguage}
+            onChange={(e) => {
+              setSourceLanguage(e.target.value as SentenceSourceLanguage | "");
+              setGroupsOffset(0);
+            }}
+            className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
+          >
+            {SOURCE_LANGUAGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <button
           onClick={() => languageId && fetchNewSentence(languageId)}
           disabled={!languageId || loadingSentence}
@@ -398,7 +435,9 @@ function TranslatePageInner() {
                 }`}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-ink">{item.englishText}</p>
+                  <p className="truncate font-medium text-ink" dir={textDirection(item.sourceLanguage)}>
+                    {item.englishText}
+                  </p>
                 </div>
                 {item.hasTranslated ? (
                   <span className="flex-shrink-0 text-xs font-semibold text-brand-dark">✓ Translated</span>
@@ -427,7 +466,9 @@ function TranslatePageInner() {
       ) : (
         <>
           <div className="card-duo rounded-2xl bg-surface p-8 shadow-sm">
-            <p className="text-2xl font-bold text-ink">{sentence.englishText}</p>
+            <p className="text-2xl font-bold text-ink" dir={textDirection(sentence.sourceLanguage)}>
+              {sentence.englishText}
+            </p>
           </div>
 
           <div className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface py-8 shadow-sm">

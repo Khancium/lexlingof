@@ -8,15 +8,19 @@ import { verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { getRandomSentence, getSentenceGroupDetail, getSentenceGroups, searchSentences, submitTranslation } from "./translation.service.js";
 
-const randomQuerySchema = z.object({ languageId: z.string().uuid() });
+const sourceLanguageSchema = z.enum(["english", "urdu", "persian"]).optional();
+
+const randomQuerySchema = z.object({ languageId: z.string().uuid(), sourceLanguage: sourceLanguageSchema });
 const idParamSchema = z.object({ id: z.string().uuid() });
 const listQuerySchema = z.object({
   search: z.string().min(1).optional(),
   filter: z.enum(["translated", "untranslated"]).optional(),
+  sourceLanguage: sourceLanguageSchema,
   limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
 const groupsQuerySchema = z.object({
+  sourceLanguage: sourceLanguageSchema,
   limit: z.coerce.number().int().min(1).max(1000).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -37,8 +41,8 @@ const submitTranslationSchema = z.object({
 
 export default async function translationRoutes(fastify: FastifyInstance) {
   fastify.get("/sentences", { preHandler: verifyToken }, async (request) => {
-    const { search, filter, limit, offset } = listQuerySchema.parse(request.query);
-    return searchSentences(request.user!.id, search, filter, limit, offset);
+    const { search, filter, sourceLanguage, limit, offset } = listQuerySchema.parse(request.query);
+    return searchSentences(request.user!.id, search, filter, sourceLanguage, limit, offset);
   });
 
   // Sentences bucketed into fixed-size (<=50) "groups" for the translate
@@ -47,18 +51,19 @@ export default async function translationRoutes(fastify: FastifyInstance) {
   // matter (different path segment), but kept next to the other sentence
   // list endpoints.
   fastify.get("/sentence-groups", { preHandler: verifyToken }, async (request) => {
-    const { limit, offset } = groupsQuerySchema.parse(request.query);
-    return getSentenceGroups(request.user!.id, limit, offset);
+    const { sourceLanguage, limit, offset } = groupsQuerySchema.parse(request.query);
+    return getSentenceGroups(request.user!.id, sourceLanguage, limit, offset);
   });
 
   fastify.get("/sentence-groups/:groupIndex", { preHandler: verifyToken }, async (request) => {
     const { groupIndex } = groupParamSchema.parse(request.params);
-    return getSentenceGroupDetail(request.user!.id, groupIndex);
+    const { sourceLanguage } = z.object({ sourceLanguage: sourceLanguageSchema }).parse(request.query);
+    return getSentenceGroupDetail(request.user!.id, groupIndex, sourceLanguage);
   });
 
   fastify.get("/sentences/random", { preHandler: verifyToken }, async (request) => {
-    const { languageId } = randomQuerySchema.parse(request.query);
-    return getRandomSentence(request.user!.id, languageId);
+    const { languageId, sourceLanguage } = randomQuerySchema.parse(request.query);
+    return getRandomSentence(request.user!.id, languageId, sourceLanguage);
   });
 
   fastify.get("/sentences/:id", { preHandler: verifyToken }, async (request) => {
@@ -68,6 +73,7 @@ export default async function translationRoutes(fastify: FastifyInstance) {
       .select({
         id: sentences.id,
         englishText: sentences.englishText,
+        sourceLanguage: sentences.sourceLanguage,
         categoryId: categories.id,
         categoryName: categories.nameEnglish,
         categorySlug: categories.slug,
@@ -84,6 +90,7 @@ export default async function translationRoutes(fastify: FastifyInstance) {
     return {
       id: sentence.id,
       englishText: sentence.englishText,
+      sourceLanguage: sentence.sourceLanguage,
       category: sentence.categoryId ? { id: sentence.categoryId, name: sentence.categoryName, slug: sentence.categorySlug } : null,
     };
   });

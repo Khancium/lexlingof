@@ -116,6 +116,9 @@ export const dataAccessLevel = pgEnum("data_access_level", [
 
 export const sceneDifficulty = pgEnum("scene_difficulty", ["easy", "medium", "hard", "expert"]);
 
+/** The language a sentence's prompt text is written in -- what a contributor reads before recording their translation. Despite the column's historical name (english_text), it holds text in whichever of these this row is. */
+export const sentenceSourceLanguage = pgEnum("sentence_source_language", ["english", "urdu", "persian"]);
+
 export const streakStatus = pgEnum("streak_status", ["active", "broken", "grace"]);
 
 export const notificationChannel = pgEnum("notification_channel", ["in_app", "email", "push"]);
@@ -198,6 +201,22 @@ export const refreshTokens = pgTable("refresh_tokens", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
 });
+
+/** One-time, short-lived tokens for the "forgot password" email flow -- same hash-and-compare shape as refreshTokens (never store the raw token), but single-use (usedAt) rather than revocable, and with no device/session metadata since a reset link isn't tied to any one client. */
+export const passwordResetTokens = pgTable(
+  "password_reset_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("ix_password_reset_tokens_user").on(t.userId)],
+);
 
 /** Push notification device registrations. */
 export const deviceTokens = pgTable(
@@ -356,6 +375,9 @@ export const sentences = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     englishText: text("english_text").notNull(),
+    // Default 'english' so every pre-existing row (all authored in English,
+    // before this column existed) keeps meaning what it already meant.
+    sourceLanguage: sentenceSourceLanguage("source_language").default("english").notNull(),
     categoryId: uuid("category_id").references(() => categories.id),
     isActive: boolean("is_active").default(true).notNull(),
     usageCount: integer("usage_count").default(0).notNull(),

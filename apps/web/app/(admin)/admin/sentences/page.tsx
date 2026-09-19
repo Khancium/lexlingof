@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type AdminSentence, type Category } from "@/lib/api";
+import { api, type AdminSentence, type Category, type SentenceSourceLanguage } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
@@ -10,6 +10,12 @@ import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
 const DEFAULT_PAGE_SIZE = 50;
+
+const SOURCE_LANGUAGE_OPTIONS: { value: SentenceSourceLanguage; label: string }[] = [
+  { value: "english", label: "English" },
+  { value: "urdu", label: "Urdu" },
+  { value: "persian", label: "Persian" },
+];
 
 export default function AdminSentencesPage() {
   const user = useAuthStore((s) => s.user);
@@ -27,12 +33,16 @@ export default function AdminSentencesPage() {
   // Volunteer-only "my own additions" filter -- also unlocks their per-row
   // Delete button (see the delete-visibility rule near the table below).
   const [onlyMine, setOnlyMine] = useState(false);
+  const [filterSourceLanguage, setFilterSourceLanguage] = useState<SentenceSourceLanguage | "">("");
 
   const [englishText, setEnglishText] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [sourceLanguage, setSourceLanguage] = useState<SentenceSourceLanguage>("english");
   const [isCreating, setIsCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const [createInfo, setCreateInfo] = useState<string | null>(null);
+
+  const [bulkSourceLanguage, setBulkSourceLanguage] = useState<SentenceSourceLanguage>("english");
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
@@ -54,6 +64,7 @@ export default function AdminSentencesPage() {
         createdFrom: createdFromIso,
         createdTo: createdToIso,
         mine: isVolunteer && onlyMine ? true : undefined,
+        sourceLanguage: filterSourceLanguage || undefined,
       }),
     ]);
     setCategories(cats);
@@ -65,7 +76,7 @@ export default function AdminSentencesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, limit, createdFrom, createdTo, onlyMine]);
+  }, [offset, limit, createdFrom, createdTo, onlyMine, filterSourceLanguage]);
 
   function handleLimitChange(newLimit: number) {
     setLimit(newLimit);
@@ -81,6 +92,7 @@ export default function AdminSentencesPage() {
       const result = await api.admin.createSentence({
         englishText: englishText.trim(),
         categoryId: categoryId || undefined,
+        sourceLanguage,
       });
       setEnglishText("");
       if ("pending" in result) {
@@ -161,9 +173,20 @@ export default function AdminSentencesPage() {
           <input
             value={englishText}
             onChange={(e) => setEnglishText(e.target.value)}
-            placeholder="English sentence"
+            placeholder="Sentence text"
             className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-ink placeholder:text-gray-400 ring-1 ring-border"
           />
+          <select
+            value={sourceLanguage}
+            onChange={(e) => setSourceLanguage(e.target.value as SentenceSourceLanguage)}
+            className="rounded-lg bg-surface-card px-3 py-2 text-ink ring-1 ring-border"
+          >
+            {SOURCE_LANGUAGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
           <select
             value={categoryId}
             onChange={(e) => setCategoryId(e.target.value)}
@@ -193,7 +216,31 @@ export default function AdminSentencesPage() {
          decision, so neither renders for them. */}
       {!isVolunteer ? (
         <>
-          <AdminBulkUpload label="Bulk Upload Sentences" onUpload={(file) => api.admin.bulkUploadSentences(file)} onDone={load} />
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex items-center gap-2 text-sm text-ink-muted">
+              Bulk upload language
+              <select
+                value={bulkSourceLanguage}
+                onChange={(e) => setBulkSourceLanguage(e.target.value as SentenceSourceLanguage)}
+                className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
+              >
+                {SOURCE_LANGUAGE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <span className="text-xs text-ink-muted">
+              Every row in the uploaded file is added as a sentence in this language. Column: <code>englishText</code> or{" "}
+              <code>text</code> (required), <code>category</code> (optional).
+            </span>
+          </div>
+          <AdminBulkUpload
+            label="Bulk Upload Sentences"
+            onUpload={(file) => api.admin.bulkUploadSentences(file, bulkSourceLanguage)}
+            onDone={load}
+          />
 
           <AdminBulkBar
             count={selected.size}
@@ -238,6 +285,24 @@ export default function AdminSentencesPage() {
             Show only my additions
           </label>
         ) : null}
+        <label className="flex items-center gap-2 text-sm text-ink-muted">
+          Language
+          <select
+            value={filterSourceLanguage}
+            onChange={(e) => {
+              setFilterSourceLanguage(e.target.value as SentenceSourceLanguage | "");
+              setOffset(0);
+            }}
+            className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
+          >
+            <option value="">All languages</option>
+            {SOURCE_LANGUAGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex items-center gap-2 text-sm text-ink-muted">
           Added
           <input
@@ -291,7 +356,8 @@ export default function AdminSentencesPage() {
                     />
                   ) : null}
                 </th>
-                <th className="px-4 py-3">English Text</th>
+                <th className="px-4 py-3">Text</th>
+                <th className="px-4 py-3">Language</th>
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Used</th>
                 <th className="px-4 py-3">Added</th>
@@ -307,6 +373,7 @@ export default function AdminSentencesPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-ink">{sentence.englishText}</td>
+                  <td className="px-4 py-3 text-ink-muted capitalize">{sentence.sourceLanguage}</td>
                   <td className="px-4 py-3 text-ink-muted">{categoryName(sentence.categoryId)}</td>
                   <td className="px-4 py-3 text-ink-muted">{sentence.usageCount}</td>
                   <td className="px-4 py-3 text-ink-muted">{new Date(sentence.createdAt).toLocaleString()}</td>

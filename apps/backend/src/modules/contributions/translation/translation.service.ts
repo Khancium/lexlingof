@@ -21,6 +21,8 @@ import { HttpError } from "../../../utils/http-error.js";
 // Module 3 translations carry NO 3-second limit anywhere in this file.
 // Audio can be any duration.
 
+export type SentenceSourceLanguage = (typeof sentences.$inferInsert)["sourceLanguage"];
+
 export type SubmitTranslationInput = {
   nativeText?: string | null;
   romanization?: string | null;
@@ -60,6 +62,7 @@ export async function searchSentences(
   userId: string,
   search: string | undefined,
   filter: "translated" | "untranslated" | undefined,
+  sourceLanguage: SentenceSourceLanguage | undefined,
   limit: number,
   offset: number,
 ) {
@@ -79,12 +82,16 @@ export async function searchSentences(
   } else if (filter === "untranslated") {
     conditions.push(sql`not (${hasTranslatedExpr})`);
   }
+  if (sourceLanguage) {
+    conditions.push(eq(sentences.sourceLanguage, sourceLanguage));
+  }
 
   const [rows, [totalRow]] = await Promise.all([
     db
       .select({
         id: sentences.id,
         englishText: sentences.englishText,
+        sourceLanguage: sentences.sourceLanguage,
         categoryId: categories.id,
         categoryName: categories.nameEnglish,
         categorySlug: categories.slug,
@@ -102,6 +109,7 @@ export async function searchSentences(
   const items = rows.map((row) => ({
     id: row.id,
     englishText: row.englishText,
+    sourceLanguage: row.sourceLanguage,
     category: row.categoryId ? { id: row.categoryId, name: row.categoryName, slug: row.categorySlug } : null,
     hasTranslated: row.hasTranslated,
   }));
@@ -127,13 +135,18 @@ const SENTENCE_GROUP_SIZE = 50;
 // statement each, so only the small, already-aggregated result ever
 // crosses the network -- a page of groups is a handful of summary rows, and
 // a single group's detail is at most 50 rows.
-export async function getSentenceGroups(userId: string, limit: number, offset: number) {
+export async function getSentenceGroups(userId: string, sourceLanguage: SentenceSourceLanguage | undefined, limit: number, offset: number) {
+  // sql.raw for the enum literal is safe here -- sourceLanguage only ever
+  // reaches this function already validated against the zod enum in the
+  // route, never arbitrary user text.
+  const languageFilter = sourceLanguage ? sql`and ${sentences.sourceLanguage} = ${sourceLanguage}` : sql``;
+
   const [groupRows, [totalRow]] = await Promise.all([
     db.execute<{ group_index: number; sentence_count: number; translated_count: number }>(sql`
       with ordered as (
         select id, (row_number() over (order by md5(id::text)) - 1) as rn
         from ${sentences}
-        where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+        where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
       ),
       grouped as (
         select (rn / ${SENTENCE_GROUP_SIZE})::int as group_index, id
@@ -153,7 +166,7 @@ export async function getSentenceGroups(userId: string, limit: number, offset: n
     db.execute<{ total_groups: number }>(sql`
       select ceil(count(*)::numeric / ${SENTENCE_GROUP_SIZE})::int as total_groups
       from ${sentences}
-      where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+      where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
     `),
   ]);
 
@@ -166,16 +179,19 @@ export async function getSentenceGroups(userId: string, limit: number, offset: n
   return { items, limit, offset, total: totalRow?.total_groups ?? 0 };
 }
 
-export async function getSentenceGroupDetail(userId: string, groupIndex: number) {
+export async function getSentenceGroupDetail(userId: string, groupIndex: number, sourceLanguage: SentenceSourceLanguage | undefined) {
+  const languageFilter = sourceLanguage ? sql`and ${sentences.sourceLanguage} = ${sourceLanguage}` : sql``;
+
   const [[totalRow], rows] = await Promise.all([
     db.execute<{ total_groups: number }>(sql`
       select ceil(count(*)::numeric / ${SENTENCE_GROUP_SIZE})::int as total_groups
       from ${sentences}
-      where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+      where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
     `),
     db.execute<{
       id: string;
       english_text: string;
+      source_language: string;
       category_id: string | null;
       category_name: string | null;
       category_slug: string | null;
@@ -183,13 +199,14 @@ export async function getSentenceGroupDetail(userId: string, groupIndex: number)
     }>(sql`
       with ordered as (
         select id from ${sentences}
-        where ${sentences.isActive} = true and ${sentences.deletedAt} is null
+        where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
         order by md5(id::text)
         offset ${groupIndex * SENTENCE_GROUP_SIZE} limit ${SENTENCE_GROUP_SIZE}
       )
       select
         s.id,
         s.english_text,
+        s.source_language,
         c.id as category_id,
         c.name_english as category_name,
         c.slug as category_slug,
@@ -211,6 +228,7 @@ export async function getSentenceGroupDetail(userId: string, groupIndex: number)
   const items = rows.map((row) => ({
     id: row.id,
     englishText: row.english_text,
+    sourceLanguage: row.source_language as SentenceSourceLanguage,
     category: row.category_id ? { id: row.category_id, name: row.category_name, slug: row.category_slug } : null,
     hasTranslated: row.has_translated,
   }));
@@ -218,7 +236,7 @@ export async function getSentenceGroupDetail(userId: string, groupIndex: number)
   return { groupIndex, totalGroups, items };
 }
 
-export async function getRandomSentence(userId: string, languageId: string) {
+export async function getRandomSentence(userId: string, languageId: string, sourceLanguage: SentenceSourceLanguage | undefined) {
   // The literal exclusion query given in spec only filters by user_id and
   // module_type, which would make the languageId parameter unused. Since
   // this is a multi-language platform (every contribution carries a
@@ -237,17 +255,23 @@ export async function getRandomSentence(userId: string, languageId: string) {
       ),
     );
 
+  const conditions = [eq(sentences.isActive, true), isNull(sentences.deletedAt), not(inArray(sentences.id, translatedSentenceIds))];
+  if (sourceLanguage) {
+    conditions.push(eq(sentences.sourceLanguage, sourceLanguage));
+  }
+
   const [sentence] = await db
     .select({
       id: sentences.id,
       englishText: sentences.englishText,
+      sourceLanguage: sentences.sourceLanguage,
       categoryId: categories.id,
       categoryName: categories.nameEnglish,
       categorySlug: categories.slug,
     })
     .from(sentences)
     .leftJoin(categories, eq(categories.id, sentences.categoryId))
-    .where(and(eq(sentences.isActive, true), isNull(sentences.deletedAt), not(inArray(sentences.id, translatedSentenceIds))))
+    .where(and(...conditions))
     .orderBy(sql`random()`)
     .limit(1);
 
@@ -260,6 +284,7 @@ export async function getRandomSentence(userId: string, languageId: string) {
   return {
     id: sentence.id,
     englishText: sentence.englishText,
+    sourceLanguage: sentence.sourceLanguage,
     category: sentence.categoryId ? { id: sentence.categoryId, name: sentence.categoryName, slug: sentence.categorySlug } : null,
   };
 }

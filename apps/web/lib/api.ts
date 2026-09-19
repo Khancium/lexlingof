@@ -448,9 +448,12 @@ export type AddSegmentInput = {
 };
 export type AddSegmentResponse = { segmentId: string; pointsAwarded: number };
 
+export type SentenceSourceLanguage = "english" | "urdu" | "persian";
+
 export type RandomSentence = {
   id: string;
   englishText: string;
+  sourceLanguage: SentenceSourceLanguage;
   category: { id: string; name: string; slug: string } | null;
   hasTranslated?: boolean;
 };
@@ -925,7 +928,7 @@ export type AdminSceneConceptInput = { sceneId: string; conceptId: string; categ
 export type BulkEditScenesInput = { ids: string[]; difficulty?: SceneDifficulty; isActive?: boolean };
 export type SceneImageKeyword = { id: string; keyword: string };
 
-export type AdminSentenceInput = { englishText: string; categoryId?: string };
+export type AdminSentenceInput = { englishText: string; categoryId?: string; sourceLanguage?: SentenceSourceLanguage };
 export type BulkUploadResult = { created: number; errors: { row: number; message: string }[] };
 
 export type OpenverseImageResult = {
@@ -976,6 +979,7 @@ export type SceneMedia = {
 export type AdminSentence = {
   id: string;
   englishText: string;
+  sourceLanguage: SentenceSourceLanguage;
   categoryId: string | null;
   isActive: boolean;
   usageCount: number;
@@ -1114,6 +1118,12 @@ export const api = {
 
     changePassword: (currentPassword: string, newPassword: string) =>
       apiClient.post<{ success: boolean }>("/api/v1/auth/change-password", { currentPassword, newPassword }).then((r) => r.data),
+
+    /** Always resolves the same way regardless of whether the email matches an account -- don't build UI that treats a rejection differently from a success here. */
+    forgotPassword: (email: string) =>
+      apiClient.post<{ success: boolean; message: string }>("/api/v1/auth/forgot-password", { email }).then((r) => r.data),
+    resetPassword: (token: string, newPassword: string) =>
+      apiClient.post<{ success: boolean }>("/api/v1/auth/reset-password", { token, newPassword }).then((r) => r.data),
   },
 
   users: {
@@ -1226,15 +1236,20 @@ export const api = {
       apiClient.post<AddTranscriptionResponse>(`/api/v1/contributions/audio/${id}/transcription`, data).then((r) => r.data),
     addSegment: (id: string, data: AddSegmentInput) =>
       apiClient.post<AddSegmentResponse>(`/api/v1/contributions/audio/${id}/segments`, data).then((r) => r.data),
-    searchSentences: (params?: { search?: string; filter?: "translated" | "untranslated"; limit?: number; offset?: number }) =>
-      apiClient.get<SentencesResponse>("/api/v1/sentences", { params }).then((r) => r.data),
+    searchSentences: (params?: {
+      search?: string;
+      filter?: "translated" | "untranslated";
+      sourceLanguage?: SentenceSourceLanguage;
+      limit?: number;
+      offset?: number;
+    }) => apiClient.get<SentencesResponse>("/api/v1/sentences", { params }).then((r) => r.data),
     getSentenceById: (id: string) => apiClient.get<RandomSentence>(`/api/v1/sentences/${id}`).then((r) => r.data),
-    getRandomSentence: (languageId: string) =>
-      apiClient.get<RandomSentence>("/api/v1/sentences/random", { params: { languageId } }).then((r) => r.data),
-    getSentenceGroups: (params?: { limit?: number; offset?: number }) =>
+    getRandomSentence: (languageId: string, sourceLanguage?: SentenceSourceLanguage) =>
+      apiClient.get<RandomSentence>("/api/v1/sentences/random", { params: { languageId, sourceLanguage } }).then((r) => r.data),
+    getSentenceGroups: (params?: { sourceLanguage?: SentenceSourceLanguage; limit?: number; offset?: number }) =>
       apiClient.get<SentenceGroupsResponse>("/api/v1/sentence-groups", { params }).then((r) => r.data),
-    getSentenceGroup: (groupIndex: number) =>
-      apiClient.get<SentenceGroupDetail>(`/api/v1/sentence-groups/${groupIndex}`).then((r) => r.data),
+    getSentenceGroup: (groupIndex: number, sourceLanguage?: SentenceSourceLanguage) =>
+      apiClient.get<SentenceGroupDetail>(`/api/v1/sentence-groups/${groupIndex}`, { params: { sourceLanguage } }).then((r) => r.data),
     submitTranslation: (sentenceId: string, data: SubmitTranslationInput) =>
       apiClient.post<SubmitTranslationResponse>(`/api/v1/sentences/${sentenceId}/translation`, data).then((r) => r.data),
   },
@@ -1523,8 +1538,14 @@ export const api = {
     deleteSceneKeyword: (sceneId: string, keywordId: string) =>
       apiClient.delete(`/api/v1/admin/scenes/${sceneId}/keywords/${keywordId}`).then((r) => r.data),
 
-    getSentences: (params?: { createdFrom?: string; createdTo?: string; mine?: boolean; limit?: number; offset?: number }) =>
-      apiClient.get<AdminSentencesResponse>("/api/v1/admin/sentences", { params }).then((r) => r.data),
+    getSentences: (params?: {
+      createdFrom?: string;
+      createdTo?: string;
+      mine?: boolean;
+      sourceLanguage?: SentenceSourceLanguage;
+      limit?: number;
+      offset?: number;
+    }) => apiClient.get<AdminSentencesResponse>("/api/v1/admin/sentences", { params }).then((r) => r.data),
     createSentence: (data: AdminSentenceInput) =>
       apiClient.post<AdminSentence | PendingResult>("/api/v1/admin/sentences", data).then((r) => r.data),
     deleteSentence: (id: string) =>
@@ -1537,10 +1558,12 @@ export const api = {
       apiClient.post<BulkPermanentDeleteResult>("/api/v1/admin/sentences/bulk-delete-permanent", { ids }).then((r) => r.data),
     bulkEditSentences: (data: BulkEditSentencesInput) =>
       apiClient.post<{ updated: number }>("/api/v1/admin/sentences/bulk-edit", data).then((r) => r.data),
-    bulkUploadSentences: (file: File) => {
+    bulkUploadSentences: (file: File, sourceLanguage: SentenceSourceLanguage = "english") => {
       const form = new FormData();
       form.append("file", file);
-      return apiClient.post<BulkUploadResult>("/api/v1/admin/sentences/bulk", form).then((r) => r.data);
+      return apiClient
+        .post<BulkUploadResult>("/api/v1/admin/sentences/bulk", form, { params: { sourceLanguage } })
+        .then((r) => r.data);
     },
 
     /* ----------------------------- Volunteers ----------------------------- */

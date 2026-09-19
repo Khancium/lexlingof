@@ -1015,6 +1015,7 @@ const sentencesQuerySchema = z.object({
   // Volunteer's "my own additions" filter -- true restricts the list to
   // sentences this caller themselves created (sentences.createdBy).
   mine: z.coerce.boolean().optional(),
+  sourceLanguage: z.enum(["english", "urdu", "persian"]).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -1022,6 +1023,7 @@ const sentencesQuerySchema = z.object({
 const createSentenceSchema = z.object({
   englishText: z.string().min(1),
   categoryId: z.string().uuid().optional(),
+  sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english"),
 });
 
 const bulkEditSentencesSchema = z.object({
@@ -1137,10 +1139,19 @@ async function applyCreateScene(body: z.infer<typeof createSceneSchema>, actor: 
 }
 
 async function applyCreateSentence(body: z.infer<typeof createSentenceSchema>, actor: { id: string; role: string }, createdBy: string | null) {
+  // Scoped to the same sourceLanguage -- identical text in two different
+  // languages (or a coincidental Urdu/Persian match, which share a script)
+  // isn't a real duplicate.
   const [duplicate] = await db
     .select()
     .from(sentences)
-    .where(and(sql`lower(${sentences.englishText}) = lower(${body.englishText})`, isNull(sentences.deletedAt)))
+    .where(
+      and(
+        sql`lower(${sentences.englishText}) = lower(${body.englishText})`,
+        eq(sentences.sourceLanguage, body.sourceLanguage),
+        isNull(sentences.deletedAt),
+      ),
+    )
     .limit(1);
   if (duplicate) {
     return duplicate;
@@ -1148,7 +1159,7 @@ async function applyCreateSentence(body: z.infer<typeof createSentenceSchema>, a
 
   const [sentence] = await db
     .insert(sentences)
-    .values({ englishText: body.englishText, categoryId: body.categoryId ?? null, createdBy })
+    .values({ englishText: body.englishText, categoryId: body.categoryId ?? null, sourceLanguage: body.sourceLanguage, createdBy })
     .returning();
 
   return sentence!;
@@ -3211,12 +3222,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // exposes a random single sentence and get-by-id, neither of which can
   // enumerate all sentences for an admin list view.
   fastify.get("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request) => {
-    const { createdFrom, createdTo, mine, limit, offset } = sentencesQuerySchema.parse(request.query);
+    const { createdFrom, createdTo, mine, sourceLanguage, limit, offset } = sentencesQuerySchema.parse(request.query);
 
     const conditions = [isNull(sentences.deletedAt)];
     if (createdFrom) conditions.push(gte(sentences.createdAt, new Date(createdFrom)));
     if (createdTo) conditions.push(lte(sentences.createdAt, new Date(createdTo)));
     if (mine) conditions.push(eq(sentences.createdBy, request.user!.id));
+    if (sourceLanguage) conditions.push(eq(sentences.sourceLanguage, sourceLanguage));
     const whereClause = and(...conditions);
 
     const [items, [totalRow]] = await Promise.all([
@@ -3241,9 +3253,15 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.code(201).send(outcome.result);
   });
 
-  // Bulk create from a CSV or JSON file. Expected row fields: englishText
-  // (required), category (optional, slug or English name).
+  // Bulk create from a CSV or JSON file. Expected row fields: englishText or
+  // text (required -- accepts either column name, since a non-English batch
+  // realistically won't be titled "englishText"), category (optional, slug
+  // or English name). Every row in one upload shares a single sourceLanguage
+  // (?sourceLanguage=urdu|persian|english on the URL, default english) --
+  // real-world imports are one file per language, not a language-per-row
+  // column, matching how this dataset actually shows up.
   fastify.post("/admin/sentences/bulk", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { sourceLanguage } = z.object({ sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english") }).parse(request.query);
     const rows = await readBulkRows(request);
     const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
     const categoryByKey = new Map(
@@ -3261,14 +3279,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     // sentences table -- with 6000+ rows and cross-region latency, that would
     // be exactly the "never pull a large row set into Node" mistake this
     // codebase has already been burned by once (see ARCHITECTURE.md §2.7).
-    const candidateLower = [...new Set(rows.map((r) => (r.englishText ?? "").trim().toLowerCase()).filter(Boolean))];
+    const candidateLower = [...new Set(rows.map((r) => (r.englishText ?? r.text ?? "").trim().toLowerCase()).filter(Boolean))];
     const existingLower = new Set(
       candidateLower.length
         ? (
             await db
               .select({ englishText: sentences.englishText })
               .from(sentences)
-              .where(and(sql`lower(${sentences.englishText}) in ${candidateLower}`, isNull(sentences.deletedAt)))
+              .where(
+                and(
+                  sql`lower(${sentences.englishText}) in ${candidateLower}`,
+                  eq(sentences.sourceLanguage, sourceLanguage),
+                  isNull(sentences.deletedAt),
+                ),
+              )
           ).map((s) => s.englishText.toLowerCase())
         : [],
     );
@@ -3276,10 +3300,10 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
       const rowNum = i + 2;
-      const englishText = (row.englishText ?? "").trim();
+      const englishText = (row.englishText ?? row.text ?? "").trim();
 
       if (!englishText) {
-        result.errors.push({ row: rowNum, message: "englishText is required" });
+        result.errors.push({ row: rowNum, message: "englishText (or text) is required" });
         continue;
       }
       let categoryId: string | null = null;
@@ -3301,7 +3325,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       }
       existingLower.add(lower);
 
-      toInsert.push({ rowNum, value: { englishText, categoryId } });
+      toInsert.push({ rowNum, value: { englishText, categoryId, sourceLanguage } });
     }
 
     await insertBulkInChunks(sentences, toInsert, result);

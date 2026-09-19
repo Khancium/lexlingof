@@ -1,0 +1,2 @@
+CREATE TYPE "public"."sentence_source_language" AS ENUM('english', 'urdu', 'persian');--> statement-breakpoint
+ALTER TABLE "sentences" ADD COLUMN "source_language" "sentence_source_language" DEFAULT 'english' NOT NULL;
