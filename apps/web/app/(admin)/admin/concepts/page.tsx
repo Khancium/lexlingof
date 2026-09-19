@@ -138,7 +138,7 @@ export default function AdminConceptsPage() {
     }
   }
 
-  // A picked file is cropped client-side (1:1, matching the server's own
+  // A picked file is cropped client-side (4:3, matching the server's own
   // auto-crop target) before it ever reaches uploadConceptMedia -- the
   // server still center-crops on top of this as a safety net, but starting
   // from an admin-chosen crop means that safety net rarely has to do
@@ -672,9 +672,9 @@ export default function AdminConceptsPage() {
                     <td colSpan={7} className="px-4 py-4">
                       <AdminMediaManager
                         itemId={concept.id}
-                        aspectRatio={1}
+                        aspectRatio={4 / 3}
                         outputWidth={1200}
-                        outputHeight={1200}
+                        outputHeight={900}
                         getMedia={api.admin.getConceptMedia}
                         deleteMedia={api.admin.deleteConceptMedia}
                         cropMedia={api.admin.cropConceptMedia}
@@ -703,10 +703,10 @@ export default function AdminConceptsPage() {
       {cropTarget ? (
         <ImageCropper
           imageSrc={cropTarget.url}
-          aspectRatio={1}
+          aspectRatio={4 / 3}
           outputWidth={1200}
-          outputHeight={1200}
-          title="Crop image (1:1)"
+          outputHeight={900}
+          title="Crop image (4:3)"
           onCancel={() => {
             URL.revokeObjectURL(cropTarget.url);
             setCropTarget(null);

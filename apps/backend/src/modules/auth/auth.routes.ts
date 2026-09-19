@@ -27,6 +27,15 @@ const changePasswordSchema = z.object({
   newPassword: z.string().min(8),
 });
 
+const forgotPasswordSchema = z.object({
+  email: z.string().email().min(1),
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(8),
+});
+
 export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/register", async (request, reply) => {
     const body = registerSchema.parse(request.body);
@@ -60,6 +69,20 @@ export default async function authRoutes(fastify: FastifyInstance) {
   fastify.post("/change-password", { preHandler: verifyToken }, async (request, reply) => {
     const body = changePasswordSchema.parse(request.body);
     await authService.changePassword(request.user!.id, body.currentPassword, body.newPassword);
+    reply.code(200).send({ success: true });
+  });
+
+  // Always the same response whether or not the email matches an account --
+  // see the service-level comment on requestPasswordReset for why.
+  fastify.post("/forgot-password", async (request, reply) => {
+    const body = forgotPasswordSchema.parse(request.body);
+    await authService.requestPasswordReset(body.email);
+    reply.code(200).send({ success: true, message: "If an account exists for this email, a reset link has been sent." });
+  });
+
+  fastify.post("/reset-password", async (request, reply) => {
+    const body = resetPasswordSchema.parse(request.body);
+    await authService.resetPassword(body.token, body.newPassword);
     reply.code(200).send({ success: true });
   });
 }

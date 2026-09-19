@@ -22,7 +22,6 @@ import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
-import { AdminCreateCategory } from "@/components/admin-create-category";
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
 const DEFAULT_PAGE_SIZE = 20;
@@ -550,12 +549,6 @@ export default function AdminScenesPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-ink">Scenes</h1>
-
-      {/* Categories only belong to concepts, not scenes directly -- this is
-         here so an admin tagging a scene's concept coverage can create a
-         brand-new category on the spot (e.g. for a concept that doesn't
-         exist yet either) without leaving this page for the Concepts one. */}
-      <AdminCreateCategory onCreated={() => {}} />
 
       <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
         <h2 className="text-lg font-bold text-ink">Add New Scene</h2>

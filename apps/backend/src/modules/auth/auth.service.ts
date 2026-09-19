@@ -5,12 +5,14 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 
 import { db } from "../../db/index.js";
-import { contributorProfiles, refreshTokens, streaks, userStats, users } from "../../db/schema.js";
+import { contributorProfiles, passwordResetTokens, refreshTokens, streaks, userStats, users } from "../../db/schema.js";
 import { writeAuditLog } from "../../services/audit-log.service.js";
+import { sendPasswordResetEmail } from "../../services/mailer.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const ACCESS_TOKEN_EXPIRY = "15m";
 const REFRESH_TOKEN_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000;
+const PASSWORD_RESET_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
 const PASSWORD_SALT_ROUNDS = 12;
 
 type AuthUser = { id: string; email: string; displayName: string; role: string };
@@ -230,6 +232,71 @@ class AuthService {
     }
 
     return updated;
+  }
+
+  /**
+   * Always resolves the same way whether or not the email matches an
+   * account -- the route response and timing must not let a caller
+   * distinguish "sent" from "no such account", or this becomes an email
+   * enumeration oracle. If it does match, an unused token is minted and
+   * emailed; nothing else about the response reveals which branch ran.
+   */
+  async requestPasswordReset(email: string): Promise<void> {
+    const [user] = await db
+      .select({ id: users.id, email: users.email })
+      .from(users)
+      .where(and(eq(users.email, email), isNull(users.deletedAt)))
+      .limit(1);
+
+    if (!user) {
+      return;
+    }
+
+    const rawToken = randomBytes(32).toString("hex");
+    const tokenHash = sha256(rawToken);
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_EXPIRY_MS);
+
+    await db.insert(passwordResetTokens).values({ userId: user.id, tokenHash, expiresAt });
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
+    const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
+    await sendPasswordResetEmail(user.email, resetUrl);
+  }
+
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    const tokenHash = sha256(token);
+
+    // Same validate-and-consume-in-one-statement shape as refreshTokens
+    // above, for the same reason -- closes the replay window where two
+    // requests carrying the same token could both pass a separate SELECT
+    // check before either marked it used.
+    const [row] = await db
+      .update(passwordResetTokens)
+      .set({ usedAt: new Date() })
+      .where(and(eq(passwordResetTokens.tokenHash, tokenHash), isNull(passwordResetTokens.usedAt), gt(passwordResetTokens.expiresAt, new Date())))
+      .returning({ userId: passwordResetTokens.userId });
+
+    if (!row) {
+      throw new HttpError(400, "INVALID_TOKEN", "This reset link is invalid or has expired");
+    }
+
+    const passwordHash = await bcrypt.hash(newPassword, PASSWORD_SALT_ROUNDS);
+    await db.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, row.userId));
+
+    // Same as a self-service password change -- every existing session is
+    // signed out, including whatever device the reset link was opened on.
+    await db
+      .update(refreshTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(refreshTokens.userId, row.userId), isNull(refreshTokens.revokedAt)));
+
+    await writeAuditLog({
+      actorId: row.userId,
+      actorRole: null,
+      action: "user_password_reset",
+      resourceType: "user",
+      resourceId: row.userId,
+    });
   }
 
   private async generateTokens(userId: string, email: string, role: string): Promise<TokenPair> {
