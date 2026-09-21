@@ -300,9 +300,9 @@ function ConceptPageInner() {
                     <Image
                       src={item.imageUrl}
                       alt=""
-                      width={64}
-                      height={64}
-                      className="h-16 w-16 rounded-lg object-cover"
+                      width={96}
+                      height={54}
+                      className="h-[54px] w-24 rounded-lg object-cover"
                     />
                   ) : (
                     <span className="text-3xl">🖼️</span>
@@ -329,12 +329,12 @@ function ConceptPageInner() {
                   <Image
                     src={concept.media[0].publicUrl}
                     alt={concept.labelEnglish}
-                    width={160}
+                    width={284}
                     height={160}
-                    className="mx-auto mb-4 h-40 w-40 rounded-lg object-cover"
+                    className="mx-auto mb-4 h-40 w-[284px] rounded-lg object-cover"
                   />
                 ) : (
-                  <div className="mx-auto mb-4 flex h-40 w-40 items-center justify-center rounded-lg bg-surface-card text-4xl">
+                  <div className="mx-auto mb-4 flex h-40 w-[284px] items-center justify-center rounded-lg bg-surface-card text-4xl">
                     🖼️
                   </div>
                 )}
