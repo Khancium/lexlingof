@@ -152,7 +152,7 @@ class StorageService {
   private static readonly IMAGE_WEBP_QUALITY = 82;
 
   // Concept tiles and scene images are shown at fixed aspect ratios in the
-  // contribute UI -- 4:3 for a concept's object photo, 16:9 for a scene's
+  // contribute UI -- 16:9 for both a concept's object photo and a scene's
   // wide establishing shot. Letting arbitrary source dimensions through (the
   // old behavior, `fit: "inside"`, only capped the longest edge and left the
   // ratio whatever the source was) meant the frontend's fixed-ratio image
@@ -163,7 +163,7 @@ class StorageService {
   // centre crop, so it's a reasonable unattended default -- an admin who
   // isn't happy with where it landed can still crop manually afterward
   // (see cropAndUploadImage below).
-  private static readonly CONCEPT_IMAGE_SIZE = { width: 1200, height: 900 };
+  private static readonly CONCEPT_IMAGE_SIZE = { width: 1600, height: 900 };
   private static readonly SCENE_IMAGE_SIZE = { width: 1600, height: 900 };
 
   private async uploadImageWithTargetRatio(
@@ -197,7 +197,7 @@ class StorageService {
     return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
   }
 
-  /** 4:3 -- concept object photos. */
+  /** 16:9 -- concept object photos. */
   async uploadConceptImage(fileBuffer: Buffer, filename: string) {
     return this.uploadImageWithTargetRatio(fileBuffer, filename, StorageService.CONCEPT_IMAGE_SIZE);
   }

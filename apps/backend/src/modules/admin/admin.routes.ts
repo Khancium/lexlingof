@@ -641,6 +641,45 @@ async function buildConceptInserts(
     ]),
   );
 
+  // A category name in the pasted/uploaded rows that doesn't match anything
+  // on file is created on the spot rather than rejecting the row -- an admin
+  // pasting a fresh batch of objects into a category that doesn't exist yet
+  // almost always means "and make that category too", not "reject everything
+  // in it". Keyed by slug so two different-cased spellings of the same name
+  // in one batch ("Kitchen" / "kitchen") collapse into a single new category.
+  const missingByCategorySlug = new Map<string, string>();
+  for (const row of rows) {
+    const rawCategory = (row.category ?? "").trim();
+    if (!rawCategory || categoryByKey.has(rawCategory.toLowerCase())) continue;
+    const slug = slugify(rawCategory);
+    if (!missingByCategorySlug.has(slug)) missingByCategorySlug.set(slug, rawCategory);
+  }
+  if (missingByCategorySlug.size > 0) {
+    const created = await db
+      .insert(categories)
+      .values([...missingByCategorySlug].map(([slug, nameEnglish]) => ({ slug, nameEnglish })))
+      .onConflictDoNothing({ target: categories.slug })
+      .returning({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish });
+
+    // onConflictDoNothing skips (and doesn't return) any slug that already
+    // existed -- a concurrent bulk request beat this one to it, since it
+    // wasn't in categoryByKey's own snapshot from the top of this function.
+    // Re-fetch those separately rather than treating them as failures.
+    const stillMissingSlugs = [...missingByCategorySlug.keys()].filter((slug) => !created.some((c) => c.slug === slug));
+    const recovered = stillMissingSlugs.length
+      ? await db
+          .select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish })
+          .from(categories)
+          .where(inArray(categories.slug, stillMissingSlugs))
+      : [];
+
+    for (const c of [...created, ...recovered]) {
+      categoryByKey.set(c.slug.toLowerCase(), c);
+      categoryByKey.set(c.nameEnglish.toLowerCase(), c);
+    }
+    invalidateCategoriesCache();
+  }
+
   const toInsert: { rowNum: number; value: typeof concepts.$inferInsert }[] = [];
   const errors: { row: number; message: string }[] = [];
 

@@ -68,6 +68,8 @@ export default function AdminConceptsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [isBulkEditing, setIsBulkEditing] = useState(false);
+  const [isBulkAutofilling, setIsBulkAutofilling] = useState(false);
+  const [bulkAutofillInfo, setBulkAutofillInfo] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -138,7 +140,7 @@ export default function AdminConceptsPage() {
     }
   }
 
-  // A picked file is cropped client-side (4:3, matching the server's own
+  // A picked file is cropped client-side (16:9, matching the server's own
   // auto-crop target) before it ever reaches uploadConceptMedia -- the
   // server still center-crops on top of this as a safety net, but starting
   // from an admin-chosen crop means that safety net rarely has to do
@@ -280,6 +282,26 @@ export default function AdminConceptsPage() {
     }
   }
 
+  // Scoped to whatever's currently selected -- typically everything matching
+  // the category/date filters via "select all" -- rather than the standalone
+  // widget above's corpus-wide sweep. Concepts in the selection that already
+  // have an image are left untouched (conceptsWithoutImage filters those out
+  // server-side), so re-running this after a partial success is safe.
+  async function handleBulkAutofillOpenverse() {
+    setIsBulkAutofilling(true);
+    setBulkAutofillInfo(null);
+    try {
+      const result = await api.admin.bulkOpenverseAutofillConcepts([...selected]);
+      setBulkAutofillInfo(
+        `Added ${result.created} image(s).` + (result.errors.length > 0 ? ` ${result.errors.length} failed.` : ""),
+      );
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkAutofilling(false);
+    }
+  }
+
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-ink">Concepts</h1>
@@ -384,7 +406,15 @@ export default function AdminConceptsPage() {
             >
               {isBulkEditing ? "Applying..." : "Apply"}
             </button>
+            <button
+              onClick={handleBulkAutofillOpenverse}
+              disabled={isBulkAutofilling}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              {isBulkAutofilling ? "Adding images..." : "Add images from Openverse"}
+            </button>
           </AdminBulkBar>
+          {bulkAutofillInfo ? <p className="text-sm text-emerald-600">{bulkAutofillInfo}</p> : null}
         </>
       ) : null}
 
@@ -672,8 +702,8 @@ export default function AdminConceptsPage() {
                     <td colSpan={7} className="px-4 py-4">
                       <AdminMediaManager
                         itemId={concept.id}
-                        aspectRatio={4 / 3}
-                        outputWidth={1200}
+                        aspectRatio={16 / 9}
+                        outputWidth={1600}
                         outputHeight={900}
                         getMedia={api.admin.getConceptMedia}
                         deleteMedia={api.admin.deleteConceptMedia}
@@ -703,10 +733,10 @@ export default function AdminConceptsPage() {
       {cropTarget ? (
         <ImageCropper
           imageSrc={cropTarget.url}
-          aspectRatio={4 / 3}
-          outputWidth={1200}
+          aspectRatio={16 / 9}
+          outputWidth={1600}
           outputHeight={900}
-          title="Crop image (4:3)"
+          title="Crop image (16:9)"
           onCancel={() => {
             URL.revokeObjectURL(cropTarget.url);
             setCropTarget(null);
