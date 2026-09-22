@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -50,14 +50,25 @@ function ScenePageInner() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // Guards against a slow, now-stale search response overwriting a faster,
+  // more recent one -- see the identical guard on the concept contribute page.
+  const scenesRequestId = useRef(0);
+
   function loadScenes(searchText: string) {
+    const requestId = ++scenesRequestId.current;
     setLoadingScenes(true);
     setScenesError(null);
     api.scenes
       .getAll({ search: searchText.trim() || undefined, limit: 100 })
-      .then((res) => setScenes(userId ? seededShuffle(res.items, userId) : res.items))
-      .catch((err) => setScenesError(err instanceof Error ? err.message : "Failed to load scenes"))
-      .finally(() => setLoadingScenes(false));
+      .then((res) => {
+        if (requestId === scenesRequestId.current) setScenes(userId ? seededShuffle(res.items, userId) : res.items);
+      })
+      .catch((err) => {
+        if (requestId === scenesRequestId.current) setScenesError(err instanceof Error ? err.message : "Failed to load scenes");
+      })
+      .finally(() => {
+        if (requestId === scenesRequestId.current) setLoadingScenes(false);
+      });
   }
 
   useEffect(() => {

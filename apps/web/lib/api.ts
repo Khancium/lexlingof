@@ -30,12 +30,8 @@ export function getErrorMessage(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback;
 }
 
-export function setAccessToken(token: string | null): void {
+function setAccessToken(token: string | null): void {
   accessToken = token;
-}
-
-export function getAccessToken(): string | null {
-  return accessToken;
 }
 
 function getStoredRefreshToken(): string | null {
@@ -75,7 +71,7 @@ function clearSessionAndRedirectToLogin(hadRefreshToken: boolean): void {
   }
 }
 
-export const apiClient = axios.create({
+const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
   timeout: 30000,
 });

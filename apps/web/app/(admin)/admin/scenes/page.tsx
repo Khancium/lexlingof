@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import {
   api,
   type Category,
@@ -14,14 +15,18 @@ import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
-import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
 import { AdminMediaManager } from "@/components/admin-media-manager";
-import { ImageCropper } from "@/components/image-cropper";
 import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+
+// Loaded on demand only -- see the identical note on the concepts admin page.
+const ImageCropper = dynamic(() => import("@/components/image-cropper").then((m) => m.ImageCropper), { ssr: false });
+const AdminOpenversePicker = dynamic(() => import("@/components/admin-openverse-picker").then((m) => m.AdminOpenversePicker), {
+  ssr: false,
+});
 
 const DIFFICULTIES: SceneDifficulty[] = ["easy", "medium", "hard", "expert"];
 const DEFAULT_PAGE_SIZE = 20;
@@ -159,7 +164,7 @@ export default function AdminScenesPage() {
       // on the concepts admin page.
       const createdFromIso = createdFrom ? new Date(createdFrom).toISOString() : undefined;
       const createdToIso = createdTo ? new Date(`${createdTo}T23:59:59.999Z`).toISOString() : undefined;
-      const [sceneRes, conceptRes, allSceneRes, cats] = await Promise.all([
+      const [sceneRes, cats] = await Promise.all([
         api.scenes.getAll({
           limit,
           offset,
@@ -172,14 +177,10 @@ export default function AdminScenesPage() {
           // for them server-side and they only ever see active rows.
           includeHidden: true,
         }),
-        api.concepts.getAll({ limit: 200 }),
-        api.scenes.getAll({ limit: 1000 }),
         api.categories.getAll(),
       ]);
       setScenes(sceneRes.items);
       setTotal(sceneRes.total);
-      setConcepts(conceptRes.items);
-      setAllScenes(allSceneRes.items);
       setCategories(cats);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load scenes");
@@ -187,6 +188,15 @@ export default function AdminScenesPage() {
       setLoading(false);
     }
   }
+
+  // Unpaginated and independent of every filter/page control above -- only
+  // needed for the concept-coverage picker and the bulk-by-URL title
+  // matcher, so both are fetched once on mount instead of being refetched
+  // on every filter/offset change the way they used to be bundled into load().
+  useEffect(() => {
+    api.concepts.getAll({ limit: 200 }).then((res) => setConcepts(res.items));
+    api.scenes.getAll({ limit: 1000 }).then((res) => setAllScenes(res.items));
+  }, []);
 
   useEffect(() => {
     load();

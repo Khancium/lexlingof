@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -84,12 +84,23 @@ function ConceptPageInner() {
     });
   }, [userId]);
 
+  // Guards against a slow, now-stale search response overwriting a faster,
+  // more recent one -- without this, typing quickly could briefly show
+  // results for an earlier keystroke if its request happened to resolve
+  // after the latest one's.
+  const conceptsRequestId = useRef(0);
+
   function loadConcepts(categoryId: string, search: string) {
+    const requestId = ++conceptsRequestId.current;
     setLoadingConcepts(true);
     api.concepts
       .getAll({ categoryId, search: search.trim() || undefined, limit: 100 })
-      .then((res) => setConcepts(res.items))
-      .finally(() => setLoadingConcepts(false));
+      .then((res) => {
+        if (requestId === conceptsRequestId.current) setConcepts(res.items);
+      })
+      .finally(() => {
+        if (requestId === conceptsRequestId.current) setLoadingConcepts(false);
+      });
   }
 
   function openCategory(c: Category) {

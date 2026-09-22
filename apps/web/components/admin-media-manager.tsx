@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Image from "next/image";
 import type { ConceptMedia, SceneMedia } from "@/lib/api";
 import { ImageCropper } from "@/components/image-cropper";
 
@@ -94,11 +95,12 @@ export function AdminMediaManager({
           {items.map((m) => (
             <div key={m.id} className="relative overflow-hidden rounded-lg ring-1 ring-border">
               {m.publicUrl ? (
-                // Third-party-sourced images (Openverse, arbitrary "From URL"
-                // links) aren't run through next/image -- see the identical
-                // note in admin-openverse-picker.tsx.
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={m.publicUrl} alt="" className="h-24 w-full object-cover" />
+                // Unlike admin-openverse-picker.tsx's search-result thumbnails
+                // (genuine third-party URLs), every image here has already
+                // been re-hosted on Supabase Storage regardless of original
+                // source -- see the module docstring -- so next/image's
+                // allow-listed remotePatterns cover it.
+                <Image src={m.publicUrl} alt="" width={200} height={96} className="h-24 w-full object-cover" />
               ) : (
                 <div className="flex h-24 items-center justify-center bg-surface-card text-xs text-ink-muted">No preview</div>
               )}

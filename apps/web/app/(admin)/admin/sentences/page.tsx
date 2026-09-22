@@ -27,6 +27,7 @@ export default function AdminSentencesPage() {
   const [offset, setOffset] = useState(0);
   const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [createdFrom, setCreatedFrom] = useState("");
   const [createdTo, setCreatedTo] = useState("");
@@ -54,25 +55,31 @@ export default function AdminSentencesPage() {
 
   async function load() {
     setLoading(true);
-    // An end date is inclusive of the whole day -- see the identical note
-    // on the concepts/scenes admin pages.
-    const createdFromIso = createdFrom ? new Date(createdFrom).toISOString() : undefined;
-    const createdToIso = createdTo ? new Date(`${createdTo}T23:59:59.999Z`).toISOString() : undefined;
-    const [cats, res] = await Promise.all([
-      api.categories.getAll(),
-      api.admin.getSentences({
-        limit,
-        offset,
-        createdFrom: createdFromIso,
-        createdTo: createdToIso,
-        mine: isVolunteer && onlyMine ? true : undefined,
-        sourceLanguage: filterSourceLanguage || undefined,
-      }),
-    ]);
-    setCategories(cats);
-    setSentences(res.items);
-    setTotal(res.total);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      // An end date is inclusive of the whole day -- see the identical note
+      // on the concepts/scenes admin pages.
+      const createdFromIso = createdFrom ? new Date(createdFrom).toISOString() : undefined;
+      const createdToIso = createdTo ? new Date(`${createdTo}T23:59:59.999Z`).toISOString() : undefined;
+      const [cats, res] = await Promise.all([
+        api.categories.getAll(),
+        api.admin.getSentences({
+          limit,
+          offset,
+          createdFrom: createdFromIso,
+          createdTo: createdToIso,
+          mine: isVolunteer && onlyMine ? true : undefined,
+          sourceLanguage: filterSourceLanguage || undefined,
+        }),
+      ]);
+      setCategories(cats);
+      setSentences(res.items);
+      setTotal(res.total);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Failed to load sentences");
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -393,6 +400,8 @@ export default function AdminSentencesPage() {
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
+      ) : loadError ? (
+        <p className="text-red-600">{loadError}</p>
       ) : (
         <div className="card-duo overflow-x-auto rounded-2xl bg-surface shadow-sm">
           <table className="w-full text-left text-sm">

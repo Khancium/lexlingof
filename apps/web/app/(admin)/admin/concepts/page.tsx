@@ -1,21 +1,29 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { api, type Category, type ConceptListItem, type OpenverseImageResult } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
 import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
 import { AdminBulkConceptTextCreate } from "@/components/admin-bulk-concept-text-create";
-import { AdminOpenversePicker } from "@/components/admin-openverse-picker";
 import { AdminMediaManager } from "@/components/admin-media-manager";
-import { ImageCropper } from "@/components/image-cropper";
 import { AdminOpenverseAutofill } from "@/components/admin-openverse-autofill";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 import { AdminCreateCategory } from "@/components/admin-create-category";
+
+// Loaded on demand only -- both are sizeable modals rendered for a small
+// fraction of page visits (cropping a freshly-picked file, or opening the
+// Openverse search), so there's no reason to ship them in this page's main
+// bundle for every admin who never touches either feature this visit.
+const ImageCropper = dynamic(() => import("@/components/image-cropper").then((m) => m.ImageCropper), { ssr: false });
+const AdminOpenversePicker = dynamic(() => import("@/components/admin-openverse-picker").then((m) => m.AdminOpenversePicker), {
+  ssr: false,
+});
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -82,7 +90,7 @@ export default function AdminConceptsPage() {
       // "today" should still match something added at 11pm today.
       const createdFromIso = createdFrom ? new Date(createdFrom).toISOString() : undefined;
       const createdToIso = createdTo ? new Date(`${createdTo}T23:59:59.999Z`).toISOString() : undefined;
-      const [cats, res, allRes] = await Promise.all([
+      const [cats, res] = await Promise.all([
         api.categories.getAll(),
         api.concepts.getAll({
           limit,
@@ -96,18 +104,24 @@ export default function AdminConceptsPage() {
           // ignored for them server-side and they only ever see active rows.
           includeHidden: true,
         }),
-        api.concepts.getAll({ limit: 1000 }),
       ]);
       setCategories(cats);
       setConcepts(res.items);
       setTotal(res.total);
-      setAllConcepts(allRes.items);
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load concepts");
     } finally {
       setLoading(false);
     }
   }
+
+  // Unpaginated and independent of every filter/page control above -- only
+  // needed to resolve labels typed into the bulk-by-URL textarea, so it's
+  // fetched once on mount rather than refetched on every filter/offset
+  // change the way it used to be bundled into load().
+  useEffect(() => {
+    api.concepts.getAll({ limit: 1000 }).then((res) => setAllConcepts(res.items));
+  }, []);
 
   useEffect(() => {
     load();
