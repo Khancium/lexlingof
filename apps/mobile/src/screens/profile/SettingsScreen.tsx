@@ -66,8 +66,11 @@ export default function SettingsScreen() {
     try {
       await api.users.updateMe({ displayName: displayName.trim() });
       updateUser({ displayName: displayName.trim() });
-    } catch {
-      // Non-critical -- the field just keeps its current value on screen.
+    } catch (err) {
+      // The input still shows the typed value even though the save failed --
+      // silently swallowing this would make a failed rename look identical
+      // to a successful one.
+      Alert.alert('Could not save name', err instanceof Error ? err.message : 'Please try again.');
     } finally {
       setIsSavingName(false);
     }
@@ -77,19 +80,24 @@ export default function SettingsScreen() {
     setShowLocation(value);
     try {
       await api.users.updateMe({ showLocation: value });
-    } catch {
+    } catch (err) {
       setShowLocation(!value);
+      Alert.alert('Could not update setting', err instanceof Error ? err.message : 'Please try again.');
     }
   }
 
   async function applyLanguageDialect(newLanguageId: string, newDialectId: string | null) {
+    const previousLanguageId = languageId;
+    const previousDialectId = dialectId;
     setLanguageId(newLanguageId);
     setDialectId(newDialectId);
     setIsPickerOpen(false);
     try {
       await api.users.updateMe({ primaryLanguageId: newLanguageId, primaryDialectId: newDialectId ?? undefined });
-    } catch {
-      // Best-effort; the picker already reflects the attempted change.
+    } catch (err) {
+      setLanguageId(previousLanguageId);
+      setDialectId(previousDialectId);
+      Alert.alert('Could not update language', err instanceof Error ? err.message : 'Please try again.');
     }
   }
 

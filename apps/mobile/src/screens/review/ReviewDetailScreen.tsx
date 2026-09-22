@@ -114,7 +114,7 @@ export default function ReviewDetailScreen({ navigation, route }: Props) {
       setCurrentMs(0);
       setTotalMs(0);
 
-      const next = await api.reviews.getQueue();
+      const next = await api.reviews.getQueue(route.params.filter);
       const remaining = next.filter((q: ReviewQueueItem) => q.contributionId !== item.contributionId);
       if (remaining.length > 0) {
         setItem(remaining[0]);

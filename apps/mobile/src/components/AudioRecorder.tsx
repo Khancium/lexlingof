@@ -170,6 +170,13 @@ export default function AudioRecorder({
 
   useEffect(() => {
     return () => {
+      // A screen can unmount mid-recording (back navigation, tab switch) --
+      // without also stopping the native recorder here, it keeps running
+      // after this component is gone, leaking the file handle and
+      // potentially blocking the next startRecorder() call on remount.
+      if (statusRef.current === 'recording' || statusRef.current === 'paused') {
+        recorderPlayer.stopRecorder().catch(() => {});
+      }
       recorderPlayer.removeRecordBackListener();
     };
   }, []);

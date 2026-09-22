@@ -34,7 +34,11 @@ export type ReviewQueueItem = {
 
 export type ReviewStackParamList = {
   ReviewListScreen: undefined;
-  ReviewDetailScreen: { item: ReviewQueueItem };
+  // `filter` is the module-type chip active on the list screen when this
+  // item was opened -- carried through so confirming a decision re-fetches
+  // the queue with the same filter instead of silently dropping back to
+  // "all modules" and surfacing an item outside what the reviewer selected.
+  ReviewDetailScreen: { item: ReviewQueueItem; filter?: ReviewQueueItem['moduleType'] };
 };
 
 const Stack = createNativeStackNavigator<ReviewStackParamList>();

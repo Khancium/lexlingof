@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Image } from 'expo-image';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -32,10 +32,13 @@ const DIFFICULTY_COLOR: Record<Scene['difficulty'], string> = {
   expert: colors.danger,
 };
 
-const IMAGE_HEIGHT = Dimensions.get('window').height * 0.45;
-
 export default function Module4Screen({ navigation }: Props) {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
+  // useWindowDimensions (not a module-level Dimensions.get() snapshot taken
+  // once at import time) so this responds to orientation changes, split-
+  // screen/foldable resizing, etc. instead of staying locked to whatever the
+  // screen size was the first time this file loaded.
+  const windowHeight = useWindowDimensions().height;
 
   const [scene, setScene] = useState<Scene | null>(null);
   const [loadingScene, setLoadingScene] = useState(true);
@@ -111,7 +114,7 @@ export default function Module4Screen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['top']}>
-      <View style={styles.imageWrapper}>
+      <View style={[styles.imageWrapper, { height: windowHeight * 0.45 }]}>
         {scene.imageUrl ? (
           <Image source={{ uri: scene.imageUrl }} style={styles.image} contentFit="cover" />
         ) : (
@@ -169,7 +172,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
   },
   imageWrapper: {
-    height: IMAGE_HEIGHT,
     justifyContent: 'flex-end',
   },
   image: {

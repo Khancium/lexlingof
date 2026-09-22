@@ -151,7 +151,7 @@ export default function ReviewListScreen({ navigation }: Props) {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor={colors.brand} />}
           ListEmptyComponent={<Text style={styles.emptyText}>No pending reviews. All caught up!</Text>}
           renderItem={({ item }) => (
-            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('ReviewDetailScreen', { item })}>
+            <TouchableOpacity style={styles.card} onPress={() => navigation.navigate('ReviewDetailScreen', { item, filter })}>
               <View style={styles.cardTopRow}>
                 <Ionicons name={MODULE_ICON[item.moduleType]} size={18} color={colors.ink} />
                 <Text style={styles.cardModuleName}>{MODULE_NAME[item.moduleType]}</Text>

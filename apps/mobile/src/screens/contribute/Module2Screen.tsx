@@ -28,6 +28,12 @@ type Props = NativeStackScreenProps<ContributeStackParamList, 'Module2Screen'>;
 
 const RECORDING_TYPES = ['conversation', 'story', 'interview', 'speech', 'song', 'other'] as const;
 
+// Matches the "Maximum file size: 100MB" text shown to the user below --
+// previously advertised but never actually enforced before the full-file
+// base64 read below, which risks an OOM crash on lower-end devices for a
+// file that slips through right up to that limit.
+const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+
 type PickedFile = { name: string; size: number; localPath: string };
 
 type Segment = {
@@ -79,6 +85,16 @@ export default function Module2Screen({ navigation }: Props) {
     }
   }, [defaultLanguageId, languageId]);
 
+  // Without this, navigating away mid-playback (e.g. back to the hub) leaves
+  // the picked file's preview audio playing and its end-listener registered
+  // -- same cleanup ReviewDetailScreen already does for review playback.
+  useEffect(() => {
+    return () => {
+      recorderPlayer.stopPlayer().catch(() => {});
+      recorderPlayer.removePlaybackEndListener();
+    };
+  }, []);
+
   async function handlePickFile() {
     setStep1Error(null);
     try {
@@ -105,6 +121,10 @@ export default function Module2Screen({ navigation }: Props) {
 
   async function handleUploadAndContinue() {
     if (!pickedFile || !languageId || title.trim().length === 0) {
+      return;
+    }
+    if (pickedFile.size > MAX_FILE_SIZE_BYTES) {
+      setStep1Error('This file is over the 100MB limit -- please pick a smaller one.');
       return;
     }
     setIsUploading(true);
@@ -147,6 +167,11 @@ export default function Module2Screen({ navigation }: Props) {
     if (!pickedFile) return;
     if (isPlaying) {
       await recorderPlayer.stopPlayer();
+      // A manual stop never reaches the end-listener's own cleanup below
+      // (that only fires when the track finishes naturally), so without
+      // this the listener stays registered and the next togglePlayback()
+      // call stacks a second one on top of it.
+      recorderPlayer.removePlaybackEndListener();
       setIsPlaying(false);
       return;
     }
