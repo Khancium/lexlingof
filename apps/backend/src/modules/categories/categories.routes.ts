@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { db } from "../../db/index.js";
 import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
-import { verifyToken } from "../../middleware/auth.js";
+import { hasPermission, verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const LIST_CACHE_TTL_MS = 30 * 60 * 1000;
@@ -24,6 +24,15 @@ export function invalidateCategoriesCache(): void {
   listCache = null;
 }
 
+/**
+ * Two counts per category: `conceptCount` (every active concept -- what an
+ * admin/volunteer sees, matching GET /concepts' own canManage bypass) and
+ * `visibleConceptCount` (only concepts with at least one image -- what a
+ * plain contributor sees). This cache is shared across every caller
+ * regardless of role, so both have to be precomputed here; the route below
+ * picks the right one per-request rather than baking a single answer into
+ * the shared cache.
+ */
 async function loadActiveCategoriesWithCounts() {
   const categoryRows = await db
     .select()
@@ -31,28 +40,27 @@ async function loadActiveCategoriesWithCounts() {
     .where(eq(categories.isActive, true))
     .orderBy(asc(categories.sortOrder));
 
-  // Matches the same "no image, not shown to a contributor" rule enforced on
-  // the concept browse/detail routes -- otherwise a category tile's count
-  // would include concepts the tile grid itself never actually displays.
   const conceptRows = await db
-    .select({ categoryId: concepts.categoryId })
+    .select({
+      categoryId: concepts.categoryId,
+      hasImage: sql<boolean>`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`,
+    })
     .from(concepts)
-    .where(
-      and(
-        eq(concepts.isActive, true),
-        isNull(concepts.deletedAt),
-        sql`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`,
-      ),
-    );
+    .where(and(eq(concepts.isActive, true), isNull(concepts.deletedAt)));
 
   const countByCategory = new Map<string, number>();
+  const visibleCountByCategory = new Map<string, number>();
   for (const row of conceptRows) {
     countByCategory.set(row.categoryId, (countByCategory.get(row.categoryId) ?? 0) + 1);
+    if (row.hasImage) {
+      visibleCountByCategory.set(row.categoryId, (visibleCountByCategory.get(row.categoryId) ?? 0) + 1);
+    }
   }
 
   return categoryRows.map((category) => ({
     ...category,
     conceptCount: countByCategory.get(category.id) ?? 0,
+    visibleConceptCount: visibleCountByCategory.get(category.id) ?? 0,
   }));
 }
 
@@ -84,10 +92,21 @@ export default async function categoriesRoutes(fastify: FastifyInstance) {
     if (!listCache || listCache.expiresAt <= Date.now()) {
       listCache = { data: await loadActiveCategoriesWithCounts(), expiresAt: Date.now() + LIST_CACHE_TTL_MS };
     }
-    const contributedByCategory = await loadContributedCountsByCategory(request.user!.id);
-    return listCache.data.map((c) => ({ ...c, contributedCount: contributedByCategory.get(c.id) ?? 0 }));
+    const [canManage, contributedByCategory] = await Promise.all([
+      hasPermission(request.user!.role, "concepts.manage"),
+      loadContributedCountsByCategory(request.user!.id),
+    ]);
+    return listCache.data.map(({ visibleConceptCount, ...c }) => ({
+      ...c,
+      conceptCount: canManage ? c.conceptCount : visibleConceptCount,
+      contributedCount: contributedByCategory.get(c.id) ?? 0,
+    }));
   });
 
+  // No admin path calls this route (unused by the current frontend
+  // entirely, in fact) -- kept unauthenticated like it already was, and the
+  // image requirement here is unconditional, matching how GET /concepts/:id
+  // treats an equally admin-less lookup.
   fastify.get("/categories/:id", async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
