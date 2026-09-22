@@ -368,6 +368,32 @@ class StorageService {
     return { path: data.path, publicUrl: this.getImagePublicUrl(data.path) };
   }
 
+  /**
+   * A suggestion's attached photo is reference material for an admin to look
+   * at, not a live corpus image -- so unlike concept/scene uploads there's no
+   * fixed target ratio to crop to; `fit: "inside"` just caps the longest
+   * edge and leaves the original framing intact.
+   */
+  async uploadSuggestionImage(fileBuffer: Buffer, filename: string) {
+    const resized = await sharp(fileBuffer)
+      .rotate()
+      .resize({ width: StorageService.IMAGE_MAX_DIMENSION, height: StorageService.IMAGE_MAX_DIMENSION, fit: "inside" })
+      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
+      .toBuffer();
+
+    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
+
+    const { data, error } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
+
+    if (error) {
+      throw error;
+    }
+
+    return { path: data.path, publicUrl: this.getImagePublicUrl(data.path) };
+  }
+
   getImagePublicUrl(path: string): string {
     const {
       data: { publicUrl },

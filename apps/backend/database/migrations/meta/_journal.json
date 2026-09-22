@@ -225,6 +225,13 @@
       "when": 1789810698757,
       "tag": "0031_amused_mystique",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1790064858848,
+      "tag": "0032_chilly_grim_reaper",
+      "breakpoints": true
     }
   ]
 }

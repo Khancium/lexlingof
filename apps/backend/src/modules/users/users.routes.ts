@@ -1,4 +1,6 @@
-import type { FastifyInstance } from "fastify";
+import { randomUUID } from "node:crypto";
+
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -29,6 +31,7 @@ import { computeStreakDisplay } from "../../services/streak.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10MB
+const MAX_SUGGESTION_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 
 /* -------------------------------------------------------------------------- */
 /*                                   Helpers                                  */
@@ -156,7 +159,45 @@ const updateMeSchema = z.object({
   pushNotificationsEnabled: z.boolean().optional(),
 });
 
-const submitSuggestionSchema = z.object({ message: z.string().trim().min(1).max(2000) });
+const submitSuggestionSchema = z.object({
+  message: z.string().trim().min(1).max(2000),
+  conceptId: z.string().uuid().optional(),
+  sceneId: z.string().uuid().optional(),
+});
+
+/**
+ * The suggestion box always posts multipart now (even with no image
+ * attached) so this one route handles both cases without branching on
+ * content-type. Iterating request.parts() directly, rather than
+ * request.file() + file.fields (the pattern used elsewhere in this codebase
+ * for a file that's always present), is what lets the image stay optional --
+ * request.file() has no defined behavior for a multipart body with zero
+ * file parts.
+ */
+async function readSuggestionSubmission(
+  request: FastifyRequest,
+): Promise<{ message: string; conceptId?: string; sceneId?: string; image?: { buffer: Buffer; filename: string } }> {
+  const fields: Record<string, string> = {};
+  let image: { buffer: Buffer; filename: string } | undefined;
+
+  for await (const part of request.parts()) {
+    if (part.type === "file") {
+      if (!part.mimetype.startsWith("image/")) {
+        throw new HttpError(400, "INVALID_FILE_TYPE", "Only image files are accepted");
+      }
+      const buffer = await part.toBuffer();
+      if (buffer.byteLength > MAX_SUGGESTION_IMAGE_BYTES) {
+        throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_SUGGESTION_IMAGE_BYTES} byte limit`);
+      }
+      image = { buffer, filename: part.filename };
+    } else if (part.type === "field") {
+      fields[part.fieldname] = String(part.value);
+    }
+  }
+
+  const body = submitSuggestionSchema.parse(fields);
+  return { ...body, image };
+}
 
 const contributionsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(1000).default(20),
@@ -428,12 +469,28 @@ export default async function usersRoutes(fastify: FastifyInstance) {
   // the admin side (GET /admin/suggestions). No edit/delete from the user's
   // side; it's a one-way "send a note to the team", not a ticket thread.
   fastify.post("/me/suggestions", { preHandler: verifyToken }, async (request, reply) => {
-    const { message } = submitSuggestionSchema.parse(request.body);
+    const { message, conceptId, sceneId, image } = await readSuggestionSubmission(request);
+
+    let imageUrl: string | null = null;
+    let imageStorageKey: string | null = null;
+    if (image) {
+      const ext = image.filename.includes(".") ? image.filename.split(".").pop() : "jpg";
+      const uploaded = await storageService.uploadSuggestionImage(image.buffer, `suggestions/${randomUUID()}.${ext}`);
+      imageUrl = uploaded.publicUrl;
+      imageStorageKey = uploaded.path;
+    }
 
     const [created] = await db
       .insert(suggestions)
-      .values({ userId: request.user!.id, message })
-      .returning({ id: suggestions.id, message: suggestions.message, createdAt: suggestions.createdAt });
+      .values({
+        userId: request.user!.id,
+        message,
+        imageUrl,
+        imageStorageKey,
+        conceptId: conceptId ?? null,
+        sceneId: sceneId ?? null,
+      })
+      .returning({ id: suggestions.id, message: suggestions.message, imageUrl: suggestions.imageUrl, createdAt: suggestions.createdAt });
 
     reply.code(201).send(created);
   });

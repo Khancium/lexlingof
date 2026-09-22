@@ -891,6 +891,11 @@ export type AdminUserDetail = {
 export type AdminSuggestion = {
   id: string;
   message: string;
+  imageUrl: string | null;
+  conceptId: string | null;
+  conceptLabel: string | null;
+  sceneId: string | null;
+  sceneTitle: string | null;
   isReviewed: boolean;
   reviewedAt: string | null;
   createdAt: string;
@@ -1142,10 +1147,17 @@ export const api = {
       return apiClient.post<UserProfile>("/api/v1/users/me/avatar", form).then((r) => r.data);
     },
     deleteAccount: () => apiClient.delete<{ deleted: boolean }>("/api/v1/users/me").then((r) => r.data),
-    submitSuggestion: (message: string) =>
-      apiClient
-        .post<{ id: string; message: string; createdAt: string }>("/api/v1/users/me/suggestions", { message })
-        .then((r) => r.data),
+    /** conceptId/sceneId tag a suggestion as being about that specific corpus item (e.g. the "suggest a better image" button) -- omit both for general feedback. */
+    submitSuggestion: (data: { message: string; image?: File; conceptId?: string; sceneId?: string }) => {
+      const form = new FormData();
+      form.append("message", data.message);
+      if (data.image) form.append("file", data.image);
+      if (data.conceptId) form.append("conceptId", data.conceptId);
+      if (data.sceneId) form.append("sceneId", data.sceneId);
+      return apiClient
+        .post<{ id: string; message: string; imageUrl: string | null; createdAt: string }>("/api/v1/users/me/suggestions", form)
+        .then((r) => r.data);
+    },
   },
 
   notifications: {

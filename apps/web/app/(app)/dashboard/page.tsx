@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuthStore } from "@/lib/store";
 import { api, type StreakStatus, type UserStatsResponse } from "@/lib/api";
 import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
+import { SuggestionBox } from "@/components/suggestion-box";
 
 const QUICK_ACTIONS = [
   {
@@ -119,6 +120,8 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      <SuggestionBox />
     </div>
   );
 }

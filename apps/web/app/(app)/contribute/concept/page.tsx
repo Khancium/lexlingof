@@ -16,6 +16,7 @@ import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
+import { SuggestBetterImageButton } from "@/components/suggest-better-image-button";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "categories" | "concepts" | "record";
@@ -340,6 +341,9 @@ function ConceptPageInner() {
                 )}
                 <div className="text-3xl font-bold text-ink">{concept.labelEnglish}</div>
                 <div className="mt-1 text-sm text-ink-muted">{concept.category.name}</div>
+                <div className="mt-2 flex justify-center">
+                  <SuggestBetterImageButton itemLabel={concept.labelEnglish} conceptId={concept.id} />
+                </div>
               </div>
 
               <div className="flex items-center justify-center gap-3">

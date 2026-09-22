@@ -1300,6 +1300,17 @@ export const suggestions = pgTable(
       .notNull()
       .references(() => users.id),
     message: text("message").notNull(),
+    // Optional photo attached to the suggestion -- e.g. "here's a better
+    // photo for this object/scene". Reference material for an admin to look
+    // at and manually apply if they agree; never applied automatically.
+    imageUrl: text("image_url"),
+    imageStorageKey: text("image_storage_key"),
+    // Set when the suggestion was made from the small "suggest a better
+    // image" button on a concept/scene's contribute page -- at most one of
+    // these is ever set. Null for a suggestion typed from the general
+    // feedback box, which isn't about any one corpus item.
+    conceptId: uuid("concept_id").references(() => concepts.id),
+    sceneId: uuid("scene_id").references(() => scenes.id),
     isReviewed: boolean("is_reviewed").default(false).notNull(),
     reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
     reviewedBy: uuid("reviewed_by").references(() => users.id),

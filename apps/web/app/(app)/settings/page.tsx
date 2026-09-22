@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useAuthStore } from "@/lib/store";
 import { api, getErrorMessage } from "@/lib/api";
 
+
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: () => void; disabled?: boolean }) {
   return (
     <button
@@ -25,11 +26,6 @@ export default function SettingsPage() {
   const [savingField, setSavingField] = useState<"autoLoadNext" | "pushNotificationsEnabled" | null>(null);
   const [toggleError, setToggleError] = useState<string | null>(null);
 
-  const [suggestion, setSuggestion] = useState("");
-  const [isSubmittingSuggestion, setIsSubmittingSuggestion] = useState(false);
-  const [suggestionError, setSuggestionError] = useState<string | null>(null);
-  const [suggestionSent, setSuggestionSent] = useState(false);
-
   async function toggleField(field: "autoLoadNext" | "pushNotificationsEnabled") {
     if (!user) return;
     const nextValue = !user[field];
@@ -42,22 +38,6 @@ export default function SettingsPage() {
       setToggleError(getErrorMessage(err, "Failed to save setting"));
     } finally {
       setSavingField(null);
-    }
-  }
-
-  async function submitSuggestion() {
-    if (suggestion.trim().length === 0) return;
-    setIsSubmittingSuggestion(true);
-    setSuggestionError(null);
-    setSuggestionSent(false);
-    try {
-      await api.users.submitSuggestion(suggestion.trim());
-      setSuggestion("");
-      setSuggestionSent(true);
-    } catch (err) {
-      setSuggestionError(getErrorMessage(err, "Failed to send suggestion"));
-    } finally {
-      setIsSubmittingSuggestion(false);
     }
   }
 
@@ -103,32 +83,6 @@ export default function SettingsPage() {
         </div>
 
         {toggleError ? <p className="text-sm text-red-600">{toggleError}</p> : null}
-      </div>
-
-      <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
-        <h2 className="text-lg font-bold text-ink">Suggestions &amp; Feedback</h2>
-        <p className="text-sm text-ink-muted">
-          Spotted a bug, or have an idea to make Lexlingo better? Send it straight to the team.
-        </p>
-        <textarea
-          value={suggestion}
-          onChange={(e) => {
-            setSuggestion(e.target.value);
-            setSuggestionSent(false);
-          }}
-          placeholder="Tell us what's on your mind..."
-          rows={4}
-          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-        />
-        {suggestionError ? <p className="text-sm text-red-600">{suggestionError}</p> : null}
-        {suggestionSent ? <p className="text-sm text-emerald-600">Thanks! Your feedback has been sent.</p> : null}
-        <button
-          onClick={submitSuggestion}
-          disabled={isSubmittingSuggestion || suggestion.trim().length === 0}
-          className="btn-duo bg-brand px-5 py-2.5 font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
-        >
-          {isSubmittingSuggestion ? "Sending..." : "Send Feedback"}
-        </button>
       </div>
     </div>
   );

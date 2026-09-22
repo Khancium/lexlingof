@@ -9,6 +9,7 @@ import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
+import { SuggestBetterImageButton } from "@/components/suggest-better-image-button";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "browse" | "record";
@@ -176,9 +177,10 @@ function ScenePageInner() {
 
         <button
           onClick={() => loadDifferentScene().then(() => setStep("record"))}
-          className="text-sm font-semibold text-brand hover:underline"
+          disabled={loadingScene}
+          className="btn-duo w-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
         >
-          🎲 Pick a random scene
+          🎲 Pick a Random Scene
         </button>
 
         {loadingScenes ? (
@@ -236,6 +238,10 @@ function ScenePageInner() {
             <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
               {scene.title}
             </span>
+          </div>
+
+          <div className="flex justify-center">
+            <SuggestBetterImageButton itemLabel={scene.title} sceneId={scene.id} />
           </div>
 
           <p className="text-center text-ink-muted">

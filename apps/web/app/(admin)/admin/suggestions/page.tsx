@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Image from "next/image";
 import { api, getErrorMessage, type AdminSuggestion } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
@@ -89,11 +90,27 @@ export default function AdminSuggestionsPage() {
         <div className="space-y-3">
           {items.map((item) => (
             <div key={item.id} className="card-duo flex flex-col gap-3 rounded-2xl bg-surface p-4 shadow-sm sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 flex-1">
-                <p className="whitespace-pre-wrap text-ink">{item.message}</p>
-                <p className="mt-2 text-xs text-ink-muted">
-                  {item.userDisplayName} ({item.userEmail}) &middot; {new Date(item.createdAt).toLocaleString()}
-                </p>
+              <div className="flex min-w-0 flex-1 gap-3">
+                {item.imageUrl ? (
+                  <Image
+                    src={item.imageUrl}
+                    alt=""
+                    width={96}
+                    height={96}
+                    className="h-24 w-24 flex-shrink-0 rounded-lg object-cover"
+                  />
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  {item.conceptLabel || item.sceneTitle ? (
+                    <span className="mb-1 inline-block rounded-full bg-surface-card px-2 py-0.5 text-[10px] font-bold uppercase text-ink-muted ring-1 ring-border">
+                      Re: {item.conceptLabel ?? item.sceneTitle}
+                    </span>
+                  ) : null}
+                  <p className="whitespace-pre-wrap text-ink">{item.message}</p>
+                  <p className="mt-2 text-xs text-ink-muted">
+                    {item.userDisplayName} ({item.userEmail}) &middot; {new Date(item.createdAt).toLocaleString()}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => toggleReviewed(item)}

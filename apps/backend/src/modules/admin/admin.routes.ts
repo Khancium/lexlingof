@@ -3861,6 +3861,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         .select({
           id: suggestions.id,
           message: suggestions.message,
+          imageUrl: suggestions.imageUrl,
+          conceptId: suggestions.conceptId,
+          conceptLabel: concepts.labelEnglish,
+          sceneId: suggestions.sceneId,
+          sceneTitle: scenes.title,
           isReviewed: suggestions.isReviewed,
           reviewedAt: suggestions.reviewedAt,
           createdAt: suggestions.createdAt,
@@ -3870,6 +3875,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         })
         .from(suggestions)
         .innerJoin(users, eq(users.id, suggestions.userId))
+        .leftJoin(concepts, eq(concepts.id, suggestions.conceptId))
+        .leftJoin(scenes, eq(scenes.id, suggestions.sceneId))
         .where(whereClause)
         .orderBy(desc(suggestions.createdAt))
         .limit(limit)
