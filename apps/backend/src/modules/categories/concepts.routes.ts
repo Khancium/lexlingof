@@ -40,8 +40,9 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
       request.query,
     );
 
-    const canSeeHidden = includeHidden && (await hasPermission(request.user!.role, "concepts.manage"));
-    const conditions = canSeeHidden ? [isNull(concepts.deletedAt)] : [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
+    const canManage = await hasPermission(request.user!.role, "concepts.manage");
+    const conditions =
+      includeHidden && canManage ? [isNull(concepts.deletedAt)] : [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
     if (categoryId) {
       conditions.push(eq(concepts.categoryId, categoryId));
     }
@@ -63,7 +64,11 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
     // bare "id" inside this subquery would resolve to concept_media.id
     // instead of the outer concepts.id (comparing a row against itself),
     // exactly the pitfall documented in ARCHITECTURE.md §2.7.
-    if (hasImage === "yes") {
+    // A concept with no image is never shown to a plain contributor,
+    // regardless of what hasImage they asked for -- only an admin/volunteer
+    // with concepts.manage can browse imageless concepts (to find and fix
+    // them), via their own explicit hasImage filter.
+    if (hasImage === "yes" || !canManage) {
       conditions.push(sql`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`);
     } else if (hasImage === "no") {
       conditions.push(sql`not exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`);
@@ -131,7 +136,10 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
       db.select().from(conceptMedia).where(eq(conceptMedia.conceptId, id)),
     ]);
 
-    if (!row || !row.isActive || row.deletedAt) {
+    // No admin path calls this route -- it's exclusively the public "open
+    // this exact concept" lookup -- so a hidden concept or one with no image
+    // is just as unreachable here as it is from the browse list.
+    if (!row || !row.isActive || row.deletedAt || media.length === 0) {
       throw new HttpError(404, "NOT_FOUND", "Concept not found");
     }
 

@@ -146,7 +146,14 @@ export async function getDailyScene() {
     .select(sceneSelection())
     .from(scenes)
     .leftJoin(sceneMedia, and(eq(sceneMedia.sceneId, scenes.id), eq(sceneMedia.isPrimary, true)))
-    .where(and(eq(scenes.isDaily, true), eq(scenes.isActive, true), isNull(scenes.deletedAt)))
+    .where(
+      and(
+        eq(scenes.isDaily, true),
+        eq(scenes.isActive, true),
+        isNull(scenes.deletedAt),
+        sql`exists (select 1 from scene_media where scene_media.scene_id = scenes.id)`,
+      ),
+    )
     .limit(1);
 
   if (scene) {
@@ -157,7 +164,11 @@ export async function getDailyScene() {
 }
 
 export async function getRandomScene(excludeId?: string) {
-  const conditions = [eq(scenes.isActive, true), isNull(scenes.deletedAt)];
+  const conditions = [
+    eq(scenes.isActive, true),
+    isNull(scenes.deletedAt),
+    sql`exists (select 1 from scene_media where scene_media.scene_id = scenes.id)`,
+  ];
   if (excludeId) {
     conditions.push(ne(scenes.id, excludeId));
   }
@@ -182,10 +193,14 @@ export async function getSceneById(sceneId: string) {
     .select(sceneSelection())
     .from(scenes)
     .leftJoin(sceneMedia, and(eq(sceneMedia.sceneId, scenes.id), eq(sceneMedia.isPrimary, true)))
-    .where(and(eq(scenes.id, sceneId), isNull(scenes.deletedAt)))
+    .where(and(eq(scenes.id, sceneId), eq(scenes.isActive, true), isNull(scenes.deletedAt)))
     .limit(1);
 
-  if (!scene) {
+  // No admin path calls this (see the module-level comment on scene_concepts
+  // above) -- it's exclusively the public "open this exact scene" lookup, so
+  // a hidden scene or one with no image is just as unreachable here as it is
+  // from the browse list.
+  if (!scene || !scene.imageUrl) {
     throw new HttpError(404, "NOT_FOUND", "Scene not found");
   }
 

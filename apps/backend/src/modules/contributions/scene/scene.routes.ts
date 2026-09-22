@@ -45,15 +45,19 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
     const { search, createdFrom, createdTo, categoryId, hasImage, mine, includeHidden, limit, offset } = listQuerySchema.parse(
       request.query,
     );
-    const canSeeHidden = includeHidden && (await hasPermission(request.user!.role, "scenes.manage"));
+    const canManage = await hasPermission(request.user!.role, "scenes.manage");
     return getScenes(limit, offset, request.user!.id, {
       search,
       createdFrom,
       createdTo,
       categoryId,
-      hasImage,
+      // A scene with no image is never shown to a plain contributor,
+      // regardless of what hasImage they asked for -- only an admin/
+      // volunteer with scenes.manage can browse imageless scenes (to find
+      // and fix them), via their own explicit hasImage filter.
+      hasImage: canManage ? hasImage : "yes",
       mine: mine ? request.user!.id : undefined,
-      includeHidden: canSeeHidden,
+      includeHidden: includeHidden && canManage,
     });
   });
 

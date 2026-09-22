@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -31,10 +31,19 @@ async function loadActiveCategoriesWithCounts() {
     .where(eq(categories.isActive, true))
     .orderBy(asc(categories.sortOrder));
 
+  // Matches the same "no image, not shown to a contributor" rule enforced on
+  // the concept browse/detail routes -- otherwise a category tile's count
+  // would include concepts the tile grid itself never actually displays.
   const conceptRows = await db
     .select({ categoryId: concepts.categoryId })
     .from(concepts)
-    .where(and(eq(concepts.isActive, true), isNull(concepts.deletedAt)));
+    .where(
+      and(
+        eq(concepts.isActive, true),
+        isNull(concepts.deletedAt),
+        sql`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`,
+      ),
+    );
 
   const countByCategory = new Map<string, number>();
   for (const row of conceptRows) {
@@ -89,7 +98,14 @@ export default async function categoriesRoutes(fastify: FastifyInstance) {
       db
         .select()
         .from(concepts)
-        .where(and(eq(concepts.categoryId, id), eq(concepts.isActive, true), isNull(concepts.deletedAt)))
+        .where(
+          and(
+            eq(concepts.categoryId, id),
+            eq(concepts.isActive, true),
+            isNull(concepts.deletedAt),
+            sql`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`,
+          ),
+        )
         .orderBy(asc(concepts.sortOrder)),
     ]);
 

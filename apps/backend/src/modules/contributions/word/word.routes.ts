@@ -33,7 +33,11 @@ export default async function wordRoutes(fastify: FastifyInstance) {
     const { categoryId } = nextConceptQuerySchema.parse(request.query);
     const userId = request.user!.id;
 
-    const conceptConditions = [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
+    const conceptConditions = [
+      eq(concepts.isActive, true),
+      isNull(concepts.deletedAt),
+      sql`exists (select 1 from concept_media where concept_media.concept_id = concepts.id)`,
+    ];
     if (categoryId) {
       conceptConditions.push(eq(concepts.categoryId, categoryId));
     }
