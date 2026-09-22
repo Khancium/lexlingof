@@ -64,12 +64,15 @@ export default function AdminConceptsPage() {
   const [urlEntryValue, setUrlEntryValue] = useState("");
 
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [isBulkEditing, setIsBulkEditing] = useState(false);
   const [isBulkAutofilling, setIsBulkAutofilling] = useState(false);
   const [bulkAutofillInfo, setBulkAutofillInfo] = useState<string | null>(null);
+  const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
+  const [isBulkHiding, setIsBulkHiding] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -89,6 +92,9 @@ export default function AdminConceptsPage() {
           categoryId: filterCategoryId || undefined,
           hasImage: filterHasImage || undefined,
           mine: isVolunteer && onlyMine ? true : undefined,
+          // Volunteers don't hold concepts.manage, so this is silently
+          // ignored for them server-side and they only ever see active rows.
+          includeHidden: true,
         }),
         api.concepts.getAll({ limit: 1000 }),
       ]);
@@ -221,6 +227,20 @@ export default function AdminConceptsPage() {
     }
   }
 
+  // Hiding just flips isActive -- unlike Delete, this never touches
+  // deletedAt, so it's fully reversible and the row stays visible (and
+  // manageable) right here in the admin table instead of disappearing into
+  // the soft-delete/undo flow.
+  async function handleToggleActive(concept: ConceptListItem) {
+    setTogglingActiveId(concept.id);
+    try {
+      await api.admin.updateConcept(concept.id, { isActive: !concept.isActive });
+      await load();
+    } finally {
+      setTogglingActiveId(null);
+    }
+  }
+
   function startEdit(concept: ConceptListItem) {
     setEditingId(concept.id);
     setEditLabel(concept.labelEnglish);
@@ -299,6 +319,49 @@ export default function AdminConceptsPage() {
       await load();
     } finally {
       setIsBulkAutofilling(false);
+    }
+  }
+
+  // Clears every image (any source) on every selected concept -- the
+  // opposite of the autofill above, for clearing out a bad batch (e.g. a
+  // wrong Openverse auto-fill run) without opening each concept's image
+  // manager individually.
+  async function handleBulkDeleteImages() {
+    if (!confirm(`Remove all images from ${selected.size} selected concept(s)? This cannot be undone.`)) return;
+    setIsBulkDeletingImages(true);
+    setBulkAutofillInfo(null);
+    try {
+      const result = await api.admin.bulkDeleteConceptMedia([...selected]);
+      setBulkAutofillInfo(`Removed ${result.deleted} image(s).`);
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkDeletingImages(false);
+    }
+  }
+
+  // Hide/unhide just flips isActive in bulk via the same bulk-edit endpoint
+  // the category-move button already uses -- no separate hide-specific
+  // route needed.
+  async function handleBulkHide() {
+    setIsBulkHiding(true);
+    try {
+      await api.admin.bulkEditConcepts({ ids: [...selected], isActive: false });
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkHiding(false);
+    }
+  }
+
+  async function handleBulkUnhide() {
+    setIsBulkHiding(true);
+    try {
+      await api.admin.bulkEditConcepts({ ids: [...selected], isActive: true });
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkHiding(false);
     }
   }
 
@@ -413,6 +476,27 @@ export default function AdminConceptsPage() {
             >
               {isBulkAutofilling ? "Adding images..." : "Add images from Openverse"}
             </button>
+            <button
+              onClick={handleBulkDeleteImages}
+              disabled={isBulkDeletingImages}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-red-600 hover:bg-border disabled:opacity-50"
+            >
+              {isBulkDeletingImages ? "Removing images..." : "Remove all images"}
+            </button>
+            <button
+              onClick={handleBulkHide}
+              disabled={isBulkHiding}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              {isBulkHiding ? "Hiding..." : "Hide selected"}
+            </button>
+            <button
+              onClick={handleBulkUnhide}
+              disabled={isBulkHiding}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              Unhide selected
+            </button>
           </AdminBulkBar>
           {bulkAutofillInfo ? <p className="text-sm text-emerald-600">{bulkAutofillInfo}</p> : null}
         </>
@@ -521,6 +605,7 @@ export default function AdminConceptsPage() {
                 <th className="px-4 py-3">Description</th>
                 <th className="px-4 py-3">Image</th>
                 <th className="px-4 py-3">Added</th>
+                <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
@@ -557,6 +642,7 @@ export default function AdminConceptsPage() {
                         className="w-full rounded bg-surface-card px-2 py-1 text-ink ring-1 ring-border"
                       />
                     </td>
+                    <td className="px-4 py-2 text-xs text-ink-muted">--</td>
                     <td className="px-4 py-2 text-xs text-ink-muted">--</td>
                     <td className="px-4 py-2 text-xs text-ink-muted">--</td>
                     <td className="px-4 py-2">
@@ -664,10 +750,28 @@ export default function AdminConceptsPage() {
                     </td>
                     <td className="px-4 py-3 text-ink-muted">{new Date(concept.createdAt).toLocaleString()}</td>
                     <td className="px-4 py-3">
+                      {concept.isActive ? (
+                        <span className="text-xs text-ink-muted">Visible</span>
+                      ) : (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">
+                          Hidden
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
                       <div className="flex gap-3">
                         <button onClick={() => startEdit(concept)} className="text-xs font-semibold text-brand hover:underline">
                           Edit
                         </button>
+                        {!isVolunteer ? (
+                          <button
+                            onClick={() => handleToggleActive(concept)}
+                            disabled={togglingActiveId === concept.id}
+                            className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline disabled:opacity-50"
+                          >
+                            {togglingActiveId === concept.id ? "Saving..." : concept.isActive ? "Hide" : "Unhide"}
+                          </button>
+                        ) : null}
                         {/* A volunteer may only delete (or request deletion of) their own
                            past additions, and only while the "my own additions" filter is
                            active -- otherwise the button doesn't render at all for them. */}
@@ -699,7 +803,7 @@ export default function AdminConceptsPage() {
                 )}
                 {imagesConceptId === concept.id ? (
                   <tr className="border-b border-border bg-surface-card/50 last:border-0">
-                    <td colSpan={7} className="px-4 py-4">
+                    <td colSpan={8} className="px-4 py-4">
                       <AdminMediaManager
                         itemId={concept.id}
                         aspectRatio={16 / 9}

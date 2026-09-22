@@ -49,6 +49,8 @@ export default function AdminSentencesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkCategoryId, setBulkCategoryId] = useState("");
   const [isBulkEditing, setIsBulkEditing] = useState(false);
+  const [isBulkHiding, setIsBulkHiding] = useState(false);
+  const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -163,6 +165,41 @@ export default function AdminSentencesPage() {
     }
   }
 
+  // Hide/unhide flips isActive -- there's no single-sentence update route,
+  // so this reuses bulk-edit with a one-element ids array both here and for
+  // the real bulk buttons below.
+  async function handleToggleActive(sentence: AdminSentence) {
+    setTogglingActiveId(sentence.id);
+    try {
+      await api.admin.bulkEditSentences({ ids: [sentence.id], isActive: !sentence.isActive });
+      await load();
+    } finally {
+      setTogglingActiveId(null);
+    }
+  }
+
+  async function handleBulkHide() {
+    setIsBulkHiding(true);
+    try {
+      await api.admin.bulkEditSentences({ ids: [...selected], isActive: false });
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkHiding(false);
+    }
+  }
+
+  async function handleBulkUnhide() {
+    setIsBulkHiding(true);
+    try {
+      await api.admin.bulkEditSentences({ ids: [...selected], isActive: true });
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkHiding(false);
+    }
+  }
+
   return (
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-ink">Sentences</h1>
@@ -267,6 +304,20 @@ export default function AdminSentencesPage() {
             >
               {isBulkEditing ? "Applying..." : "Apply"}
             </button>
+            <button
+              onClick={handleBulkHide}
+              disabled={isBulkHiding}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              {isBulkHiding ? "Hiding..." : "Hide selected"}
+            </button>
+            <button
+              onClick={handleBulkUnhide}
+              disabled={isBulkHiding}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              Unhide selected
+            </button>
           </AdminBulkBar>
         </>
       ) : null}
@@ -361,6 +412,7 @@ export default function AdminSentencesPage() {
                 <th className="px-4 py-3">Category</th>
                 <th className="px-4 py-3">Used</th>
                 <th className="px-4 py-3">Added</th>
+                <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
@@ -378,6 +430,15 @@ export default function AdminSentencesPage() {
                   <td className="px-4 py-3 text-ink-muted">{sentence.usageCount}</td>
                   <td className="px-4 py-3 text-ink-muted">{new Date(sentence.createdAt).toLocaleString()}</td>
                   <td className="px-4 py-3">
+                    {sentence.isActive ? (
+                      <span className="text-xs text-ink-muted">Visible</span>
+                    ) : (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">
+                        Hidden
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     <div className="flex gap-3">
                       {/* A volunteer may only delete (or request deletion of) their own
                          past additions, and only while the "my own additions" filter is
@@ -389,6 +450,15 @@ export default function AdminSentencesPage() {
                           className="text-xs font-semibold text-red-600 hover:underline disabled:opacity-50"
                         >
                           {deletingId === sentence.id ? "Deleting..." : "Delete"}
+                        </button>
+                      ) : null}
+                      {!isVolunteer ? (
+                        <button
+                          onClick={() => handleToggleActive(sentence)}
+                          disabled={togglingActiveId === sentence.id}
+                          className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline disabled:opacity-50"
+                        >
+                          {togglingActiveId === sentence.id ? "Saving..." : sentence.isActive ? "Hide" : "Unhide"}
                         </button>
                       ) : null}
                       {!isVolunteer ? (

@@ -58,6 +58,7 @@ function sceneSelection() {
     description: scenes.description,
     difficulty: scenes.difficulty,
     estimatedDurationSeconds: scenes.estimatedDurationSeconds,
+    isActive: scenes.isActive,
     isDaily: scenes.isDaily,
     createdAt: scenes.createdAt,
     createdBy: scenes.createdBy,
@@ -80,10 +81,13 @@ export async function getScenes(
     // themselves created (scenes.createdBy). Named after the "mine" query
     // param that sets it, not after what it holds.
     mine?: string;
+    // Admin-only (the route only honors this after checking scenes.manage) --
+    // includes hidden (isActive false, not deleted) scenes in the results.
+    includeHidden?: boolean;
   } = {},
 ) {
-  const { search, createdFrom, createdTo, categoryId, hasImage, mine } = filters;
-  const conditions = [eq(scenes.isActive, true), isNull(scenes.deletedAt)];
+  const { search, createdFrom, createdTo, categoryId, hasImage, mine, includeHidden } = filters;
+  const conditions = includeHidden ? [isNull(scenes.deletedAt)] : [eq(scenes.isActive, true), isNull(scenes.deletedAt)];
   if (search) conditions.push(ilike(scenes.title, `%${search}%`));
   if (mine) conditions.push(eq(scenes.createdBy, mine));
   if (createdFrom) conditions.push(gte(scenes.createdAt, new Date(createdFrom)));

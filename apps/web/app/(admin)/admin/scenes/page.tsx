@@ -146,6 +146,10 @@ export default function AdminScenesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkDifficulty, setBulkDifficulty] = useState<SceneDifficulty | "">("");
   const [isBulkEditing, setIsBulkEditing] = useState(false);
+  const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
+  const [bulkActionInfo, setBulkActionInfo] = useState<string | null>(null);
+  const [isBulkHiding, setIsBulkHiding] = useState(false);
+  const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -164,6 +168,9 @@ export default function AdminScenesPage() {
           categoryId: filterCategoryId || undefined,
           hasImage: filterHasImage || undefined,
           mine: isVolunteer && onlyMine ? true : undefined,
+          // Volunteers don't hold scenes.manage, so this is silently ignored
+          // for them server-side and they only ever see active rows.
+          includeHidden: true,
         }),
         api.concepts.getAll({ limit: 200 }),
         api.scenes.getAll({ limit: 1000 }),
@@ -476,6 +483,56 @@ export default function AdminScenesPage() {
     }
   }
 
+  // Clears every image (any source) on every selected scene -- mirrors the
+  // identical concepts-page action.
+  async function handleBulkDeleteImages() {
+    if (!confirm(`Remove all images from ${selected.size} selected scene(s)? This cannot be undone.`)) return;
+    setIsBulkDeletingImages(true);
+    setBulkActionInfo(null);
+    try {
+      const result = await api.admin.bulkDeleteSceneMedia([...selected]);
+      setBulkActionInfo(`Removed ${result.deleted} image(s).`);
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkDeletingImages(false);
+    }
+  }
+
+  // Hide/unhide just flips isActive via the same bulk-edit endpoint the
+  // difficulty button already uses -- fully reversible, unlike Delete.
+  async function handleBulkHide() {
+    setIsBulkHiding(true);
+    try {
+      await api.admin.bulkEditScenes({ ids: [...selected], isActive: false });
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkHiding(false);
+    }
+  }
+
+  async function handleBulkUnhide() {
+    setIsBulkHiding(true);
+    try {
+      await api.admin.bulkEditScenes({ ids: [...selected], isActive: true });
+      setSelected(new Set());
+      await load();
+    } finally {
+      setIsBulkHiding(false);
+    }
+  }
+
+  async function handleToggleActive(scene: Scene) {
+    setTogglingActiveId(scene.id);
+    try {
+      await api.admin.updateScene(scene.id, { isActive: !scene.isActive });
+      await load();
+    } finally {
+      setTogglingActiveId(null);
+    }
+  }
+
   async function handleAddCoverage() {
     if (!coverageSceneId || coverageConceptIds.size === 0) return;
     setIsAddingCoverage(true);
@@ -704,7 +761,29 @@ export default function AdminScenesPage() {
             >
               {isBulkEditing ? "Applying..." : "Apply"}
             </button>
+            <button
+              onClick={handleBulkDeleteImages}
+              disabled={isBulkDeletingImages}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-red-600 hover:bg-border disabled:opacity-50"
+            >
+              {isBulkDeletingImages ? "Removing images..." : "Remove all images"}
+            </button>
+            <button
+              onClick={handleBulkHide}
+              disabled={isBulkHiding}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              {isBulkHiding ? "Hiding..." : "Hide selected"}
+            </button>
+            <button
+              onClick={handleBulkUnhide}
+              disabled={isBulkHiding}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              Unhide selected
+            </button>
           </AdminBulkBar>
+          {bulkActionInfo ? <p className="text-sm text-emerald-600">{bulkActionInfo}</p> : null}
         </>
       ) : null}
 
@@ -817,6 +896,11 @@ export default function AdminScenesPage() {
                       >
                         {scene.imageUrl ? "✓ Image" : "No image"}
                       </span>
+                      {!scene.isActive ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700">
+                          Hidden
+                        </span>
+                      ) : null}
                     </p>
                     <p className="text-xs capitalize text-ink-muted">
                       {scene.slug} · {scene.difficulty} · Added {new Date(scene.createdAt).toLocaleDateString()}
@@ -860,6 +944,15 @@ export default function AdminScenesPage() {
                   <button onClick={() => toggleKeywords(scene.id)} className="text-xs font-semibold text-brand hover:underline">
                     {keywordsSceneId === scene.id ? "Close Keywords" : "Keywords"}
                   </button>
+                  {!isVolunteer ? (
+                    <button
+                      onClick={() => handleToggleActive(scene)}
+                      disabled={togglingActiveId === scene.id}
+                      className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline disabled:opacity-50"
+                    >
+                      {togglingActiveId === scene.id ? "Saving..." : scene.isActive ? "Hide" : "Unhide"}
+                    </button>
+                  ) : null}
                   <button
                     onClick={() => setImagesSceneId(imagesSceneId === scene.id ? null : scene.id)}
                     className="text-xs font-semibold text-brand hover:underline"

@@ -355,6 +355,8 @@ export type ConceptsQuery = {
   hasImage?: "yes" | "no";
   /** Volunteer's "my own additions" filter -- true restricts the list to concepts this caller created. */
   mine?: boolean;
+  /** Admin-only (silently ignored otherwise) -- includes hidden (isActive false, not deleted) concepts. */
+  includeHidden?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -367,6 +369,7 @@ export type ConceptListItem = {
   description: string | null;
   createdAt: string;
   createdBy: string | null;
+  isActive: boolean;
   imageUrl: string | null;
   imageMediaId: string | null;
   hasContributed: boolean;
@@ -550,6 +553,7 @@ export type Scene = {
   description: string | null;
   difficulty: SceneDifficulty;
   estimatedDurationSeconds: number | null;
+  isActive: boolean;
   isDaily: boolean;
   createdAt: string;
   createdBy: string | null;
@@ -1263,6 +1267,8 @@ export const api = {
       hasImage?: "yes" | "no";
       /** Volunteer's "my own additions" filter -- true restricts the list to scenes this caller created. */
       mine?: boolean;
+      /** Admin-only (silently ignored otherwise) -- includes hidden (isActive false, not deleted) scenes. */
+      includeHidden?: boolean;
       limit?: number;
       offset?: number;
     }) => apiClient.get<ScenesResponse>("/api/v1/scenes", { params }).then((r) => r.data),
@@ -1450,6 +1456,9 @@ export const api = {
       apiClient.get<{ items: ConceptMedia[] }>(`/api/v1/admin/concepts/${id}/media`).then((r) => r.data.items),
     deleteConceptMedia: (id: string, mediaId: string) =>
       apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/concepts/${id}/media/${mediaId}`).then((r) => r.data),
+    /** Clears every image (upload, URL, or Openverse) on every given concept -- for the bulk-selection bar. */
+    bulkDeleteConceptMedia: (conceptIds: string[]) =>
+      apiClient.post<{ deleted: number }>("/api/v1/admin/concepts/media/bulk-delete", { ids: conceptIds }).then((r) => r.data),
     /** Replaces this exact image with a manually-cropped version -- id/isPrimary/attribution are unchanged, only the image itself. */
     cropConceptMedia: (id: string, mediaId: string, file: File) => {
       const form = new FormData();
@@ -1510,6 +1519,9 @@ export const api = {
       apiClient.get<{ items: SceneMedia[] }>(`/api/v1/admin/scenes/${id}/media`).then((r) => r.data.items),
     deleteSceneMedia: (id: string, mediaId: string) =>
       apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/scenes/${id}/media/${mediaId}`).then((r) => r.data),
+    /** Clears every image (upload, URL, or Openverse) on every given scene -- for the bulk-selection bar. */
+    bulkDeleteSceneMedia: (sceneIds: string[]) =>
+      apiClient.post<{ deleted: number }>("/api/v1/admin/scenes/media/bulk-delete", { ids: sceneIds }).then((r) => r.data),
     /** Replaces this exact image with a manually-cropped version -- see cropConceptMedia. */
     cropSceneMedia: (id: string, mediaId: string, file: File) => {
       const form = new FormData();

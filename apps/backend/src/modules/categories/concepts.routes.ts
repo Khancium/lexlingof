@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { db } from "../../db/index.js";
 import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
-import { verifyToken } from "../../middleware/auth.js";
+import { hasPermission, verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 
 const listQuerySchema = z.object({
@@ -21,6 +21,10 @@ const listQuerySchema = z.object({
   // concepts this caller themselves created (concepts.createdBy). Same
   // convention as the scene/sentence list routes.
   mine: z.coerce.boolean().optional(),
+  // Admin-only: include hidden (isActive false, not deleted) concepts too.
+  // Silently ignored for anyone without concepts.manage -- see the check
+  // below -- so a contributor can never pass this to see hidden items.
+  includeHidden: z.coerce.boolean().optional(),
   // 1000 (not 200) so admin pages can fetch the full concept list in one
   // request for client-side matching (e.g. the bulk-add-images-by-URL and
   // scene-coverage pickers) without paginating just to build a lookup map.
@@ -32,9 +36,12 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 
 export default async function conceptsRoutes(fastify: FastifyInstance) {
   fastify.get("/concepts", { preHandler: verifyToken }, async (request) => {
-    const { categoryId, search, createdFrom, createdTo, hasImage, mine, limit, offset } = listQuerySchema.parse(request.query);
+    const { categoryId, search, createdFrom, createdTo, hasImage, mine, includeHidden, limit, offset } = listQuerySchema.parse(
+      request.query,
+    );
 
-    const conditions = [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
+    const canSeeHidden = includeHidden && (await hasPermission(request.user!.role, "concepts.manage"));
+    const conditions = canSeeHidden ? [isNull(concepts.deletedAt)] : [eq(concepts.isActive, true), isNull(concepts.deletedAt)];
     if (categoryId) {
       conditions.push(eq(concepts.categoryId, categoryId));
     }
@@ -73,6 +80,7 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
           description: concepts.description,
           createdAt: concepts.createdAt,
           createdBy: concepts.createdBy,
+          isActive: concepts.isActive,
           imageUrl: conceptMedia.publicUrl,
           imageMediaId: conceptMedia.id,
           // Tile shading needs a per-user "have I already recorded this

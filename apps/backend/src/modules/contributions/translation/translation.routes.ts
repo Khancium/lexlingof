@@ -74,6 +74,8 @@ export default async function translationRoutes(fastify: FastifyInstance) {
         id: sentences.id,
         englishText: sentences.englishText,
         sourceLanguage: sentences.sourceLanguage,
+        isActive: sentences.isActive,
+        deletedAt: sentences.deletedAt,
         categoryId: categories.id,
         categoryName: categories.nameEnglish,
         categorySlug: categories.slug,
@@ -83,7 +85,11 @@ export default async function translationRoutes(fastify: FastifyInstance) {
       .where(eq(sentences.id, id))
       .limit(1);
 
-    if (!sentence) {
+    // Every other sentence-listing path in this file already filters out
+    // hidden/deleted rows -- this direct-by-id lookup (used by the "Submit
+    // Again" deep link) hadn't, which would let a hidden or soft-deleted
+    // sentence still be fetched and translated by its id.
+    if (!sentence || !sentence.isActive || sentence.deletedAt) {
       throw new HttpError(404, "NOT_FOUND", "Sentence not found");
     }
 

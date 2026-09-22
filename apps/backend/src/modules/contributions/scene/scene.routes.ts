@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { verifyToken } from "../../../middleware/auth.js";
+import { hasPermission, verifyToken } from "../../../middleware/auth.js";
 import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneContribution } from "./scene.service.js";
 
 const listQuerySchema = z.object({
@@ -18,6 +18,9 @@ const listQuerySchema = z.object({
   // Volunteer's "my own additions" filter -- true restricts the list to
   // scenes this caller themselves created (scenes.createdBy).
   mine: z.coerce.boolean().optional(),
+  // Admin-only: include hidden (isActive false, not deleted) scenes too --
+  // silently ignored for anyone without scenes.manage, same as concepts.
+  includeHidden: z.coerce.boolean().optional(),
   // 1000 (not 200) so admin pages can fetch the full scene list in one
   // request for client-side matching (bulk-add-images-by-URL) without
   // paginating just to build a lookup map.
@@ -39,7 +42,10 @@ const submitSchema = z.object({
 
 export default async function sceneRoutes(fastify: FastifyInstance) {
   fastify.get("/", { preHandler: verifyToken }, async (request) => {
-    const { search, createdFrom, createdTo, categoryId, hasImage, mine, limit, offset } = listQuerySchema.parse(request.query);
+    const { search, createdFrom, createdTo, categoryId, hasImage, mine, includeHidden, limit, offset } = listQuerySchema.parse(
+      request.query,
+    );
+    const canSeeHidden = includeHidden && (await hasPermission(request.user!.role, "scenes.manage"));
     return getScenes(limit, offset, request.user!.id, {
       search,
       createdFrom,
@@ -47,6 +53,7 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
       categoryId,
       hasImage,
       mine: mine ? request.user!.id : undefined,
+      includeHidden: canSeeHidden,
     });
   });
 

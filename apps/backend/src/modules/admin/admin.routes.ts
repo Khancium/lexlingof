@@ -2575,6 +2575,36 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     },
   );
 
+  // Removes every image on every given concept, however each one got there
+  // (upload, "From URL", or Openverse) -- all three already funnel through
+  // conceptMedia, so this is one unscoped delete per concept id, not three
+  // separate source-specific paths. Meant for the bulk-selection bar: filter
+  // by category/date, select rows, clear their images in one action instead
+  // of opening each concept's image manager individually.
+  fastify.post("/admin/concepts/media/bulk-delete", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    const media = await db
+      .select({ id: conceptMedia.id, storageKey: conceptMedia.storageKey })
+      .from(conceptMedia)
+      .where(inArray(conceptMedia.conceptId, ids));
+    if (media.length === 0) return { deleted: 0 };
+
+    await db.delete(conceptMedia).where(inArray(conceptMedia.conceptId, ids));
+
+    // DB rows are gone either way -- a storage failure here is logged, not
+    // thrown, same "delete already succeeded, an orphaned file is a much
+    // smaller problem" reasoning as the single-image delete above.
+    const results = await Promise.allSettled(media.map((m) => storageService.deleteImage(m.storageKey)));
+    results.forEach((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[admin] bulk image delete: row ${media[i]!.id} deleted but storage object could not be removed:`, r.reason);
+      }
+    });
+
+    return { deleted: media.length };
+  });
+
   // Replaces this exact image with a manually-cropped version -- the crop
   // itself happened client-side (a canvas, against either a freshly-picked
   // local file or this same image's own already-CORS-enabled Supabase
@@ -3068,6 +3098,30 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     return { id: mediaId, deleted: true };
+  });
+
+  // Same as the concepts bulk-delete above -- clears every image (any
+  // source) on every given scene id, meant for the bulk-selection bar.
+  fastify.post("/admin/scenes/media/bulk-delete", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+    const { ids } = bulkIdsSchema.parse(request.body);
+
+    const media = await db
+      .select({ id: sceneMedia.id, storageKey: sceneMedia.storageKey })
+      .from(sceneMedia)
+      .where(inArray(sceneMedia.sceneId, ids));
+    if (media.length === 0) return { deleted: 0 };
+
+    // scene_image_keywords cascades on the DB side, no manual cleanup needed.
+    await db.delete(sceneMedia).where(inArray(sceneMedia.sceneId, ids));
+
+    const results = await Promise.allSettled(media.map((m) => storageService.deleteImage(m.storageKey)));
+    results.forEach((r, i) => {
+      if (r.status === "rejected") {
+        console.error(`[admin] bulk image delete: row ${media[i]!.id} deleted but storage object could not be removed:`, r.reason);
+      }
+    });
+
+    return { deleted: media.length };
   });
 
   // See the identical concept-image crop route above for the reasoning --
