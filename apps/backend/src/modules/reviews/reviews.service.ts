@@ -393,8 +393,14 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
       .set({ reviewsCompleted: sql`${userStats.reviewsCompleted} + 1`, updatedAt: new Date() })
       .where(eq(userStats.userId, reviewerId));
 
-    // 9. Reviewer points, idempotent per (contribution, reviewer).
-    const reviewAward = await readConfigValue(tx, REVIEW_AWARD_CONFIG_KEY);
+    // 9. Reviewer points, idempotent per (contribution, reviewer). Fetched
+    // together with 10a's verified-bonus lookup below -- the two config
+    // reads are independent of each other, so there's no reason to make the
+    // second wait on the first finishing.
+    const [reviewAward, verifiedBonus] = await Promise.all([
+      readConfigValue(tx, REVIEW_AWARD_CONFIG_KEY),
+      data.decision === "valid" ? readConfigValue(tx, VERIFIED_BONUS_CONFIG_KEY[contribution.moduleType]) : Promise.resolve(0),
+    ]);
     await tx
       .insert(pointsTransactions)
       .values({
@@ -410,8 +416,7 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
     let contributorPointsAwarded = 0;
 
     if (data.decision === "valid") {
-      // 10a. Verified bonus for this module.
-      const verifiedBonus = await readConfigValue(tx, VERIFIED_BONUS_CONFIG_KEY[contribution.moduleType]);
+      // 10a. Verified bonus for this module -- already fetched above.
       contributorPointsAwarded = verifiedBonus;
 
       // 10b. Contributor points, idempotent per contribution.

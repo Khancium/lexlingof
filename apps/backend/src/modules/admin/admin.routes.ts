@@ -135,6 +135,12 @@ async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: s
       attribution: source?.attribution ?? null,
     })
     .returning();
+
+  // The categories cache's visibleConceptCount is derived from "does this
+  // concept have at least one image" -- only the concept's *first* image
+  // flips that, so only invalidate then, not on every subsequent upload.
+  if (isPrimary) invalidateCategoriesCache();
+
   return media;
 }
 
@@ -1891,7 +1897,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     for (const target of targets) {
       const audio = audioById.get(target.audioFileId);
       if (!audio) continue;
-      const stream = await storageService.getAudioObjectStream(audio.storageKey);
+      // One missing/corrupted R2 object shouldn't abort the entire zip for
+      // the whole selection -- skip it and keep going, same graceful-
+      // degradation approach this file already applies to every other
+      // storage failure (a delete that already committed, an orphaned file
+      // left behind, etc.).
+      let stream: Awaited<ReturnType<typeof storageService.getAudioObjectStream>>;
+      try {
+        stream = await storageService.getAudioObjectStream(audio.storageKey);
+      } catch (err) {
+        console.error(`[admin] bulk-download-zip: skipping audio ${audio.id} (storage object unavailable):`, err);
+        continue;
+      }
       const safeName = `${target.moduleType}_${target.contributorDisplayName}_${target.contributionId.slice(0, 8)}.${audio.format}`.replace(
         /[^a-zA-Z0-9_.-]/g,
         "_",
@@ -2559,6 +2576,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           .limit(1);
         if (next) {
           await db.update(conceptMedia).set({ isPrimary: true }).where(eq(conceptMedia.id, next.id));
+        } else {
+          // No survivor -- this concept just went from "has an image" to
+          // "has none", which is exactly what the categories cache's
+          // visibleConceptCount tracks.
+          invalidateCategoriesCache();
         }
       }
 
@@ -2591,6 +2613,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (media.length === 0) return { deleted: 0 };
 
     await db.delete(conceptMedia).where(inArray(conceptMedia.conceptId, ids));
+    // Unconditional rather than checking which concepts actually hit zero
+    // images -- this is a rare bulk admin action, so the cost of an
+    // occasionally-unnecessary cache clear is negligible next to the
+    // complexity of figuring out exactly which of `ids` now has none.
+    invalidateCategoriesCache();
 
     // DB rows are gone either way -- a storage failure here is logged, not
     // thrown, same "delete already succeeded, an orphaned file is a much
@@ -4032,43 +4059,72 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { id, autoApproveVolunteer: enabled };
   });
 
-  // A human-readable label for a pending change, resolved from its payload
-  // -- so the review panel can show "River (Nature)" instead of a bare
-  // targetType + a JSON blob. Best-effort: a delete's payload only has an
-  // id, so this looks the current row up; if that row is already gone
-  // (deleted some other way in the meantime) this falls back to the id.
-  async function describePendingChange(row: typeof pendingChanges.$inferSelect): Promise<string> {
-    const payload = row.payload as Record<string, unknown>;
-    if (row.action === "create") {
-      switch (row.targetType) {
-        case "category":
-          return String(payload.nameEnglish ?? "(category)");
-        case "concept":
-          return String(payload.labelEnglish ?? "(concept)");
-        case "scene":
-          return String(payload.title ?? "(scene)");
-        case "sentence":
-          return String(payload.englishText ?? "(sentence)");
-        case "concept_media":
-        case "scene_media":
-          return "(image)";
+  // Human-readable labels for a batch of pending changes, resolved from
+  // their payloads -- so the review panel can show "River (Nature)" instead
+  // of a bare targetType + a JSON blob. "create" rows resolve entirely from
+  // their own payload (no query needed); "delete" rows only carry `{ id }`,
+  // so those need the current row's label -- batched here with one
+  // inArray() lookup per targetType instead of one query per row, since
+  // this runs on every load of the approvals list and a volunteer's full
+  // activity panel. Best-effort: if a row is already gone (deleted some
+  // other way in the meantime), its label falls back to the bare id.
+  async function describePendingChanges(rows: (typeof pendingChanges.$inferSelect)[]): Promise<Map<string, string>> {
+    const labels = new Map<string, string>();
+    const deleteIdsByType: Record<"concept" | "scene" | "sentence", string[]> = { concept: [], scene: [], sentence: [] };
+
+    for (const row of rows) {
+      const payload = row.payload as Record<string, unknown>;
+      if (row.action === "create") {
+        switch (row.targetType) {
+          case "category":
+            labels.set(row.id, String(payload.nameEnglish ?? "(category)"));
+            break;
+          case "concept":
+            labels.set(row.id, String(payload.labelEnglish ?? "(concept)"));
+            break;
+          case "scene":
+            labels.set(row.id, String(payload.title ?? "(scene)"));
+            break;
+          case "sentence":
+            labels.set(row.id, String(payload.englishText ?? "(sentence)"));
+            break;
+          case "concept_media":
+          case "scene_media":
+            labels.set(row.id, "(image)");
+            break;
+        }
+        continue;
+      }
+      // Delete: payload is just { id } -- queued for a batched lookup below.
+      if (row.targetType === "concept" || row.targetType === "scene" || row.targetType === "sentence") {
+        deleteIdsByType[row.targetType].push(String(payload.id ?? ""));
       }
     }
-    // Delete: payload is just { id } -- look up the current label.
-    const targetId = String(payload.id ?? "");
-    if (row.targetType === "concept") {
-      const [c] = await db.select({ labelEnglish: concepts.labelEnglish }).from(concepts).where(eq(concepts.id, targetId)).limit(1);
-      return c ? `Delete: ${c.labelEnglish}` : `Delete: ${targetId}`;
+
+    const [conceptLabels, sceneLabels, sentenceLabels] = await Promise.all([
+      deleteIdsByType.concept.length
+        ? db.select({ id: concepts.id, label: concepts.labelEnglish }).from(concepts).where(inArray(concepts.id, deleteIdsByType.concept))
+        : [],
+      deleteIdsByType.scene.length
+        ? db.select({ id: scenes.id, label: scenes.title }).from(scenes).where(inArray(scenes.id, deleteIdsByType.scene))
+        : [],
+      deleteIdsByType.sentence.length
+        ? db
+            .select({ id: sentences.id, label: sentences.englishText })
+            .from(sentences)
+            .where(inArray(sentences.id, deleteIdsByType.sentence))
+        : [],
+    ]);
+    const labelById = new Map([...conceptLabels, ...sceneLabels, ...sentenceLabels].map((r) => [r.id, r.label]));
+
+    for (const row of rows) {
+      if (labels.has(row.id)) continue; // already resolved as a "create" above
+      const targetId = String((row.payload as Record<string, unknown>).id ?? "");
+      const label = labelById.get(targetId);
+      labels.set(row.id, label ? `Delete: ${label}` : `Delete: ${targetId}`);
     }
-    if (row.targetType === "scene") {
-      const [s] = await db.select({ title: scenes.title }).from(scenes).where(eq(scenes.id, targetId)).limit(1);
-      return s ? `Delete: ${s.title}` : `Delete: ${targetId}`;
-    }
-    if (row.targetType === "sentence") {
-      const [s] = await db.select({ englishText: sentences.englishText }).from(sentences).where(eq(sentences.id, targetId)).limit(1);
-      return s ? `Delete: ${s.englishText}` : `Delete: ${targetId}`;
-    }
-    return targetId;
+
+    return labels;
   }
 
   // Every pending change for one volunteer (or, without volunteerId, across
@@ -4078,7 +4134,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.get("/admin/pending-changes", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
     const query = pendingChangesQuerySchema.parse(request.query);
     const rows = await listPendingChanges(query);
-    const items = await Promise.all(rows.map(async (row) => ({ ...row, label: await describePendingChange(row) })));
+    const labels = await describePendingChanges(rows);
+    const items = rows.map((row) => ({ ...row, label: labels.get(row.id) ?? row.id }));
     return { items };
   });
 
@@ -4135,20 +4192,31 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // Bulk forms: each id is independent -- one already-reviewed or
   // now-invalid item doesn't block the rest of the batch, same convention
-  // as every other bulk-* admin route in this file.
+  // as every other bulk-* admin route in this file. Run in bounded batches
+  // (see PERMANENT_DELETE_CONCURRENCY above) rather than one id at a time --
+  // each approval is several round trips plus, for a create, a storage
+  // upload, so a fully sequential loop over a large selection would be just
+  // as slow as the bulk-permanent-delete path already fixed for the same
+  // reason.
   fastify.post("/admin/pending-changes/bulk-approve", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
     const { ids } = bulkPendingIdsSchema.parse(request.body);
     const results: { id: string; status: "approved" | "error"; message?: string }[] = [];
 
-    for (const id of ids) {
-      try {
-        const row = await requirePendingRow(id);
-        const resultResourceId = await applyPendingChange(row);
-        await markApproved(id, request.user!.id, resultResourceId);
-        results.push({ id, status: "approved" });
-      } catch (err) {
-        results.push({ id, status: "error", message: err instanceof Error ? err.message : "Failed" });
-      }
+    for (let i = 0; i < ids.length; i += PERMANENT_DELETE_CONCURRENCY) {
+      const batch = ids.slice(i, i + PERMANENT_DELETE_CONCURRENCY);
+      const outcomes = await Promise.allSettled(
+        batch.map(async (id) => {
+          const row = await requirePendingRow(id);
+          const resultResourceId = await applyPendingChange(row);
+          await markApproved(id, request.user!.id, resultResourceId);
+          return id;
+        }),
+      );
+      outcomes.forEach((outcome, j) => {
+        const id = batch[j]!;
+        if (outcome.status === "fulfilled") results.push({ id, status: "approved" });
+        else results.push({ id, status: "error", message: outcome.reason instanceof Error ? outcome.reason.message : "Failed" });
+      });
     }
 
     await writeAuditLogs(
@@ -4171,14 +4239,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { reason } = rejectPendingChangeSchema.parse(request.body);
     const results: { id: string; status: "rejected" | "error"; message?: string }[] = [];
 
-    for (const id of ids) {
-      try {
-        await requirePendingRow(id);
-        await markRejected(id, request.user!.id, reason);
-        results.push({ id, status: "rejected" });
-      } catch (err) {
-        results.push({ id, status: "error", message: err instanceof Error ? err.message : "Failed" });
-      }
+    for (let i = 0; i < ids.length; i += PERMANENT_DELETE_CONCURRENCY) {
+      const batch = ids.slice(i, i + PERMANENT_DELETE_CONCURRENCY);
+      const outcomes = await Promise.allSettled(
+        batch.map(async (id) => {
+          await requirePendingRow(id);
+          await markRejected(id, request.user!.id, reason);
+          return id;
+        }),
+      );
+      outcomes.forEach((outcome, j) => {
+        const id = batch[j]!;
+        if (outcome.status === "fulfilled") results.push({ id, status: "rejected" });
+        else results.push({ id, status: "error", message: outcome.reason instanceof Error ? outcome.reason.message : "Failed" });
+      });
     }
 
     await writeAuditLogs(
@@ -4213,7 +4287,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       db.select().from(auditLogs).where(eq(auditLogs.actorId, id)).orderBy(desc(auditLogs.createdAt)).limit(200),
     ]);
 
-    const pendingWithLabels = await Promise.all(pendingRows.map(async (row) => ({ ...row, label: await describePendingChange(row) })));
+    const labels = await describePendingChanges(pendingRows);
+    const pendingWithLabels = pendingRows.map((row) => ({ ...row, label: labels.get(row.id) ?? row.id }));
 
     return { pendingChanges: pendingWithLabels, auditLog: auditRows };
   });

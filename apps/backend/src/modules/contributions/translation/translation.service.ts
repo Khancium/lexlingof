@@ -502,7 +502,14 @@ async function overrideTranslation(
   });
 
   if (oldAudio) {
-    await storageService.deleteAudioFile(oldAudio.storageKey);
+    // Best-effort, same reasoning as the identical override path in
+    // word.service.ts -- the DB write already committed, so a storage
+    // failure here must not 500 a retake that otherwise succeeded.
+    try {
+      await storageService.deleteAudioFile(oldAudio.storageKey);
+    } catch (err) {
+      console.error(`[translation] translation ${existing.id} overridden but old storage object could not be removed:`, err);
+    }
   }
 
   return { contributionId: existing.contributionId, translationId: existing.id, pointsAwarded: 0, newLevel: userLevel };

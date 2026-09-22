@@ -232,6 +232,13 @@
       "when": 1790064858848,
       "tag": "0032_chilly_grim_reaper",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1790089353502,
+      "tag": "0033_secret_giant_man",
+      "breakpoints": true
     }
   ]
 }

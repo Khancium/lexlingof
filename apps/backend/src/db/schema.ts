@@ -184,6 +184,11 @@ export const users = pgTable(
     uniqueIndex("uq_users_email_active")
       .on(t.email)
       .where(sql`${t.deletedAt} is null`),
+    // The admin Users list filters on role and deletedAt (excluding soft-
+    // deleted accounts) and defaults to ORDER BY created_at DESC -- none of
+    // that had index support before.
+    index("ix_users_deleted_at_created_at").on(t.deletedAt, t.createdAt),
+    index("ix_users_role").on(t.role),
   ],
 );
 
@@ -640,7 +645,14 @@ export const pendingSubmissions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
-  (t) => [index("ix_pending_submissions_status").on(t.status), index("ix_pending_submissions_user").on(t.userId)],
+  (t) => [
+    index("ix_pending_submissions_status").on(t.status),
+    index("ix_pending_submissions_user").on(t.userId),
+    // GET /contributions/buffer/mine filters on userId and status together --
+    // the single-column indexes above can each be used alone but not both at
+    // once as efficiently as one composite covering the pair.
+    index("ix_pending_submissions_user_status").on(t.userId, t.status),
+  ],
 );
 
 /* -------------------------------------------------------------------------- */
@@ -1497,6 +1509,10 @@ export const contributorDemographics = pgTable(
     // the leading column of the composite above cannot serve.
     index("ix_contributor_demographics_city").on(t.city),
     index("ix_contributor_demographics_village").on(t.villageId),
+    // Also filtered directly (independent of tribe/city) by the admin Users
+    // page's sub-tribe/quarter filters.
+    index("ix_contributor_demographics_sub_tribe").on(t.subTribeId),
+    index("ix_contributor_demographics_quarter").on(t.quarterId),
   ],
 );
 

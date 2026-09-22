@@ -260,7 +260,15 @@ class AuthService {
 
     const frontendUrl = process.env.FRONTEND_URL || "http://localhost:3000";
     const resetUrl = `${frontendUrl}/reset-password?token=${rawToken}`;
-    await sendPasswordResetEmail(user.email, resetUrl);
+    // Best-effort -- an SMTP failure here must never surface as an error
+    // response, or it becomes exactly the email-enumeration side channel
+    // the comment above says this function must not have: a request for a
+    // real email would 500 while one for a nonexistent email still 200s.
+    try {
+      await sendPasswordResetEmail(user.email, resetUrl);
+    } catch (err) {
+      console.error("[auth] failed to send password reset email:", err);
+    }
   }
 
   async resetPassword(token: string, newPassword: string): Promise<void> {

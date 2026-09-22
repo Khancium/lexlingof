@@ -307,7 +307,16 @@ async function overrideWordRecording(
   });
 
   if (oldAudio) {
-    await storageService.deleteAudioFile(oldAudio.storageKey);
+    // The DB write above already committed -- an R2 failure here is logged,
+    // not thrown, same "delete already succeeded, an orphaned file is a much
+    // smaller problem" reasoning used for every storage delete in
+    // admin.routes.ts. Throwing here would 500 a retake whose new recording
+    // was already saved successfully.
+    try {
+      await storageService.deleteAudioFile(oldAudio.storageKey);
+    } catch (err) {
+      console.error(`[word] recording ${existing.id} overridden but old storage object could not be removed:`, err);
+    }
   }
 
   return { contributionId: existing.contributionId, wordRecordingId: existing.id, pointsAwarded: 0, userLevel, currentStreak };

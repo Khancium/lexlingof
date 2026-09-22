@@ -55,81 +55,84 @@ const CORPUS_STATS_CACHE_TTL_MS = 60 * 60 * 1000;
 let corpusStatsCache: { data: Awaited<ReturnType<typeof loadCorpusStats>>; expiresAt: number } | null = null;
 
 async function loadCorpusStats() {
-  const totalActiveContributorsRows = await db
-    .select({ value: sql<number>`count(*)`.mapWith(Number) })
-    .from(users)
-    .where(and(eq(users.role, "contributor"), eq(users.isActive, true), isNull(users.deletedAt)));
+  // Every query below is independent of every other -- fired concurrently
+  // rather than one after another, since each is its own cross-region round
+  // trip and this only runs once an hour on a cache miss, but a miss would
+  // otherwise mean ~9 sequential round trips stacked on one request.
+  const [
+    totalActiveContributorsRows,
+    totalContributionsRows,
+    verifiedContributionsRows,
+    [wordMs],
+    [uploadMs],
+    [translationMs],
+    [sceneMs],
+    countByModule,
+    activeLanguagesRows,
+    activeDialectsRows,
+  ] = await Promise.all([
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(users)
+      .where(and(eq(users.role, "contributor"), eq(users.isActive, true), isNull(users.deletedAt))),
+    db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(contributions).where(isNull(contributions.deletedAt)),
+    db
+      .select({ value: sql<number>`count(*)`.mapWith(Number) })
+      .from(contributions)
+      .where(and(eq(contributions.status, "verified"), isNull(contributions.deletedAt))),
+    // Audio duration for verified contributions is split across four payload
+    // tables (each holding its own audio_file_id), so this sums each path
+    // separately rather than attempting one sparse multi-way join.
+    db
+      .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
+      .from(wordRecordings)
+      .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
+      .innerJoin(audioFiles, eq(audioFiles.id, wordRecordings.audioFileId))
+      .where(eq(contributions.status, "verified")),
+    db
+      .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
+      .from(audioUploads)
+      .innerJoin(contributions, eq(contributions.id, audioUploads.contributionId))
+      .innerJoin(audioFiles, eq(audioFiles.id, audioUploads.audioFileId))
+      .where(eq(contributions.status, "verified")),
+    db
+      .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
+      .from(translations)
+      .innerJoin(contributions, eq(contributions.id, translations.contributionId))
+      .innerJoin(audioFiles, eq(audioFiles.id, translations.audioFileId))
+      .where(eq(contributions.status, "verified")),
+    db
+      .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
+      .from(sceneContributions)
+      .innerJoin(contributions, eq(contributions.id, sceneContributions.contributionId))
+      .innerJoin(audioFiles, eq(audioFiles.id, sceneContributions.audioFileId))
+      .where(eq(contributions.status, "verified")),
+    db
+      .select({ moduleType: contributions.moduleType, value: sql<number>`count(*)`.mapWith(Number) })
+      .from(contributions)
+      .where(isNull(contributions.deletedAt))
+      .groupBy(contributions.moduleType),
+    db
+      .select({ value: sql<number>`count(distinct ${contributions.languageId})`.mapWith(Number) })
+      .from(contributions)
+      .where(isNull(contributions.deletedAt)),
+    db
+      .select({ value: sql<number>`count(distinct ${contributions.dialectId})`.mapWith(Number) })
+      .from(contributions)
+      .where(and(isNull(contributions.deletedAt), sql`${contributions.dialectId} is not null`)),
+  ]);
+
   const totalActiveContributors = totalActiveContributorsRows[0]?.value ?? 0;
-
-  const totalContributionsRows = await db
-    .select({ value: sql<number>`count(*)`.mapWith(Number) })
-    .from(contributions)
-    .where(isNull(contributions.deletedAt));
   const totalContributions = totalContributionsRows[0]?.value ?? 0;
-
-  const verifiedContributionsRows = await db
-    .select({ value: sql<number>`count(*)`.mapWith(Number) })
-    .from(contributions)
-    .where(and(eq(contributions.status, "verified"), isNull(contributions.deletedAt)));
   const verifiedContributions = verifiedContributionsRows[0]?.value ?? 0;
-
-  // Audio duration for verified contributions is split across four payload
-  // tables (each holding its own audio_file_id), so this sums each path
-  // separately rather than attempting one sparse multi-way join.
-  let audioMs = 0;
-  const [wordMs] = await db
-    .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
-    .from(wordRecordings)
-    .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
-    .innerJoin(audioFiles, eq(audioFiles.id, wordRecordings.audioFileId))
-    .where(eq(contributions.status, "verified"));
-  audioMs += wordMs?.value ?? 0;
-
-  const [uploadMs] = await db
-    .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
-    .from(audioUploads)
-    .innerJoin(contributions, eq(contributions.id, audioUploads.contributionId))
-    .innerJoin(audioFiles, eq(audioFiles.id, audioUploads.audioFileId))
-    .where(eq(contributions.status, "verified"));
-  audioMs += uploadMs?.value ?? 0;
-
-  const [translationMs] = await db
-    .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
-    .from(translations)
-    .innerJoin(contributions, eq(contributions.id, translations.contributionId))
-    .innerJoin(audioFiles, eq(audioFiles.id, translations.audioFileId))
-    .where(eq(contributions.status, "verified"));
-  audioMs += translationMs?.value ?? 0;
-
-  const [sceneMs] = await db
-    .select({ value: sql<number>`coalesce(sum(${audioFiles.durationMs}), 0)`.mapWith(Number) })
-    .from(sceneContributions)
-    .innerJoin(contributions, eq(contributions.id, sceneContributions.contributionId))
-    .innerJoin(audioFiles, eq(audioFiles.id, sceneContributions.audioFileId))
-    .where(eq(contributions.status, "verified"));
-  audioMs += sceneMs?.value ?? 0;
-
-  const countByModule = await db
-    .select({ moduleType: contributions.moduleType, value: sql<number>`count(*)`.mapWith(Number) })
-    .from(contributions)
-    .where(isNull(contributions.deletedAt))
-    .groupBy(contributions.moduleType);
+  const audioMs = (wordMs?.value ?? 0) + (uploadMs?.value ?? 0) + (translationMs?.value ?? 0) + (sceneMs?.value ?? 0);
 
   const countByModuleType = { WORD: 0, TRANSCRIPTION: 0, TRANSLATION: 0, SCENE: 0 };
   for (const row of countByModule) {
     countByModuleType[row.moduleType] = row.value;
   }
 
-  const activeLanguagesRows = await db
-    .select({ value: sql<number>`count(distinct ${contributions.languageId})`.mapWith(Number) })
-    .from(contributions)
-    .where(isNull(contributions.deletedAt));
   const activeLanguages = activeLanguagesRows[0]?.value ?? 0;
-
-  const activeDialectsRows = await db
-    .select({ value: sql<number>`count(distinct ${contributions.dialectId})`.mapWith(Number) })
-    .from(contributions)
-    .where(and(isNull(contributions.deletedAt), sql`${contributions.dialectId} is not null`));
   const activeDialects = activeDialectsRows[0]?.value ?? 0;
 
   return {

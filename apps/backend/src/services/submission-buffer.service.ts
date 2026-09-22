@@ -157,9 +157,13 @@ async function processPendingSubmissions(): Promise<void> {
       .set({ status: "processing", updatedAt: new Date() })
       .where(inArray(pendingSubmissions.id, rows.map((r) => r.id)));
 
-    for (const row of rows) {
-      await processOne(row);
-    }
+    // Rows in a batch are independent submissions (usually from different
+    // users) and processOne() fully catches and records its own failures
+    // (never rejects), so there's no reason to process this small batch one
+    // row at a time -- that multiplied queue-drain time by BATCH_SIZE for no
+    // benefit, each row already paying its own R2 upload + DB transaction
+    // cost regardless.
+    await Promise.all(rows.map((row) => processOne(row)));
   } finally {
     isProcessing = false;
   }
