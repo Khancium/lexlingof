@@ -240,11 +240,11 @@ function ScenePageInner() {
         <p className="text-red-600">{sceneError ?? "No scene selected"}</p>
       ) : (
         <>
-          <div className="card-duo relative h-80 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
+          <div className="card-duo relative h-52 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
             {scene.imageUrl ? (
               <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" />
             ) : (
-              <div className="flex h-80 w-full items-center justify-center text-5xl">🖼️</div>
+              <div className="flex h-52 w-full items-center justify-center text-5xl">🖼️</div>
             )}
             <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
               {scene.title}
@@ -255,22 +255,17 @@ function ScenePageInner() {
             <SuggestBetterImageButton itemLabel={scene.title} sceneId={scene.id} />
           </div>
 
-          <p className="text-center text-ink-muted">
-            Describe what you see in this image in your own language. Tell us what is happening. Take as much time as you
-            need.
+          <p className="text-center text-sm text-ink-muted">
+            Describe what you see in this image in your own language. Tell us what is happening.
           </p>
 
-          <div className="card-duo flex justify-center rounded-2xl bg-surface py-8 shadow-sm">
+          <div className="card-duo flex justify-center rounded-2xl bg-surface py-5 shadow-sm">
             <AudioRecorder
               key={scene.id}
               onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
               onError={(message) => setSubmitError(message)}
             />
           </div>
-
-          <p className="text-center text-sm text-ink-muted">
-            Base: 20 pts. Bonuses: longer description (60s+), today&apos;s daily scene, expert difficulty.
-          </p>
 
           {!languageId && !languageLoading ? (
             <p className="text-center text-red-600">Set your language in your profile before contributing.</p>

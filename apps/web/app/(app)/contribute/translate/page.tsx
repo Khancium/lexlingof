@@ -465,20 +465,19 @@ function TranslatePageInner() {
         <p className="text-red-600">{sentenceError ?? "No sentences available"}</p>
       ) : (
         <>
-          <div className="card-duo rounded-2xl bg-surface p-8 shadow-sm">
-            <p className="text-2xl font-bold text-ink" dir={textDirection(sentence.sourceLanguage)}>
+          <div className="card-duo rounded-2xl bg-surface p-5 shadow-sm">
+            <p className="text-xl font-bold text-ink" dir={textDirection(sentence.sourceLanguage)}>
               {sentence.englishText}
             </p>
           </div>
 
-          <div className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface py-8 shadow-sm">
+          <div className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface py-5 shadow-sm">
             <AudioRecorder
               key={sentence.id}
               maxDurationMs={MAX_DURATION_MS}
               onRecordingComplete={(file, durationMs, checksum) => updateDraft({ recording: { file, durationMs, checksum } })}
               onError={(message) => setSubmitError(message)}
             />
-            <p className="text-xs text-ink-muted">Record yourself reading your translation (up to 60s)</p>
           </div>
 
           <div className="overflow-hidden rounded-2xl bg-surface shadow-sm">
@@ -514,10 +513,6 @@ function TranslatePageInner() {
               </div>
             )}
           </div>
-
-          <p className="text-center text-sm text-ink-muted">
-            Base points, plus bonuses for romanization and IPA.
-          </p>
 
           {!languageId && !languageLoading ? (
             <p className="text-center text-red-600">Set your language in your profile before contributing.</p>

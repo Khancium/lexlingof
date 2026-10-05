@@ -336,23 +336,23 @@ function ConceptPageInner() {
             <p className="text-red-600">{conceptError ?? "Failed to load object"}</p>
           ) : (
             <>
-              <div className="card-duo rounded-2xl bg-surface p-8 text-center shadow-sm">
+              <div className="card-duo rounded-2xl bg-surface p-5 text-center shadow-sm">
                 {concept.media[0]?.publicUrl ? (
                   <Image
                     src={concept.media[0].publicUrl}
                     alt={concept.labelEnglish}
                     width={284}
                     height={160}
-                    className="mx-auto mb-4 h-40 w-[284px] rounded-lg object-cover"
+                    className="mx-auto mb-3 h-32 w-[227px] rounded-lg object-cover"
                   />
                 ) : (
-                  <div className="mx-auto mb-4 flex h-40 w-[284px] items-center justify-center rounded-lg bg-surface-card text-4xl">
+                  <div className="mx-auto mb-3 flex h-32 w-[227px] items-center justify-center rounded-lg bg-surface-card text-4xl">
                     🖼️
                   </div>
                 )}
-                <div className="text-3xl font-bold text-ink">{concept.labelEnglish}</div>
+                <div className="text-2xl font-bold text-ink">{concept.labelEnglish}</div>
                 <div className="mt-1 text-sm text-ink-muted">{concept.category.name}</div>
-                <div className="mt-2 flex justify-center">
+                <div className="mt-1 flex justify-center">
                   <SuggestBetterImageButton itemLabel={concept.labelEnglish} conceptId={concept.id} />
                 </div>
               </div>
@@ -384,14 +384,13 @@ function ConceptPageInner() {
                 </p>
               ) : null}
 
-              <div className="card-duo flex flex-col items-center justify-center gap-4 rounded-2xl bg-surface py-10 shadow-sm">
+              <div className="card-duo flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface py-6 shadow-sm">
                 <AudioRecorder
                   key={synonymIndex}
                   maxDurationMs={5000}
                   onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
                   onError={(message) => setSubmitError(message)}
                 />
-                <p className="text-sm text-ink-muted">Tap to record</p>
               </div>
 
               <div className="overflow-hidden rounded-2xl bg-surface shadow-sm">
@@ -426,8 +425,6 @@ function ConceptPageInner() {
                   </div>
                 )}
               </div>
-
-              <p className="text-center text-sm text-ink-muted">Base points awarded now, plus a bonus once verified.</p>
 
               {!languageId && !languageLoading ? (
                 <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
