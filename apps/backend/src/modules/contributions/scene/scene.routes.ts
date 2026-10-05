@@ -70,7 +70,8 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
 
   fastify.get("/:id", { preHandler: verifyToken }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
-    return getSceneById(id);
+    const canManage = await hasPermission(request.user!.role, "scenes.manage");
+    return getSceneById(id, canManage);
   });
 
   fastify.post("/:id/contributions", { preHandler: verifyToken }, async (request, reply) => {

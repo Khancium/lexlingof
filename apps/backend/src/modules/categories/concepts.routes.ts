@@ -110,8 +110,9 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
     return { items: rows, limit, offset, total: totalRow?.value ?? 0 };
   });
 
-  fastify.get("/concepts/:id", async (request) => {
+  fastify.get("/concepts/:id", { preHandler: verifyToken }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    const canManage = await hasPermission(request.user!.role, "concepts.manage");
 
     // These two don't depend on each other -- both only need `id`, which is
     // already known from the path param -- so they run in parallel instead
@@ -136,10 +137,14 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
       db.select().from(conceptMedia).where(eq(conceptMedia.conceptId, id)),
     ]);
 
-    // No admin path calls this route -- it's exclusively the public "open
-    // this exact concept" lookup -- so a hidden concept or one with no image
-    // is just as unreachable here as it is from the browse list.
-    if (!row || !row.isActive || row.deletedAt || media.length === 0) {
+    // Mirrors GET /concepts' own canManage bypass -- an admin/volunteer
+    // browsing the public contribute page can see an imageless concept in
+    // the tile grid (that list doesn't filter it out for them), so clicking
+    // into it must not 404 just because this lookup enforced the image
+    // requirement unconditionally. A hidden (isActive false) or deleted
+    // concept stays unreachable here for everyone, admin included -- this is
+    // the public contribute flow, not the admin table.
+    if (!row || !row.isActive || row.deletedAt || (!canManage && media.length === 0)) {
       throw new HttpError(404, "NOT_FOUND", "Concept not found");
     }
 

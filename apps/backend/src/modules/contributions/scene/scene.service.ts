@@ -188,7 +188,7 @@ export async function getRandomScene(excludeId?: string) {
   return scene;
 }
 
-export async function getSceneById(sceneId: string) {
+export async function getSceneById(sceneId: string, canManage: boolean) {
   const [scene] = await db
     .select(sceneSelection())
     .from(scenes)
@@ -196,11 +196,12 @@ export async function getSceneById(sceneId: string) {
     .where(and(eq(scenes.id, sceneId), eq(scenes.isActive, true), isNull(scenes.deletedAt)))
     .limit(1);
 
-  // No admin path calls this (see the module-level comment on scene_concepts
-  // above) -- it's exclusively the public "open this exact scene" lookup, so
-  // a hidden scene or one with no image is just as unreachable here as it is
-  // from the browse list.
-  if (!scene || !scene.imageUrl) {
+  // Mirrors GET /scenes' own canManage bypass -- an admin/volunteer can see
+  // an imageless scene in the public browse list (that list doesn't filter
+  // it out for them), so clicking into it must not 404 just because this
+  // lookup enforced the image requirement unconditionally. A hidden scene
+  // stays unreachable here for everyone, admin included.
+  if (!scene || (!canManage && !scene.imageUrl)) {
     throw new HttpError(404, "NOT_FOUND", "Scene not found");
   }
 
