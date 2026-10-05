@@ -292,11 +292,11 @@ function TranslatePageInner() {
 
   if (step === "groups") {
     return (
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className="mx-auto max-w-4xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <Link
             href="/contribute"
-            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
             <span className="sm:hidden">← Back</span>
             <span className="hidden sm:inline">← Back to Contribute</span>
@@ -379,11 +379,11 @@ function TranslatePageInner() {
 
   if (step === "group") {
     return (
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="mx-auto max-w-2xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <button
             onClick={() => setStep("groups")}
-            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
             ← Back to groups
           </button>
@@ -451,10 +451,10 @@ function TranslatePageInner() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-4">
       <button
         onClick={backFromRecord}
-        className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+        className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
       >
         ← Back to sentences
       </button>

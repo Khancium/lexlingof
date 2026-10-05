@@ -167,11 +167,11 @@ function ScenePageInner() {
 
   if (step === "browse") {
     return (
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className="mx-auto max-w-4xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <Link
             href="/contribute"
-            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
             <span className="sm:hidden">← Back</span>
             <span className="hidden sm:inline">← Back to Contribute</span>
@@ -226,10 +226,10 @@ function ScenePageInner() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-4">
       <button
         onClick={() => setStep("browse")}
-        className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+        className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
       >
         ← Back to scenes
       </button>
@@ -240,11 +240,13 @@ function ScenePageInner() {
         <p className="text-red-600">{sceneError ?? "No scene selected"}</p>
       ) : (
         <>
-          <div className="card-duo relative h-52 w-full overflow-hidden rounded-2xl bg-surface shadow-sm">
+          {/* Negative margin cancels the page shell's own px-4/sm:px-6 so
+             this reaches the true viewport edge on a phone. */}
+          <div className="relative -mx-4 h-64 overflow-hidden bg-surface sm:mx-0 sm:rounded-2xl">
             {scene.imageUrl ? (
-              <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" />
+              <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" priority />
             ) : (
-              <div className="flex h-52 w-full items-center justify-center text-5xl">🖼️</div>
+              <div className="flex h-64 w-full items-center justify-center text-5xl">🖼️</div>
             )}
             <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
               {scene.title}

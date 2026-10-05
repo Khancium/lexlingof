@@ -224,12 +224,12 @@ function ConceptPageInner() {
   const canSubmit = !!recording && recording !== lastSubmittedRecording && !!languageId && !isSubmitting;
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
         {step === "categories" ? (
           <Link
             href="/contribute"
-            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
             <span className="sm:hidden">← Back</span>
             <span className="hidden sm:inline">← Back to Contribute</span>
@@ -237,7 +237,7 @@ function ConceptPageInner() {
         ) : (
           <button
             onClick={() => (step === "record" ? setStep("concepts") : setStep("categories"))}
-            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-4 py-2 text-sm font-medium text-ink hover:bg-border"
+            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
             ← Back
           </button>
@@ -336,22 +336,28 @@ function ConceptPageInner() {
             <p className="text-red-600">{conceptError ?? "Failed to load object"}</p>
           ) : (
             <>
-              <div className="card-duo rounded-2xl bg-surface p-5 text-center shadow-sm">
+              {/* Negative margin cancels the page shell's own px-4/sm:px-6 so
+                 this reaches the true viewport edge on a phone -- the shell
+                 padding is still in effect for every other block on the
+                 page, just not this one. */}
+              <div className="-mx-4 sm:-mx-6">
                 {concept.media[0]?.publicUrl ? (
                   <Image
                     src={concept.media[0].publicUrl}
                     alt={concept.labelEnglish}
-                    width={284}
-                    height={160}
-                    className="mx-auto mb-3 h-32 w-[227px] rounded-lg object-cover"
+                    width={640}
+                    height={360}
+                    sizes="100vw"
+                    className="h-56 w-full object-cover sm:rounded-2xl"
+                    priority
                   />
                 ) : (
-                  <div className="mx-auto mb-3 flex h-32 w-[227px] items-center justify-center rounded-lg bg-surface-card text-4xl">
-                    🖼️
-                  </div>
+                  <div className="flex h-56 w-full items-center justify-center bg-surface-card text-5xl sm:rounded-2xl">🖼️</div>
                 )}
+              </div>
+              <div className="text-center">
                 <div className="text-2xl font-bold text-ink">{concept.labelEnglish}</div>
-                <div className="mt-1 text-sm text-ink-muted">{concept.category.name}</div>
+                <div className="text-sm text-ink-muted">{concept.category.name}</div>
                 <div className="mt-1 flex justify-center">
                   <SuggestBetterImageButton itemLabel={concept.labelEnglish} conceptId={concept.id} />
                 </div>
