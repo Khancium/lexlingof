@@ -17,6 +17,7 @@ import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
 import AudioRecorder from "@/components/audio-recorder";
 import { SuggestBetterImageButton } from "@/components/suggest-better-image-button";
+import { ImageCarousel } from "@/components/image-carousel";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "categories" | "concepts" | "record";
@@ -341,19 +342,7 @@ function ConceptPageInner() {
                  padding is still in effect for every other block on the
                  page, just not this one. */}
               <div className="-mx-4 sm:-mx-6">
-                {concept.media[0]?.publicUrl ? (
-                  <Image
-                    src={concept.media[0].publicUrl}
-                    alt={concept.labelEnglish}
-                    width={640}
-                    height={360}
-                    sizes="100vw"
-                    className="h-56 w-full object-cover sm:rounded-2xl"
-                    priority
-                  />
-                ) : (
-                  <div className="flex h-56 w-full items-center justify-center bg-surface-card text-5xl sm:rounded-2xl">🖼️</div>
-                )}
+                <ImageCarousel images={concept.media} alt={concept.labelEnglish} />
               </div>
               <div className="text-center">
                 <div className="text-2xl font-bold text-ink">{concept.labelEnglish}</div>

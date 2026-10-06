@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { and, eq, gte, ilike, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -134,7 +134,11 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
         .innerJoin(categories, eq(categories.id, concepts.categoryId))
         .where(eq(concepts.id, id))
         .limit(1),
-      db.select().from(conceptMedia).where(eq(conceptMedia.conceptId, id)),
+      db
+        .select()
+        .from(conceptMedia)
+        .where(eq(conceptMedia.conceptId, id))
+        .orderBy(desc(conceptMedia.isPrimary), asc(conceptMedia.createdAt)),
     ]);
 
     // Mirrors GET /concepts' own canManage bypass -- an admin/volunteer
