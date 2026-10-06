@@ -156,8 +156,11 @@ export default function AdminScenesPage() {
   const [isBulkHiding, setIsBulkHiding] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
-  async function load() {
-    setLoading(true);
+  // `silent` skips the loading-state swap for a refresh that follows an
+  // action already taken on this page -- see the identical note on the
+  // concepts admin page's load().
+  async function load(opts: { silent?: boolean } = {}) {
+    if (!opts.silent) setLoading(true);
     setLoadError(null);
     try {
       // An end date is inclusive of the whole day -- see the identical note
@@ -284,7 +287,7 @@ export default function AdminScenesPage() {
       setNewKeywordsText("");
       setNewConceptIds(new Set());
       setNewConceptFilter("");
-      await load();
+      await load({ silent: true });
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create scene");
     } finally {
@@ -453,7 +456,7 @@ export default function AdminScenesPage() {
     try {
       const result = await api.admin.deleteScene(scene.id);
       if ("pending" in result) alert(result.message);
-      await load();
+      await load({ silent: true });
     } finally {
       setDeletingId(null);
     }
@@ -470,13 +473,13 @@ export default function AdminScenesPage() {
   async function handleBulkDelete() {
     await api.admin.bulkDeleteScenes([...selected]);
     setSelected(new Set());
-    await load();
+    await load({ silent: true });
   }
 
   async function handleBulkPermanentDelete() {
     const result = await api.admin.bulkPermanentlyDeleteScenes([...selected]);
     setSelected(new Set());
-    await load();
+    await load({ silent: true });
     return result;
   }
 
@@ -487,7 +490,7 @@ export default function AdminScenesPage() {
       await api.admin.bulkEditScenes({ ids: [...selected], difficulty: bulkDifficulty });
       setSelected(new Set());
       setBulkDifficulty("");
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkEditing(false);
     }
@@ -503,7 +506,7 @@ export default function AdminScenesPage() {
       const result = await api.admin.bulkDeleteSceneMedia([...selected]);
       setBulkActionInfo(`Removed ${result.deleted} image(s).`);
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkDeletingImages(false);
     }
@@ -516,7 +519,7 @@ export default function AdminScenesPage() {
     try {
       await api.admin.bulkEditScenes({ ids: [...selected], isActive: false });
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkHiding(false);
     }
@@ -527,7 +530,7 @@ export default function AdminScenesPage() {
     try {
       await api.admin.bulkEditScenes({ ids: [...selected], isActive: true });
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkHiding(false);
     }
@@ -537,7 +540,7 @@ export default function AdminScenesPage() {
     setTogglingActiveId(scene.id);
     try {
       await api.admin.updateScene(scene.id, { isActive: !scene.isActive });
-      await load();
+      await load({ silent: true });
     } finally {
       setTogglingActiveId(null);
     }
@@ -723,13 +726,13 @@ export default function AdminScenesPage() {
          explicit scoping decision, so none of these widgets render for them. */}
       {!isVolunteer ? (
         <>
-          <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={load} />
+          <AdminBulkUpload label="Bulk Upload Scenes" onUpload={(file) => api.admin.bulkUploadScenes(file)} onDone={() => load({ silent: true })} />
 
           <AdminBulkTextCreate
             label="Bulk Add Scenes by Text"
             placeholder={"Market Day\nRiver Journey\nSchool Morning"}
             onSubmit={(titles) => api.admin.bulkCreateScenesText(titles)}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminBulkImageUrlUpload
@@ -737,13 +740,13 @@ export default function AdminScenesPage() {
             matchItems={allScenes}
             matchLabel={(s) => s.title}
             onSubmit={(pairs) => api.admin.bulkAddSceneMediaUrl(pairs.map((p) => ({ sceneId: p.id, imageUrl: p.imageUrl })))}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminOpenverseAutofill
             label="Auto-fill Missing Scene Images from Openverse"
             onSubmit={() => api.admin.bulkOpenverseAutofillScenes()}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminBulkBar
@@ -985,13 +988,13 @@ export default function AdminScenesPage() {
                     <AdminPermanentDeleteButton
                       itemLabel={scene.title}
                       onDelete={() => api.admin.permanentlyDeleteScene(scene.id)}
-                      onDone={load}
+                      onDone={() => load({ silent: true })}
                     />
                   ) : null}
                   <AdminUndoButton
                     resourceType="scene"
                     identifier={scene.id}
-                    onUndone={load}
+                    onUndone={() => load({ silent: true })}
                     className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
                   />
                 </div>
@@ -1165,7 +1168,7 @@ export default function AdminScenesPage() {
                     getMedia={api.admin.getSceneMedia}
                     deleteMedia={api.admin.deleteSceneMedia}
                     cropMedia={api.admin.cropSceneMedia}
-                    onChanged={load}
+                    onChanged={() => load({ silent: true })}
                   />
                 </div>
               ) : null}

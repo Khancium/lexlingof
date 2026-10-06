@@ -82,8 +82,15 @@ export default function AdminConceptsPage() {
   const [isBulkDeletingImages, setIsBulkDeletingImages] = useState(false);
   const [isBulkHiding, setIsBulkHiding] = useState(false);
 
-  async function load() {
-    setLoading(true);
+  // `silent` skips the loading-state swap -- used for refreshes that follow
+  // an action already taken on this same page (delete, create, toggle, an
+  // image change) so the table stays visible and in place the whole time
+  // instead of collapsing to "Loading..." and back, which was producing a
+  // jarring scroll-to-top-and-back on every single action. The initial
+  // mount and filter/pagination changes still show the loading state, since
+  // there's no existing table content worth keeping on screen for those.
+  async function load(opts: { silent?: boolean } = {}) {
+    if (!opts.silent) setLoading(true);
     setLoadError(null);
     try {
       // An end date is inclusive of the whole day, not just 00:00 -- picking
@@ -151,7 +158,7 @@ export default function AdminConceptsPage() {
         // awaiting admin approval, so there's no new row to reload for.
         setCreateInfo(result.message);
       } else {
-        await load();
+        await load({ silent: true });
       }
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create concept");
@@ -235,7 +242,7 @@ export default function AdminConceptsPage() {
     try {
       const result = await api.admin.deleteConcept(concept.id);
       if ("pending" in result) alert(result.message);
-      await load();
+      await load({ silent: true });
     } finally {
       setDeletingId(null);
     }
@@ -249,7 +256,7 @@ export default function AdminConceptsPage() {
     setTogglingActiveId(concept.id);
     try {
       await api.admin.updateConcept(concept.id, { isActive: !concept.isActive });
-      await load();
+      await load({ silent: true });
     } finally {
       setTogglingActiveId(null);
     }
@@ -271,7 +278,7 @@ export default function AdminConceptsPage() {
         description: editDescription.trim() || undefined,
       });
       setEditingId(null);
-      await load();
+      await load({ silent: true });
     } finally {
       setIsSaving(false);
     }
@@ -293,13 +300,13 @@ export default function AdminConceptsPage() {
   async function handleBulkDelete() {
     await api.admin.bulkDeleteConcepts([...selected]);
     setSelected(new Set());
-    await load();
+    await load({ silent: true });
   }
 
   async function handleBulkPermanentDelete() {
     const result = await api.admin.bulkPermanentlyDeleteConcepts([...selected]);
     setSelected(new Set());
-    await load();
+    await load({ silent: true });
     return result;
   }
 
@@ -310,7 +317,7 @@ export default function AdminConceptsPage() {
       await api.admin.bulkEditConcepts({ ids: [...selected], categoryId: bulkCategoryId });
       setSelected(new Set());
       setBulkCategoryId("");
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkEditing(false);
     }
@@ -330,7 +337,7 @@ export default function AdminConceptsPage() {
         `Added ${result.created} image(s).` + (result.errors.length > 0 ? ` ${result.errors.length} failed.` : ""),
       );
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkAutofilling(false);
     }
@@ -348,7 +355,7 @@ export default function AdminConceptsPage() {
       const result = await api.admin.bulkDeleteConceptMedia([...selected]);
       setBulkAutofillInfo(`Removed ${result.deleted} image(s).`);
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkDeletingImages(false);
     }
@@ -362,7 +369,7 @@ export default function AdminConceptsPage() {
     try {
       await api.admin.bulkEditConcepts({ ids: [...selected], isActive: false });
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkHiding(false);
     }
@@ -373,7 +380,7 @@ export default function AdminConceptsPage() {
     try {
       await api.admin.bulkEditConcepts({ ids: [...selected], isActive: true });
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkHiding(false);
     }
@@ -433,29 +440,29 @@ export default function AdminConceptsPage() {
             label="Bulk Add Categories by Text"
             placeholder={"Nature\nTransport\nEmotions"}
             onSubmit={(names) => api.admin.bulkCreateCategoriesText(names)}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminBulkUpload
             label="Bulk Upload Concepts"
             onUpload={(file) => api.admin.bulkUploadConcepts(file)}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
-          <AdminBulkConceptTextCreate onSubmit={(items) => api.admin.bulkCreateConceptsText(items)} onDone={load} />
+          <AdminBulkConceptTextCreate onSubmit={(items) => api.admin.bulkCreateConceptsText(items)} onDone={() => load({ silent: true })} />
 
           <AdminBulkImageUrlUpload
             label="Bulk Add Concept Images by URL"
             matchItems={allConcepts}
             matchLabel={(c) => c.labelEnglish}
             onSubmit={(pairs) => api.admin.bulkAddConceptMediaUrl(pairs.map((p) => ({ conceptId: p.id, imageUrl: p.imageUrl })))}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminOpenverseAutofill
             label="Auto-fill Missing Concept Images from Openverse"
             onSubmit={() => api.admin.bulkOpenverseAutofillConcepts()}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminBulkBar
@@ -802,13 +809,13 @@ export default function AdminConceptsPage() {
                           <AdminPermanentDeleteButton
                             itemLabel={concept.labelEnglish}
                             onDelete={() => api.admin.permanentlyDeleteConcept(concept.id)}
-                            onDone={load}
+                            onDone={() => load({ silent: true })}
                           />
                         ) : null}
                         <AdminUndoButton
                           resourceType="concept"
                           identifier={concept.id}
-                          onUndone={load}
+                          onUndone={() => load({ silent: true })}
                           className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
                         />
                       </div>
@@ -826,7 +833,7 @@ export default function AdminConceptsPage() {
                         getMedia={api.admin.getConceptMedia}
                         deleteMedia={api.admin.deleteConceptMedia}
                         cropMedia={api.admin.cropConceptMedia}
-                        onChanged={load}
+                        onChanged={() => load({ silent: true })}
                       />
                     </td>
                   </tr>

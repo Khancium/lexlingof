@@ -53,8 +53,11 @@ export default function AdminSentencesPage() {
   const [isBulkHiding, setIsBulkHiding] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
-  async function load() {
-    setLoading(true);
+  // `silent` skips the loading-state swap for a refresh that follows an
+  // action already taken on this page -- see the identical note on the
+  // concepts admin page's load().
+  async function load(opts: { silent?: boolean } = {}) {
+    if (!opts.silent) setLoading(true);
     setLoadError(null);
     try {
       // An end date is inclusive of the whole day -- see the identical note
@@ -107,7 +110,7 @@ export default function AdminSentencesPage() {
       if ("pending" in result) {
         setCreateInfo(result.message);
       } else {
-        await load();
+        await load({ silent: true });
       }
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : "Failed to create sentence");
@@ -122,7 +125,7 @@ export default function AdminSentencesPage() {
     try {
       const result = await api.admin.deleteSentence(sentence.id);
       if ("pending" in result) alert(result.message);
-      await load();
+      await load({ silent: true });
     } finally {
       setDeletingId(null);
     }
@@ -149,13 +152,13 @@ export default function AdminSentencesPage() {
   async function handleBulkDelete() {
     await api.admin.bulkDeleteSentences([...selected]);
     setSelected(new Set());
-    await load();
+    await load({ silent: true });
   }
 
   async function handleBulkPermanentDelete() {
     const result = await api.admin.bulkPermanentlyDeleteSentences([...selected]);
     setSelected(new Set());
-    await load();
+    await load({ silent: true });
     return result;
   }
 
@@ -166,7 +169,7 @@ export default function AdminSentencesPage() {
       await api.admin.bulkEditSentences({ ids: [...selected], categoryId: bulkCategoryId });
       setSelected(new Set());
       setBulkCategoryId("");
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkEditing(false);
     }
@@ -179,7 +182,7 @@ export default function AdminSentencesPage() {
     setTogglingActiveId(sentence.id);
     try {
       await api.admin.bulkEditSentences({ ids: [sentence.id], isActive: !sentence.isActive });
-      await load();
+      await load({ silent: true });
     } finally {
       setTogglingActiveId(null);
     }
@@ -190,7 +193,7 @@ export default function AdminSentencesPage() {
     try {
       await api.admin.bulkEditSentences({ ids: [...selected], isActive: false });
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkHiding(false);
     }
@@ -201,7 +204,7 @@ export default function AdminSentencesPage() {
     try {
       await api.admin.bulkEditSentences({ ids: [...selected], isActive: true });
       setSelected(new Set());
-      await load();
+      await load({ silent: true });
     } finally {
       setIsBulkHiding(false);
     }
@@ -283,7 +286,7 @@ export default function AdminSentencesPage() {
           <AdminBulkUpload
             label="Bulk Upload Sentences"
             onUpload={(file) => api.admin.bulkUploadSentences(file, bulkSourceLanguage)}
-            onDone={load}
+            onDone={() => load({ silent: true })}
           />
 
           <AdminBulkBar
@@ -474,13 +477,13 @@ export default function AdminSentencesPage() {
                         <AdminPermanentDeleteButton
                           itemLabel={sentence.englishText}
                           onDelete={() => api.admin.permanentlyDeleteSentence(sentence.id)}
-                          onDone={load}
+                          onDone={() => load({ silent: true })}
                         />
                       ) : null}
                       <AdminUndoButton
                         resourceType="sentence"
                         identifier={sentence.id}
-                        onUndone={load}
+                        onUndone={() => load({ silent: true })}
                         className="text-xs font-semibold text-ink-muted hover:text-ink hover:underline"
                       />
                     </div>
