@@ -344,6 +344,24 @@ function ConceptPageInner() {
               <div className="-mx-4 sm:-mx-6">
                 <ImageCarousel images={concept.media} alt={concept.labelEnglish} />
               </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => goToAdjacentConcept(-1)}
+                  disabled={conceptIndex <= 0}
+                  className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
+                >
+                  ← Previous
+                </button>
+                <button
+                  onClick={() => goToAdjacentConcept(1)}
+                  disabled={conceptIndex === -1 || conceptIndex >= concepts.length - 1}
+                  className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
+                >
+                  Next →
+                </button>
+              </div>
+
               <div className="text-center">
                 <div className="text-2xl font-bold text-ink">{concept.labelEnglish}</div>
                 <div className="text-sm text-ink-muted">{concept.category.name}</div>
@@ -428,23 +446,6 @@ function ConceptPageInner() {
                 <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
               ) : null}
               {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => goToAdjacentConcept(-1)}
-                  disabled={conceptIndex <= 0}
-                  className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
-                >
-                  ← Previous
-                </button>
-                <button
-                  onClick={() => goToAdjacentConcept(1)}
-                  disabled={conceptIndex === -1 || conceptIndex >= concepts.length - 1}
-                  className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
-                >
-                  Next →
-                </button>
-              </div>
 
               <button
                 onClick={handleSubmit}

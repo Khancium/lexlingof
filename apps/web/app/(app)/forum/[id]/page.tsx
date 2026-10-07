@@ -117,23 +117,33 @@ export default function ForumPostPage() {
             <p className="whitespace-pre-wrap text-ink">{post.body}</p>
 
             {post.concept ? (
-              <div className="flex items-center gap-2 rounded-lg bg-surface-card px-3 py-2 text-sm">
+              <div className="flex items-center gap-3 rounded-xl bg-surface-card p-3 text-sm">
                 {post.concept.imageUrl ? (
-                  <Image src={post.concept.imageUrl} alt="" width={32} height={32} className="h-8 w-8 rounded object-cover" />
+                  <Image
+                    src={post.concept.imageUrl}
+                    alt=""
+                    width={112}
+                    height={112}
+                    className="h-24 w-24 shrink-0 rounded-lg object-cover"
+                  />
                 ) : null}
-                <span className="text-ink-muted">Discussing: </span>
-                <span className="font-medium text-ink">{post.concept.labelEnglish}</span>
+                <div>
+                  <span className="text-ink-muted">Discussing: </span>
+                  <span className="text-lg font-semibold text-ink">{post.concept.labelEnglish}</span>
+                </div>
               </div>
             ) : null}
             {post.sentence ? (
-              <div className="rounded-lg bg-surface-card px-3 py-2 text-sm">
+              <div className="rounded-xl bg-surface-card p-3 text-sm">
                 <span className="text-ink-muted">Discussing: </span>
-                <span className="font-medium text-ink">&quot;{post.sentence.englishText}&quot;</span>
+                <span className="text-lg font-semibold text-ink">&quot;{post.sentence.englishText}&quot;</span>
               </div>
             ) : null}
 
             {post.imageUrl ? (
-              <Image src={post.imageUrl} alt="" width={700} height={380} sizes="100vw" className="max-h-96 w-full rounded-xl object-cover" />
+              <div className="flex max-h-[32rem] w-full items-center justify-center overflow-hidden rounded-xl bg-surface-card">
+                <Image src={post.imageUrl} alt="" width={700} height={450} sizes="100vw" className="max-h-[32rem] w-full object-contain" />
+              </div>
             ) : null}
             {post.poll ? <ForumPollView postId={post.id} poll={post.poll} onVoted={load} /> : null}
 

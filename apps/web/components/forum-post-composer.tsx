@@ -12,20 +12,20 @@ export type ForumAnchor =
 function AnchorPreview({ anchor }: { anchor: ForumAnchor }) {
   if (anchor.type === "concept") {
     return (
-      <div className="flex items-center gap-2 rounded-lg bg-surface-card px-3 py-2 text-sm">
+      <div className="flex items-center gap-3 rounded-xl bg-surface-card p-3 text-sm">
         {anchor.concept.imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- tiny transient thumbnail, not worth next/image's overhead here
-          <img src={anchor.concept.imageUrl} alt="" className="h-8 w-8 rounded object-cover" />
+          // eslint-disable-next-line @next/next/no-img-element -- a short-lived preview, not worth next/image's overhead here
+          <img src={anchor.concept.imageUrl} alt="" className="h-20 w-20 shrink-0 rounded-lg object-cover" />
         ) : null}
         <span className="text-ink">
-          Discussing: <span className="font-medium">{anchor.concept.labelEnglish}</span>
+          Discussing: <span className="text-base font-semibold">{anchor.concept.labelEnglish}</span>
         </span>
       </div>
     );
   }
   return (
-    <div className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink">
-      Discussing: <span className="font-medium">&quot;{anchor.sentence.englishText}&quot;</span>
+    <div className="rounded-xl bg-surface-card p-3 text-sm text-ink">
+      Discussing: <span className="text-base font-semibold">&quot;{anchor.sentence.englishText}&quot;</span>
     </div>
   );
 }
