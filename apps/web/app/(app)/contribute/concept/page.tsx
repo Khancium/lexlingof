@@ -347,8 +347,11 @@ function ConceptPageInner() {
               <div className="text-center">
                 <div className="text-2xl font-bold text-ink">{concept.labelEnglish}</div>
                 <div className="text-sm text-ink-muted">{concept.category.name}</div>
-                <div className="mt-1 flex justify-center">
+                <div className="mt-1 flex justify-center gap-3">
                   <SuggestBetterImageButton itemLabel={concept.labelEnglish} conceptId={concept.id} />
+                  <Link href={`/forum?conceptId=${concept.id}`} className="text-xs font-semibold text-brand hover:underline">
+                    💬 Share to Forum
+                  </Link>
                 </div>
               </div>
 

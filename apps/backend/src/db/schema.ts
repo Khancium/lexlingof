@@ -1362,12 +1362,9 @@ export const forumPosts = pgTable(
     // while discussing a concept.
     imageUrl: text("image_url"),
     imageStorageKey: text("image_storage_key"),
-    // An external GIF link (Giphy/Tenor share URL or a direct .gif/.webp) --
-    // no GIF-search API key is configured in this project, so this is
-    // populated by the user pasting a link rather than an integrated search.
-    gifUrl: text("gif_url"),
-    // At most one of these is ever set -- "share this object" or "share
-    // this sentence" to start a discussion about it. Both nullable; neither
+    // At most one of these is ever set -- set by sharing a concept/sentence
+    // to the forum (a small "Share to Forum" link on that item's own page),
+    // never picked from within the composer itself. Both nullable; neither
     // required, since a post can just be a standalone message.
     conceptId: uuid("concept_id").references(() => concepts.id, { onDelete: "set null" }),
     sentenceId: uuid("sentence_id").references(() => sentences.id, { onDelete: "set null" }),
@@ -1396,7 +1393,6 @@ export const forumComments = pgTable(
     // the frontend renders this as nested/indented threads.
     parentCommentId: uuid("parent_comment_id").references((): AnyPgColumn => forumComments.id, { onDelete: "cascade" }),
     body: text("body").notNull(),
-    gifUrl: text("gif_url"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
   },
@@ -1448,6 +1444,48 @@ export const forumCommentReactions = pgTable(
   (t) => [
     uniqueIndex("uq_forum_comment_reactions_comment_user").on(t.commentId, t.userId),
     index("ix_forum_comment_reactions_comment").on(t.commentId),
+  ],
+);
+
+// A post becomes a poll purely by having option rows -- no separate "is
+// this a poll" flag needed, since a post's forumPollOptions being non-empty
+// already says so. The post's own `body` doubles as the poll question.
+export const forumPollOptions = pgTable(
+  "forum_poll_options",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => forumPosts.id, { onDelete: "cascade" }),
+    label: text("label").notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+  },
+  (t) => [index("ix_forum_poll_options_post").on(t.postId)],
+);
+
+export const forumPollVotes = pgTable(
+  "forum_poll_votes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Denormalized off optionId (rather than joining through
+    // forum_poll_options for every vote check) so "one vote per user per
+    // poll" can be a straight unique index on (postId, userId) -- switching
+    // which option a user picked updates this row's optionId in place
+    // instead of deleting+reinserting under a different option.
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => forumPosts.id, { onDelete: "cascade" }),
+    optionId: uuid("option_id")
+      .notNull()
+      .references(() => forumPollOptions.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_forum_poll_votes_post_user").on(t.postId, t.userId),
+    index("ix_forum_poll_votes_option").on(t.optionId),
   ],
 );
 

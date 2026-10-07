@@ -8,8 +8,8 @@ import { api, getErrorMessage, type ForumPostDetail } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { ForumReactionBar } from "@/components/forum-reaction-bar";
 import { ForumCommentThread } from "@/components/forum-comment-thread";
+import { ForumPollView } from "@/components/forum-poll";
 import { EmojiPicker } from "@/components/emoji-picker";
-import { GifAttachInput } from "@/components/gif-attach-input";
 
 export default function ForumPostPage() {
   const params = useParams<{ id: string }>();
@@ -21,7 +21,6 @@ export default function ForumPostPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [commentBody, setCommentBody] = useState("");
-  const [commentGifUrl, setCommentGifUrl] = useState("");
   const [isCommenting, setIsCommenting] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [isDeletingPost, setIsDeletingPost] = useState(false);
@@ -45,9 +44,8 @@ export default function ForumPostPage() {
     setIsCommenting(true);
     setCommentError(null);
     try {
-      await api.forum.createComment(params.id, { body: commentBody.trim(), gifUrl: commentGifUrl || undefined });
+      await api.forum.createComment(params.id, { body: commentBody.trim() });
       setCommentBody("");
-      setCommentGifUrl("");
       load();
     } catch (err) {
       setCommentError(getErrorMessage(err, "Failed to post comment"));
@@ -137,10 +135,7 @@ export default function ForumPostPage() {
             {post.imageUrl ? (
               <Image src={post.imageUrl} alt="" width={700} height={380} sizes="100vw" className="max-h-96 w-full rounded-xl object-cover" />
             ) : null}
-            {post.gifUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- arbitrary third-party GIF URL
-              <img src={post.gifUrl} alt="" className="max-h-96 w-full rounded-xl object-cover" />
-            ) : null}
+            {post.poll ? <ForumPollView postId={post.id} poll={post.poll} onVoted={load} /> : null}
 
             <ForumReactionBar reactionCounts={post.reactionCounts} myReaction={post.myReaction} onReact={handleReact} onUnreact={handleUnreact} />
           </div>
@@ -171,7 +166,6 @@ export default function ForumPostPage() {
                   {isCommenting ? "Posting..." : "Comment"}
                 </button>
               </div>
-              <GifAttachInput value={commentGifUrl} onChange={setCommentGifUrl} />
               {commentError ? <p className="text-sm text-red-600">{commentError}</p> : null}
             </div>
 

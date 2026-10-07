@@ -13,9 +13,11 @@ import {
   getPostAuthorId,
   listPosts,
   removeCommentReaction,
+  removePollVote,
   removePostReaction,
   setCommentReaction,
   setPostReaction,
+  votePoll,
   type ForumReactionType,
 } from "./forum.service.js";
 
@@ -30,15 +32,29 @@ const listQuerySchema = z.object({
 const createCommentSchema = z.object({
   body: z.string().trim().min(1).max(4000),
   parentCommentId: z.string().uuid().optional(),
-  gifUrl: z.string().url().max(2000).optional(),
 });
 const reactionSchema = z.object({ reactionType: z.enum(REACTION_TYPES) });
+const voteSchema = z.object({ optionId: z.string().uuid() });
 
 const createPostFieldsSchema = z.object({
   body: z.string().trim().min(1).max(4000),
   conceptId: z.string().uuid().optional(),
   sentenceId: z.string().uuid().optional(),
-  gifUrl: z.string().url().max(2000).optional(),
+  // JSON-encoded string[] of 2-6 poll option labels, sent as a regular
+  // multipart field alongside the rest of the composer's fields.
+  pollOptions: z
+    .string()
+    .optional()
+    .transform((raw, ctx) => {
+      if (!raw) return undefined;
+      try {
+        const parsed = JSON.parse(raw);
+        return z.array(z.string().trim().min(1).max(120)).min(2).max(6).parse(parsed);
+      } catch {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid pollOptions" });
+        return z.NEVER;
+      }
+    }),
 });
 
 /**
@@ -80,8 +96,8 @@ export default async function forumRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/posts", { preHandler: verifyToken }, async (request, reply) => {
-    const { body, conceptId, sentenceId, gifUrl, image } = await readPostSubmission(request);
-    const post = await createPost(request.user!.id, { body, conceptId, sentenceId, gifUrl, image });
+    const { body, conceptId, sentenceId, pollOptions, image } = await readPostSubmission(request);
+    const post = await createPost(request.user!.id, { body, conceptId, sentenceId, pollOptions, image });
     reply.code(201).send(post);
   });
 
@@ -155,5 +171,21 @@ export default async function forumRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     await removeCommentReaction(id, request.user!.id);
     return { id, reactionType: null };
+  });
+
+  // Poll voting: PUT sets/replaces the caller's own vote on this poll (one
+  // live vote per user, enforced by the forum_poll_votes unique index);
+  // DELETE retracts it.
+  fastify.put("/posts/:id/poll/vote", { preHandler: verifyToken }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { optionId } = voteSchema.parse(request.body);
+    await votePoll(id, request.user!.id, optionId);
+    return { id, optionId };
+  });
+
+  fastify.delete("/posts/:id/poll/vote", { preHandler: verifyToken }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    await removePollVote(id, request.user!.id);
+    return { id, optionId: null };
   });
 }

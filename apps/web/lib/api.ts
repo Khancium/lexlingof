@@ -676,11 +676,13 @@ export type ForumAuthor = { id: string; displayName: string; avatarUrl: string |
 export type ForumConceptPreview = { id: string; labelEnglish: string; imageUrl: string | null };
 export type ForumSentencePreview = { id: string; englishText: string };
 
+export type ForumPollOption = { id: string; label: string; voteCount: number };
+export type ForumPoll = { options: ForumPollOption[]; totalVotes: number; myOptionId: string | null };
+
 export type ForumPost = {
   id: string;
   body: string;
   imageUrl: string | null;
-  gifUrl: string | null;
   author: ForumAuthor;
   createdAt: string;
   concept: ForumConceptPreview | null;
@@ -688,6 +690,7 @@ export type ForumPost = {
   reactionCounts: ForumReactionCounts;
   myReaction: ForumReactionType | null;
   commentCount: number;
+  poll: ForumPoll | null;
 };
 export type ForumPostsResponse = { items: ForumPost[]; limit: number; offset: number; total: number };
 
@@ -695,7 +698,6 @@ export type ForumComment = {
   id: string;
   parentCommentId: string | null;
   body: string;
-  gifUrl: string | null;
   author: ForumAuthor;
   createdAt: string;
   reactionCounts: ForumReactionCounts;
@@ -1363,18 +1365,24 @@ export const api = {
     getPosts: (params?: { limit?: number; offset?: number }) =>
       apiClient.get<ForumPostsResponse>("/api/v1/forum/posts", { params }).then((r) => r.data),
     getPost: (id: string) => apiClient.get<ForumPostDetail>(`/api/v1/forum/posts/${id}`).then((r) => r.data),
-    /** conceptId/sentenceId attach a "discuss this" reference; image is this post's own photo (independent of, and combinable with, that reference). */
-    createPost: (data: { body: string; conceptId?: string; sentenceId?: string; gifUrl?: string; image?: File }) => {
+    /**
+     * conceptId/sentenceId attach a "discuss this" reference (set only by
+     * the "Share to Forum" link on that item's own page, never picked from
+     * within the composer); image is this post's own photo (independent of,
+     * and combinable with, that reference); pollOptions (2-6 labels) turns
+     * this post into a poll, with the post's own body as the question.
+     */
+    createPost: (data: { body: string; conceptId?: string; sentenceId?: string; pollOptions?: string[]; image?: File }) => {
       const form = new FormData();
       form.append("body", data.body);
       if (data.conceptId) form.append("conceptId", data.conceptId);
       if (data.sentenceId) form.append("sentenceId", data.sentenceId);
-      if (data.gifUrl) form.append("gifUrl", data.gifUrl);
+      if (data.pollOptions?.length) form.append("pollOptions", JSON.stringify(data.pollOptions));
       if (data.image) form.append("file", data.image);
       return apiClient.post<ForumPost>("/api/v1/forum/posts", form).then((r) => r.data);
     },
     deletePost: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/forum/posts/${id}`).then((r) => r.data),
-    createComment: (postId: string, data: { body: string; parentCommentId?: string; gifUrl?: string }) =>
+    createComment: (postId: string, data: { body: string; parentCommentId?: string }) =>
       apiClient.post<ForumComment>(`/api/v1/forum/posts/${postId}/comments`, data).then((r) => r.data),
     deleteComment: (id: string) =>
       apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/forum/comments/${id}`).then((r) => r.data),
@@ -1385,6 +1393,10 @@ export const api = {
       apiClient.put(`/api/v1/forum/comments/${commentId}/reaction`, { reactionType }).then((r) => r.data),
     removeCommentReaction: (commentId: string) =>
       apiClient.delete(`/api/v1/forum/comments/${commentId}/reaction`).then((r) => r.data),
+    votePoll: (postId: string, optionId: string) =>
+      apiClient.put<{ id: string; optionId: string }>(`/api/v1/forum/posts/${postId}/poll/vote`, { optionId }).then((r) => r.data),
+    removePollVote: (postId: string) =>
+      apiClient.delete<{ id: string; optionId: null }>(`/api/v1/forum/posts/${postId}/poll/vote`).then((r) => r.data),
   },
 
   admin: {

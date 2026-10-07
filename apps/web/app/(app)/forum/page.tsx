@@ -1,21 +1,57 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useSearchParams } from "next/navigation";
 import { api, getErrorMessage, type ForumPost } from "@/lib/api";
-import { ForumPostComposer } from "@/components/forum-post-composer";
+import { ForumPostComposer, type ForumAnchor } from "@/components/forum-post-composer";
 import { ForumReactionBar } from "@/components/forum-reaction-bar";
+import { ForumPollView } from "@/components/forum-poll";
 import { Pagination } from "@/components/admin-pagination";
 
 const PAGE_SIZE = 20;
 
 export default function ForumPage() {
+  return (
+    <Suspense fallback={<p className="text-ink-muted">Loading...</p>}>
+      <ForumPageInner />
+    </Suspense>
+  );
+}
+
+function ForumPageInner() {
+  const searchParams = useSearchParams();
+  const conceptId = searchParams.get("conceptId");
+  const sentenceId = searchParams.get("sentenceId");
+
+  const [anchor, setAnchor] = useState<ForumAnchor | undefined>(undefined);
   const [posts, setPosts] = useState<ForumPost[]>([]);
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (conceptId) {
+      api.concepts
+        .getById(conceptId)
+        .then((concept) =>
+          setAnchor({
+            type: "concept",
+            concept: { id: concept.id, labelEnglish: concept.labelEnglish, imageUrl: concept.media.find((m) => m.isPrimary)?.publicUrl ?? null },
+          }),
+        )
+        .catch(() => setAnchor(undefined));
+    } else if (sentenceId) {
+      api.contributions
+        .getSentenceById(sentenceId)
+        .then((sentence) => setAnchor({ type: "sentence", sentence: { id: sentence.id, englishText: sentence.englishText } }))
+        .catch(() => setAnchor(undefined));
+    } else {
+      setAnchor(undefined);
+    }
+  }, [conceptId, sentenceId]);
 
   function load() {
     setLoading(true);
@@ -52,7 +88,7 @@ export default function ForumPage() {
         An open space for every contributor -- ask questions, discuss objects and sentences from the corpus, or just chat.
       </p>
 
-      <ForumPostComposer onPosted={() => (offset === 0 ? load() : setOffset(0))} />
+      <ForumPostComposer anchor={anchor} onPosted={() => (offset === 0 ? load() : setOffset(0))} />
 
       {error ? <p className="text-red-600">{error}</p> : null}
 
@@ -106,10 +142,7 @@ export default function ForumPage() {
                   className="max-h-80 w-full rounded-xl object-cover"
                 />
               ) : null}
-              {post.gifUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element -- arbitrary third-party GIF URL
-                <img src={post.gifUrl} alt="" className="max-h-80 w-full rounded-xl object-cover" />
-              ) : null}
+              {post.poll ? <ForumPollView postId={post.id} poll={post.poll} onVoted={load} /> : null}
 
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <ForumReactionBar

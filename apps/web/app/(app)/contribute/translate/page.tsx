@@ -469,6 +469,11 @@ function TranslatePageInner() {
             <p className="text-xl font-bold text-ink" dir={textDirection(sentence.sourceLanguage)}>
               {sentence.englishText}
             </p>
+            <div className="mt-2 flex justify-end">
+              <Link href={`/forum?sentenceId=${sentence.id}`} className="text-xs font-semibold text-brand hover:underline">
+                💬 Share to Forum
+              </Link>
+            </div>
           </div>
 
           <div className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface py-5 shadow-sm">

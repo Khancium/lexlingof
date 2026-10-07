@@ -74,10 +74,6 @@ export function ForumCommentThread({
           <span>{new Date(comment.createdAt).toLocaleString()}</span>
         </div>
         <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{comment.body}</p>
-        {comment.gifUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element -- arbitrary third-party GIF URL
-          <img src={comment.gifUrl} alt="" className="mt-2 h-32 w-auto rounded-lg object-cover" />
-        ) : null}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <ForumReactionBar size="sm" reactionCounts={comment.reactionCounts} myReaction={comment.myReaction} onReact={handleReact} onUnreact={handleUnreact} />
           <button type="button" onClick={() => setReplying((v) => !v)} className="text-xs font-semibold text-ink-muted hover:underline">

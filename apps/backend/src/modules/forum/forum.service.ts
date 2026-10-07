@@ -8,6 +8,8 @@ import {
   conceptMedia,
   forumCommentReactions,
   forumComments,
+  forumPollOptions,
+  forumPollVotes,
   forumPostReactions,
   forumPosts,
   sentences,
@@ -62,7 +64,8 @@ export type CreatePostInput = {
   body: string;
   conceptId?: string;
   sentenceId?: string;
-  gifUrl?: string;
+  /** 2-6 option labels. A post becomes a poll purely by having these rows. */
+  pollOptions?: string[];
   image?: { buffer: Buffer; filename: string };
 };
 
@@ -74,6 +77,9 @@ export async function createPost(userId: string, input: CreatePostInput) {
   if (input.sentenceId) {
     const [sentence] = await db.select({ id: sentences.id }).from(sentences).where(eq(sentences.id, input.sentenceId)).limit(1);
     if (!sentence) throw new HttpError(404, "NOT_FOUND", "Sentence not found");
+  }
+  if (input.pollOptions && (input.pollOptions.length < 2 || input.pollOptions.length > 6)) {
+    throw new HttpError(400, "INVALID_POLL", "A poll needs between 2 and 6 options");
   }
 
   let imageUrl: string | null = null;
@@ -89,20 +95,80 @@ export async function createPost(userId: string, input: CreatePostInput) {
     imageStorageKey = uploaded.path;
   }
 
-  const [post] = await db
-    .insert(forumPosts)
-    .values({
-      authorId: userId,
-      body: input.body,
-      imageUrl,
-      imageStorageKey,
-      gifUrl: input.gifUrl ?? null,
-      conceptId: input.conceptId ?? null,
-      sentenceId: input.sentenceId ?? null,
-    })
-    .returning();
+  return db.transaction(async (tx) => {
+    const [post] = await tx
+      .insert(forumPosts)
+      .values({
+        authorId: userId,
+        body: input.body,
+        imageUrl,
+        imageStorageKey,
+        conceptId: input.conceptId ?? null,
+        sentenceId: input.sentenceId ?? null,
+      })
+      .returning();
 
-  return post!;
+    if (input.pollOptions?.length) {
+      await tx.insert(forumPollOptions).values(
+        input.pollOptions.map((label, index) => ({ postId: post!.id, label, sortOrder: index })),
+      );
+    }
+
+    return post!;
+  });
+}
+
+/** Poll options + vote counts + the caller's own vote, batched across every post that has any. */
+async function pollsByPost(postIds: string[], userId: string) {
+  if (postIds.length === 0) return new Map<string, { options: { id: string; label: string; voteCount: number }[]; totalVotes: number; myOptionId: string | null }>();
+
+  const [optionRows, voteCountRows, myVoteRows] = await Promise.all([
+    db
+      .select({ id: forumPollOptions.id, postId: forumPollOptions.postId, label: forumPollOptions.label })
+      .from(forumPollOptions)
+      .where(inArray(forumPollOptions.postId, postIds))
+      .orderBy(asc(forumPollOptions.sortOrder)),
+    db
+      .select({ optionId: forumPollVotes.optionId, value: sql<number>`count(*)`.mapWith(Number) })
+      .from(forumPollVotes)
+      .where(inArray(forumPollVotes.postId, postIds))
+      .groupBy(forumPollVotes.optionId),
+    db
+      .select({ postId: forumPollVotes.postId, optionId: forumPollVotes.optionId })
+      .from(forumPollVotes)
+      .where(and(inArray(forumPollVotes.postId, postIds), eq(forumPollVotes.userId, userId))),
+  ]);
+
+  const voteCountByOption = new Map(voteCountRows.map((r) => [r.optionId, r.value]));
+  const myOptionByPost = new Map(myVoteRows.map((r) => [r.postId, r.optionId]));
+
+  const byPost = new Map<string, { options: { id: string; label: string; voteCount: number }[]; totalVotes: number; myOptionId: string | null }>();
+  for (const row of optionRows) {
+    const poll = byPost.get(row.postId) ?? { options: [], totalVotes: 0, myOptionId: myOptionByPost.get(row.postId) ?? null };
+    const voteCount = voteCountByOption.get(row.id) ?? 0;
+    poll.options.push({ id: row.id, label: row.label, voteCount });
+    poll.totalVotes += voteCount;
+    byPost.set(row.postId, poll);
+  }
+  return byPost;
+}
+
+export async function votePoll(postId: string, userId: string, optionId: string): Promise<void> {
+  const [option] = await db
+    .select({ id: forumPollOptions.id })
+    .from(forumPollOptions)
+    .where(and(eq(forumPollOptions.id, optionId), eq(forumPollOptions.postId, postId)))
+    .limit(1);
+  if (!option) throw new HttpError(404, "NOT_FOUND", "Poll option not found");
+
+  await db
+    .insert(forumPollVotes)
+    .values({ postId, optionId, userId })
+    .onConflictDoUpdate({ target: [forumPollVotes.postId, forumPollVotes.userId], set: { optionId } });
+}
+
+export async function removePollVote(postId: string, userId: string): Promise<void> {
+  await db.delete(forumPollVotes).where(and(eq(forumPollVotes.postId, postId), eq(forumPollVotes.userId, userId)));
 }
 
 /** Concept/sentence preview rows for a batch of posts -- batched the same way as the reaction/comment counts below. */
@@ -138,7 +204,6 @@ export async function listPosts(userId: string, limit: number, offset: number) {
         id: forumPosts.id,
         body: forumPosts.body,
         imageUrl: forumPosts.imageUrl,
-        gifUrl: forumPosts.gifUrl,
         conceptId: forumPosts.conceptId,
         sentenceId: forumPosts.sentenceId,
         createdAt: forumPosts.createdAt,
@@ -154,7 +219,7 @@ export async function listPosts(userId: string, limit: number, offset: number) {
   ]);
 
   const postIds = rows.map((r) => r.id);
-  const [reactionCounts, myReactions, commentCountRows, { conceptById, sentenceById }] = await Promise.all([
+  const [reactionCounts, myReactions, commentCountRows, { conceptById, sentenceById }, polls] = await Promise.all([
     countReactionsByTarget(forumPostReactions, forumPostReactions.postId, postIds),
     myReactionsByTarget(forumPostReactions, forumPostReactions.postId, forumPostReactions.userId, postIds, userId),
     postIds.length
@@ -165,6 +230,7 @@ export async function listPosts(userId: string, limit: number, offset: number) {
           .groupBy(forumComments.postId)
       : [],
     attachmentsByPost(rows),
+    pollsByPost(postIds, userId),
   ]);
   const commentCountByPost = new Map(commentCountRows.map((r) => [r.postId, r.value]));
 
@@ -172,7 +238,6 @@ export async function listPosts(userId: string, limit: number, offset: number) {
     id: row.id,
     body: row.body,
     imageUrl: row.imageUrl,
-    gifUrl: row.gifUrl,
     author: row.author,
     createdAt: row.createdAt,
     concept: row.conceptId ? (conceptById.get(row.conceptId) ?? null) : null,
@@ -180,6 +245,7 @@ export async function listPosts(userId: string, limit: number, offset: number) {
     reactionCounts: reactionCounts.get(row.id) ?? {},
     myReaction: myReactions.get(row.id) ?? null,
     commentCount: commentCountByPost.get(row.id) ?? 0,
+    poll: polls.get(row.id) ?? null,
   }));
 
   return { items, limit, offset, total: totalRow?.value ?? 0 };
@@ -205,7 +271,6 @@ export async function getPost(id: string, userId: string) {
       id: forumPosts.id,
       body: forumPosts.body,
       imageUrl: forumPosts.imageUrl,
-      gifUrl: forumPosts.gifUrl,
       conceptId: forumPosts.conceptId,
       sentenceId: forumPosts.sentenceId,
       createdAt: forumPosts.createdAt,
@@ -221,13 +286,12 @@ export async function getPost(id: string, userId: string) {
     throw new HttpError(404, "NOT_FOUND", "Post not found");
   }
 
-  const [commentRows, [reactionCounts], [myReactions], { conceptById, sentenceById }] = await Promise.all([
+  const [commentRows, [reactionCounts], [myReactions], { conceptById, sentenceById }, polls] = await Promise.all([
     db
       .select({
         id: forumComments.id,
         parentCommentId: forumComments.parentCommentId,
         body: forumComments.body,
-        gifUrl: forumComments.gifUrl,
         createdAt: forumComments.createdAt,
         authorId: forumComments.authorId,
         author: AUTHOR_SELECT,
@@ -242,6 +306,7 @@ export async function getPost(id: string, userId: string) {
       m.get(id) ?? null,
     ]),
     attachmentsByPost([row]),
+    pollsByPost([id], userId),
   ]);
 
   const commentIds = commentRows.map((c) => c.id);
@@ -254,7 +319,6 @@ export async function getPost(id: string, userId: string) {
     id: c.id,
     parentCommentId: c.parentCommentId,
     body: c.body,
-    gifUrl: c.gifUrl,
     createdAt: c.createdAt,
     author: c.author,
     reactionCounts: commentReactionCounts.get(c.id) ?? {},
@@ -265,13 +329,13 @@ export async function getPost(id: string, userId: string) {
     id: row.id,
     body: row.body,
     imageUrl: row.imageUrl,
-    gifUrl: row.gifUrl,
     author: row.author,
     createdAt: row.createdAt,
     concept: row.conceptId ? (conceptById.get(row.conceptId) ?? null) : null,
     sentence: row.sentenceId ? (sentenceById.get(row.sentenceId) ?? null) : null,
-    reactionCounts: reactionCounts[0],
-    myReaction: myReactions[0],
+    reactionCounts: reactionCounts ?? {},
+    myReaction: myReactions ?? null,
+    poll: polls.get(id) ?? null,
     comments: buildCommentTree(flatComments),
   };
 }
@@ -292,7 +356,7 @@ export async function getPostAuthorId(id: string): Promise<string | null> {
 export async function createComment(
   userId: string,
   postId: string,
-  input: { body: string; parentCommentId?: string; gifUrl?: string },
+  input: { body: string; parentCommentId?: string },
 ) {
   const [post] = await db.select({ id: forumPosts.id }).from(forumPosts).where(and(eq(forumPosts.id, postId), isNull(forumPosts.deletedAt))).limit(1);
   if (!post) {
@@ -317,7 +381,6 @@ export async function createComment(
       authorId: userId,
       parentCommentId: input.parentCommentId ?? null,
       body: input.body,
-      gifUrl: input.gifUrl ?? null,
     })
     .returning();
 
