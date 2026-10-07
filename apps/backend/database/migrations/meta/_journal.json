@@ -239,6 +239,13 @@
       "when": 1790089353502,
       "tag": "0033_secret_giant_man",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1791380154017,
+      "tag": "0034_jazzy_nightshade",
+      "breakpoints": true
     }
   ]
 }

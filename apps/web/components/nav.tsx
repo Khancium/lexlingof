@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/contributions", label: "My Contributions" },
   { href: "/leaderboard", label: "Leaderboard" },
   { href: "/corpus", label: "Corpus" },
+  { href: "/forum", label: "Forum" },
   { href: "/profile", label: "Profile" },
   { href: "/settings", label: "Settings" },
 ];

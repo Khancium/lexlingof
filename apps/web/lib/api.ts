@@ -667,6 +667,45 @@ export type UserBadgesResponse = {
 };
 
 /* -------------------------------------------------------------------------- */
+/*                                    Forum                                   */
+/* -------------------------------------------------------------------------- */
+
+export type ForumReactionType = "like" | "dislike" | "laugh" | "love" | "wow" | "sad" | "angry";
+export type ForumReactionCounts = Partial<Record<ForumReactionType, number>>;
+export type ForumAuthor = { id: string; displayName: string; avatarUrl: string | null };
+export type ForumConceptPreview = { id: string; labelEnglish: string; imageUrl: string | null };
+export type ForumSentencePreview = { id: string; englishText: string };
+
+export type ForumPost = {
+  id: string;
+  body: string;
+  imageUrl: string | null;
+  gifUrl: string | null;
+  author: ForumAuthor;
+  createdAt: string;
+  concept: ForumConceptPreview | null;
+  sentence: ForumSentencePreview | null;
+  reactionCounts: ForumReactionCounts;
+  myReaction: ForumReactionType | null;
+  commentCount: number;
+};
+export type ForumPostsResponse = { items: ForumPost[]; limit: number; offset: number; total: number };
+
+export type ForumComment = {
+  id: string;
+  parentCommentId: string | null;
+  body: string;
+  gifUrl: string | null;
+  author: ForumAuthor;
+  createdAt: string;
+  reactionCounts: ForumReactionCounts;
+  myReaction: ForumReactionType | null;
+  replies: ForumComment[];
+};
+
+export type ForumPostDetail = Omit<ForumPost, "commentCount"> & { comments: ForumComment[] };
+
+/* -------------------------------------------------------------------------- */
 /*                                    Admin                                   */
 /* -------------------------------------------------------------------------- */
 
@@ -1318,6 +1357,34 @@ export const api = {
   badges: {
     getAll: () => apiClient.get<Badge[]>("/api/v1/badges").then((r) => r.data),
     getForUser: (userId: string) => apiClient.get<UserBadgesResponse>(`/api/v1/badges/user/${userId}`).then((r) => r.data),
+  },
+
+  forum: {
+    getPosts: (params?: { limit?: number; offset?: number }) =>
+      apiClient.get<ForumPostsResponse>("/api/v1/forum/posts", { params }).then((r) => r.data),
+    getPost: (id: string) => apiClient.get<ForumPostDetail>(`/api/v1/forum/posts/${id}`).then((r) => r.data),
+    /** conceptId/sentenceId attach a "discuss this" reference; image is this post's own photo (independent of, and combinable with, that reference). */
+    createPost: (data: { body: string; conceptId?: string; sentenceId?: string; gifUrl?: string; image?: File }) => {
+      const form = new FormData();
+      form.append("body", data.body);
+      if (data.conceptId) form.append("conceptId", data.conceptId);
+      if (data.sentenceId) form.append("sentenceId", data.sentenceId);
+      if (data.gifUrl) form.append("gifUrl", data.gifUrl);
+      if (data.image) form.append("file", data.image);
+      return apiClient.post<ForumPost>("/api/v1/forum/posts", form).then((r) => r.data);
+    },
+    deletePost: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/forum/posts/${id}`).then((r) => r.data),
+    createComment: (postId: string, data: { body: string; parentCommentId?: string; gifUrl?: string }) =>
+      apiClient.post<ForumComment>(`/api/v1/forum/posts/${postId}/comments`, data).then((r) => r.data),
+    deleteComment: (id: string) =>
+      apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/forum/comments/${id}`).then((r) => r.data),
+    setPostReaction: (postId: string, reactionType: ForumReactionType) =>
+      apiClient.put(`/api/v1/forum/posts/${postId}/reaction`, { reactionType }).then((r) => r.data),
+    removePostReaction: (postId: string) => apiClient.delete(`/api/v1/forum/posts/${postId}/reaction`).then((r) => r.data),
+    setCommentReaction: (commentId: string, reactionType: ForumReactionType) =>
+      apiClient.put(`/api/v1/forum/comments/${commentId}/reaction`, { reactionType }).then((r) => r.data),
+    removeCommentReaction: (commentId: string) =>
+      apiClient.delete(`/api/v1/forum/comments/${commentId}/reaction`).then((r) => r.data),
   },
 
   admin: {

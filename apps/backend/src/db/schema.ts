@@ -1335,6 +1335,122 @@ export const suggestions = pgTable(
   ],
 );
 
+/* -------------------------------------------------------------------------- */
+/*                                    Forum                                   */
+/* -------------------------------------------------------------------------- */
+// An open discussion space for every user (not admin-reviewed, unlike
+// suggestions above) -- a post can stand alone or carry a reference to a
+// concept (its photo + label) or a sentence (its text), so a discussion can
+// start "about" a specific corpus item without that item's own pages having
+// to grow a comments section of their own. Posts and comments both soft-
+// delete (deletedAt), matching every other content table in this codebase,
+// so a removed post/comment's replies and reactions don't orphan-cascade
+// into a confusing hard delete.
+
+export const forumReactionType = pgEnum("forum_reaction_type", ["like", "dislike", "laugh", "love", "wow", "sad", "angry"]);
+
+export const forumPosts = pgTable(
+  "forum_posts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    // An own-uploaded image, independent of (and combinable with) the
+    // concept/sentence reference below -- e.g. attaching a personal photo
+    // while discussing a concept.
+    imageUrl: text("image_url"),
+    imageStorageKey: text("image_storage_key"),
+    // An external GIF link (Giphy/Tenor share URL or a direct .gif/.webp) --
+    // no GIF-search API key is configured in this project, so this is
+    // populated by the user pasting a link rather than an integrated search.
+    gifUrl: text("gif_url"),
+    // At most one of these is ever set -- "share this object" or "share
+    // this sentence" to start a discussion about it. Both nullable; neither
+    // required, since a post can just be a standalone message.
+    conceptId: uuid("concept_id").references(() => concepts.id, { onDelete: "set null" }),
+    sentenceId: uuid("sentence_id").references(() => sentences.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("ix_forum_posts_created_at").on(t.createdAt),
+    index("ix_forum_posts_author").on(t.authorId),
+  ],
+);
+
+export const forumComments = pgTable(
+  "forum_comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => forumPosts.id, { onDelete: "cascade" }),
+    authorId: uuid("author_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Null for a top-level comment on the post; set for a reply to another
+    // comment. Self-referencing, so replies can themselves be replied to --
+    // the frontend renders this as nested/indented threads.
+    parentCommentId: uuid("parent_comment_id").references((): AnyPgColumn => forumComments.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    gifUrl: text("gif_url"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("ix_forum_comments_post").on(t.postId),
+    index("ix_forum_comments_parent").on(t.parentCommentId),
+  ],
+);
+
+// Separate reaction tables per target (rather than one polymorphic table)
+// so each can carry a real FK with ON DELETE CASCADE straight to its
+// target, matching how every other table in this schema handles ownership
+// -- a polymorphic targetId column couldn't do that and would need manual
+// cleanup on every post/comment delete instead.
+export const forumPostReactions = pgTable(
+  "forum_post_reactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => forumPosts.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reactionType: forumReactionType("reaction_type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    // One live reaction per user per post -- switching type replaces the
+    // row rather than stacking a second one.
+    uniqueIndex("uq_forum_post_reactions_post_user").on(t.postId, t.userId),
+    index("ix_forum_post_reactions_post").on(t.postId),
+  ],
+);
+
+export const forumCommentReactions = pgTable(
+  "forum_comment_reactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    commentId: uuid("comment_id")
+      .notNull()
+      .references(() => forumComments.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reactionType: forumReactionType("reaction_type").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_forum_comment_reactions_comment_user").on(t.commentId, t.userId),
+    index("ix_forum_comment_reactions_comment").on(t.commentId),
+  ],
+);
+
 export const featureFlags = pgTable(
   "feature_flags",
   {

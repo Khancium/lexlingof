@@ -23,6 +23,7 @@ import reviewsRoutes from "./modules/reviews/reviews.routes.js";
 import translationRoutes from "./modules/contributions/translation/translation.routes.js";
 import wordRoutes from "./modules/contributions/word/word.routes.js";
 import bufferRoutes from "./modules/contributions/buffer/buffer.routes.js";
+import forumRoutes from "./modules/forum/forum.routes.js";
 import { startSubmissionBufferWorker } from "./services/submission-buffer.service.js";
 import { HttpError } from "./utils/http-error.js";
 
@@ -106,6 +107,7 @@ await server.register(notificationsRoutes, { prefix: "/api/v1/notifications" });
 // adminRoutes already covers both /api/v1/admin/* and /api/v1/superadmin/*
 // internally (there is no separate superAdminRoutes module).
 await server.register(adminRoutes, { prefix: "/api/v1" });
+await server.register(forumRoutes, { prefix: "/api/v1/forum" });
 
 // Health checks. The versioned one is what was asked for; the bare one is
 // kept too since it's what infra (load balancers, Railway, etc.) commonly

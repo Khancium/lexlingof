@@ -1,0 +1,133 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import Image from "next/image";
+import { api, getErrorMessage, type ForumPost } from "@/lib/api";
+import { ForumPostComposer } from "@/components/forum-post-composer";
+import { ForumReactionBar } from "@/components/forum-reaction-bar";
+import { Pagination } from "@/components/admin-pagination";
+
+const PAGE_SIZE = 20;
+
+export default function ForumPage() {
+  const [posts, setPosts] = useState<ForumPost[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  function load() {
+    setLoading(true);
+    setError(null);
+    api.forum
+      .getPosts({ limit: PAGE_SIZE, offset })
+      .then((res) => {
+        setPosts(res.items);
+        setTotal(res.total);
+      })
+      .catch((err) => setError(getErrorMessage(err, "Failed to load the forum")))
+      .finally(() => setLoading(false));
+  }
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
+
+  async function handleReact(postId: string, reactionType: Parameters<typeof api.forum.setPostReaction>[1]) {
+    await api.forum.setPostReaction(postId, reactionType);
+    load();
+  }
+
+  async function handleUnreact(postId: string) {
+    await api.forum.removePostReaction(postId);
+    load();
+  }
+
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <h1 className="text-2xl font-bold text-ink">Forum</h1>
+      <p className="text-sm text-ink-muted">
+        An open space for every contributor -- ask questions, discuss objects and sentences from the corpus, or just chat.
+      </p>
+
+      <ForumPostComposer onPosted={() => (offset === 0 ? load() : setOffset(0))} />
+
+      {error ? <p className="text-red-600">{error}</p> : null}
+
+      {loading ? (
+        <p className="text-ink-muted">Loading...</p>
+      ) : posts.length === 0 ? (
+        <p className="text-ink-muted">No posts yet -- be the first to start a discussion.</p>
+      ) : (
+        <div className="space-y-4">
+          {posts.map((post) => (
+            <div key={post.id} className="card-duo space-y-3 rounded-2xl bg-surface p-4 shadow-sm">
+              <div className="flex items-center gap-2">
+                {post.author.avatarUrl ? (
+                  <Image src={post.author.avatarUrl} alt="" width={32} height={32} className="h-8 w-8 rounded-full object-cover" />
+                ) : (
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-light text-sm font-bold text-brand-dark">
+                    {post.author.displayName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <p className="text-sm font-semibold text-ink">{post.author.displayName}</p>
+                  <p className="text-xs text-ink-muted">{new Date(post.createdAt).toLocaleString()}</p>
+                </div>
+              </div>
+
+              <p className="whitespace-pre-wrap text-ink">{post.body}</p>
+
+              {post.concept ? (
+                <div className="flex items-center gap-2 rounded-lg bg-surface-card px-3 py-2 text-sm">
+                  {post.concept.imageUrl ? (
+                    <Image src={post.concept.imageUrl} alt="" width={32} height={32} className="h-8 w-8 rounded object-cover" />
+                  ) : null}
+                  <span className="text-ink-muted">Discussing: </span>
+                  <span className="font-medium text-ink">{post.concept.labelEnglish}</span>
+                </div>
+              ) : null}
+              {post.sentence ? (
+                <div className="rounded-lg bg-surface-card px-3 py-2 text-sm">
+                  <span className="text-ink-muted">Discussing: </span>
+                  <span className="font-medium text-ink">&quot;{post.sentence.englishText}&quot;</span>
+                </div>
+              ) : null}
+
+              {post.imageUrl ? (
+                <Image
+                  src={post.imageUrl}
+                  alt=""
+                  width={600}
+                  height={320}
+                  sizes="100vw"
+                  className="max-h-80 w-full rounded-xl object-cover"
+                />
+              ) : null}
+              {post.gifUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- arbitrary third-party GIF URL
+                <img src={post.gifUrl} alt="" className="max-h-80 w-full rounded-xl object-cover" />
+              ) : null}
+
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <ForumReactionBar
+                  reactionCounts={post.reactionCounts}
+                  myReaction={post.myReaction}
+                  onReact={(type) => handleReact(post.id, type)}
+                  onUnreact={() => handleUnreact(post.id)}
+                />
+                <Link href={`/forum/${post.id}`} className="text-sm font-semibold text-brand hover:underline">
+                  {post.commentCount > 0 ? `${post.commentCount} comment${post.commentCount === 1 ? "" : "s"}` : "Comment"}
+                </Link>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!loading && <Pagination offset={offset} limit={PAGE_SIZE} total={total} onChange={setOffset} showPageNumbers />}
+    </div>
+  );
+}
