@@ -10,6 +10,7 @@ import {
   type Scene,
   type SceneDifficulty,
   type SceneImageKeyword,
+  type WikimediaImageResult,
 } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
@@ -25,6 +26,9 @@ import { AdminUndoButton } from "@/components/admin-undo-button";
 // Loaded on demand only -- see the identical note on the concepts admin page.
 const ImageCropper = dynamic(() => import("@/components/image-cropper").then((m) => m.ImageCropper), { ssr: false });
 const AdminOpenversePicker = dynamic(() => import("@/components/admin-openverse-picker").then((m) => m.AdminOpenversePicker), {
+  ssr: false,
+});
+const AdminWikimediaPicker = dynamic(() => import("@/components/admin-wikimedia-picker").then((m) => m.AdminWikimediaPicker), {
   ssr: false,
 });
 
@@ -138,6 +142,7 @@ export default function AdminScenesPage() {
   const [uploadingId, setUploadingId] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
   const [openverseSceneId, setOpenverseSceneId] = useState<string | null>(null);
+  const [wikimediaSceneId, setWikimediaSceneId] = useState<string | null>(null);
   const [imagesSceneId, setImagesSceneId] = useState<string | null>(null);
   const [cropTarget, setCropTarget] = useState<{ sceneId: string; url: string } | null>(null);
   // A file the admin has chosen but not yet confirmed -- lets them type
@@ -327,6 +332,20 @@ export default function AdminScenesPage() {
     try {
       const result = await api.admin.addSceneMediaOpenverse(sceneId, image);
       setUploadMessage({ id: sceneId, text: "pending" in result ? result.message : "Image added from Openverse" });
+    } catch (err) {
+      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      throw err;
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
+  async function handleAddImageWikimedia(sceneId: string, image: WikimediaImageResult) {
+    setUploadingId(sceneId);
+    setUploadMessage(null);
+    try {
+      const result = await api.admin.addSceneMediaWikimedia(sceneId, image);
+      setUploadMessage({ id: sceneId, text: "pending" in result ? result.message : "Image added from Wikimedia Commons" });
     } catch (err) {
       setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
       throw err;
@@ -749,6 +768,13 @@ export default function AdminScenesPage() {
             onDone={() => load({ silent: true })}
           />
 
+          <AdminOpenverseAutofill
+            label="Auto-fill Missing Scene Images from Wikimedia Commons"
+            providerLabel="Wikimedia Commons"
+            onSubmit={() => api.admin.bulkWikimediaAutofillScenes()}
+            onDone={() => load({ silent: true })}
+          />
+
           <AdminBulkBar
             count={selected.size}
             onClear={() => setSelected(new Set())}
@@ -942,6 +968,12 @@ export default function AdminScenesPage() {
                     className="text-xs font-semibold text-brand hover:underline"
                   >
                     Openverse
+                  </button>
+                  <button
+                    onClick={() => setWikimediaSceneId(scene.id)}
+                    className="text-xs font-semibold text-brand hover:underline"
+                  >
+                    Wikimedia
                   </button>
                   <button
                     onClick={() => {
@@ -1184,6 +1216,14 @@ export default function AdminScenesPage() {
           defaultQuery={scenes.find((s) => s.id === openverseSceneId)?.title ?? ""}
           onSelect={(image) => handleAddImageOpenverse(openverseSceneId, image)}
           onClose={() => setOpenverseSceneId(null)}
+        />
+      ) : null}
+
+      {wikimediaSceneId ? (
+        <AdminWikimediaPicker
+          defaultQuery={scenes.find((s) => s.id === wikimediaSceneId)?.title ?? ""}
+          onSelect={(image) => handleAddImageWikimedia(wikimediaSceneId, image)}
+          onClose={() => setWikimediaSceneId(null)}
         />
       ) : null}
 

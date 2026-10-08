@@ -4,16 +4,19 @@ import { useState } from "react";
 import type { BulkUploadResult } from "@/lib/api";
 
 /**
- * One-click bulk fill: searches Openverse by each item's own name and
- * attaches the top licensed result to every item that currently has no
- * image at all. Shared by the concepts and scenes admin pages.
+ * One-click bulk fill: searches the given provider (Openverse or Wikimedia
+ * Commons) by each item's own name and attaches the top licensed result to
+ * every item that currently has no image at all. Shared by the concepts and
+ * scenes admin pages, and by both providers.
  */
 export function AdminOpenverseAutofill({
   label,
+  providerLabel = "Openverse",
   onSubmit,
   onDone,
 }: {
   label: string;
+  providerLabel?: string;
   onSubmit: () => Promise<BulkUploadResult>;
   onDone?: () => void;
 }) {
@@ -24,7 +27,7 @@ export function AdminOpenverseAutofill({
   async function handleClick() {
     if (
       !window.confirm(
-        "Search Openverse for every item currently missing an image and attach the top result? Automatic matches aren't always accurate -- review the results afterward.",
+        `Search ${providerLabel} for every item currently missing an image and attach the top result? Automatic matches aren't always accurate -- review the results afterward.`,
       )
     ) {
       return;
@@ -49,7 +52,7 @@ export function AdminOpenverseAutofill({
         <div>
           <p className="text-sm font-semibold text-ink">{label}</p>
           <p className="text-xs text-ink-muted">
-            Searches Openverse by name and attaches the top licensed result to every item with no image yet.
+            Searches {providerLabel} by name and attaches the top licensed result to every item with no image yet.
           </p>
         </div>
         <button
@@ -57,7 +60,7 @@ export function AdminOpenverseAutofill({
           disabled={isSubmitting}
           className="btn-duo whitespace-nowrap bg-brand px-4 py-2 text-sm font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
         >
-          {isSubmitting ? "Filling..." : "Auto-fill from Openverse"}
+          {isSubmitting ? "Filling..." : `Auto-fill from ${providerLabel}`}
         </button>
       </div>
       {error ? <p className="text-sm text-red-600">{error}</p> : null}

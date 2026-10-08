@@ -49,6 +49,7 @@ import {
 } from "../../db/schema.js";
 import { hasPermission, invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { buildAttribution, searchOpenverseImages } from "../../services/openverse.service.js";
+import { searchWikimediaImages } from "../../services/wikimedia.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
 import { authService } from "../auth/auth.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
@@ -200,6 +201,11 @@ async function addSceneImageFromUrl(sceneId: string, imageUrl: string, source?: 
  */
 function attributionFromOpenverse(image: { foreignLandingUrl: string; attribution: string }): MediaAttribution {
   return { sourceProvider: "openverse", sourceUrl: image.foreignLandingUrl, attribution: image.attribution };
+}
+
+/** Same reasoning as attributionFromOpenverse, for the Wikimedia Commons picker/autofill. */
+function attributionFromWikimedia(image: { foreignLandingUrl: string; attribution: string }): MediaAttribution {
+  return { sourceProvider: "wikimedia", sourceUrl: image.foreignLandingUrl, attribution: image.attribution };
 }
 
 /** Concepts/scenes currently missing any image at all -- the autofill target set when no explicit ids are given. */
@@ -993,6 +999,26 @@ const bulkOpenverseAutofillSchema = z.object({
   ids: z.array(z.string().uuid()).max(200).optional(),
 });
 
+const wikimediaSearchQuerySchema = z.object({
+  q: z.string().trim().min(1),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(40).default(20),
+});
+
+/** The subset of a WikimediaImageResult a client actually chose -- re-validated the same way as openverseImageRefSchema. */
+const wikimediaImageRefSchema = z.object({
+  url: z.string().url(),
+  foreignLandingUrl: z.string().url(),
+  attribution: z.string().min(1),
+});
+
+const addConceptWikimediaSchema = z.object({ image: wikimediaImageRefSchema });
+const addSceneWikimediaSchema = z.object({ image: wikimediaImageRefSchema });
+
+const bulkWikimediaAutofillSchema = z.object({
+  ids: z.array(z.string().uuid()).max(200).optional(),
+});
+
 const bulkIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
 
 const bulkEditConceptsSchema = z.object({
@@ -1317,6 +1343,7 @@ type MediaCreatePayload = { targetId: string } & (
   | { source: "upload"; bufferBase64: string; filename: string }
   | { source: "url"; imageUrl: string }
   | { source: "openverse"; image: { url: string; foreignLandingUrl: string; attribution: string } }
+  | { source: "wikimedia"; image: { url: string; foreignLandingUrl: string; attribution: string } }
 );
 
 async function applyCreateConceptMedia(payload: MediaCreatePayload) {
@@ -1326,6 +1353,9 @@ async function applyCreateConceptMedia(payload: MediaCreatePayload) {
   }
   if (payload.source === "url") {
     return addConceptImageFromUrl(conceptId, payload.imageUrl);
+  }
+  if (payload.source === "wikimedia") {
+    return addConceptImageFromUrl(conceptId, payload.image.url, attributionFromWikimedia(payload.image));
   }
   return addConceptImageFromUrl(conceptId, payload.image.url, attributionFromOpenverse(payload.image));
 }
@@ -1337,6 +1367,9 @@ async function applyCreateSceneMedia(payload: MediaCreatePayload) {
   }
   if (payload.source === "url") {
     return addSceneImageFromUrl(sceneId, payload.imageUrl);
+  }
+  if (payload.source === "wikimedia") {
+    return addSceneImageFromUrl(sceneId, payload.image.url, attributionFromWikimedia(payload.image));
   }
   return addSceneImageFromUrl(sceneId, payload.image.url, attributionFromOpenverse(payload.image));
 }
@@ -2687,6 +2720,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     },
   );
 
+  // Same idea, against Wikimedia Commons directly -- a much larger catalog
+  // than Openverse's own Commons slice, useful when Openverse hasn't
+  // indexed an image yet.
+  fastify.get(
+    "/admin/wikimedia/search",
+    { preHandler: requireAnyPermission("concepts.manage", "scenes.manage") },
+    async (request) => {
+      const { q, page, pageSize } = wikimediaSearchQuerySchema.parse(request.query);
+      return searchWikimediaImages(q, { page, pageSize });
+    },
+  );
+
   // Attaches one image the admin picked from the Openverse search picker --
   // re-hosted through the same fetch-and-store pipeline as "From URL", plus
   // the license/creator metadata Openverse's terms require keeping alongside
@@ -2697,6 +2742,21 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const actor = request.user!;
 
     const payload: MediaCreatePayload = { targetId: id, source: "openverse", image };
+    const outcome = await gateVolunteerAction(actor, "concept_media", "create", payload, () => applyCreateConceptMedia(payload));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
+  });
+
+  fastify.post("/admin/concepts/:id/media/wikimedia", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { image } = addConceptWikimediaSchema.parse(request.body);
+    const actor = request.user!;
+
+    const payload: MediaCreatePayload = { targetId: id, source: "wikimedia", image };
     const outcome = await gateVolunteerAction(actor, "concept_media", "create", payload, () => applyCreateConceptMedia(payload));
 
     if (outcome.pending) {
@@ -2732,6 +2792,39 @@ export default async function adminRoutes(fastify: FastifyInstance) {
             const top = results[0];
             if (!top) throw new Error(`No Openverse results for "${concept.labelEnglish}"`);
             await addConceptImageFromUrl(concept.id, top.url, attributionFromOpenverse(top));
+          }),
+        );
+        outcomes.forEach((outcome, j) => {
+          if (outcome.status === "fulfilled") created += 1;
+          else errors.push({ row: i + j + 1, message: outcome.reason instanceof Error ? outcome.reason.message : "Failed" });
+        });
+      }
+
+      return { created, errors };
+    },
+  );
+
+  // Same idea as the Openverse autofill above, searching Wikimedia Commons instead.
+  fastify.post(
+    "/admin/concepts/media/wikimedia-autofill",
+    { preHandler: requirePermission("concepts.manage") },
+    async (request) => {
+      const { ids } = bulkWikimediaAutofillSchema.parse(request.body);
+      const targets = await conceptsWithoutImage(ids);
+      if (targets.length === 0) return { created: 0, errors: [] };
+
+      const AUTOFILL_CONCURRENCY = 5;
+      const errors: { row: number; message: string }[] = [];
+      let created = 0;
+
+      for (let i = 0; i < targets.length; i += AUTOFILL_CONCURRENCY) {
+        const batch = targets.slice(i, i + AUTOFILL_CONCURRENCY);
+        const outcomes = await Promise.allSettled(
+          batch.map(async (concept) => {
+            const { results } = await searchWikimediaImages(concept.labelEnglish, { pageSize: 1 });
+            const top = results[0];
+            if (!top) throw new Error(`No Wikimedia Commons results for "${concept.labelEnglish}"`);
+            await addConceptImageFromUrl(concept.id, top.url, attributionFromWikimedia(top));
           }),
         );
         outcomes.forEach((outcome, j) => {
@@ -3047,6 +3140,21 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.code(201).send(outcome.result);
   });
 
+  fastify.post("/admin/scenes/:id/media/wikimedia", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const { image } = addSceneWikimediaSchema.parse(request.body);
+    const actor = request.user!;
+
+    const payload: MediaCreatePayload = { targetId: id, source: "wikimedia", image };
+    const outcome = await gateVolunteerAction(actor, "scene_media", "create", payload, () => applyCreateSceneMedia(payload));
+
+    if (outcome.pending) {
+      reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
+      return;
+    }
+    reply.code(201).send(outcome.result);
+  });
+
   // Same bulk auto-fill idea as concepts, searching Openverse by scene title.
   fastify.post(
     "/admin/scenes/media/openverse-autofill",
@@ -3068,6 +3176,39 @@ export default async function adminRoutes(fastify: FastifyInstance) {
             const top = results[0];
             if (!top) throw new Error(`No Openverse results for "${scene.title}"`);
             await addSceneImageFromUrl(scene.id, top.url, attributionFromOpenverse(top));
+          }),
+        );
+        outcomes.forEach((outcome, j) => {
+          if (outcome.status === "fulfilled") created += 1;
+          else errors.push({ row: i + j + 1, message: outcome.reason instanceof Error ? outcome.reason.message : "Failed" });
+        });
+      }
+
+      return { created, errors };
+    },
+  );
+
+  // Same idea, searching Wikimedia Commons by scene title.
+  fastify.post(
+    "/admin/scenes/media/wikimedia-autofill",
+    { preHandler: requirePermission("scenes.manage") },
+    async (request) => {
+      const { ids } = bulkWikimediaAutofillSchema.parse(request.body);
+      const targets = await scenesWithoutImage(ids);
+      if (targets.length === 0) return { created: 0, errors: [] };
+
+      const AUTOFILL_CONCURRENCY = 5;
+      const errors: { row: number; message: string }[] = [];
+      let created = 0;
+
+      for (let i = 0; i < targets.length; i += AUTOFILL_CONCURRENCY) {
+        const batch = targets.slice(i, i + AUTOFILL_CONCURRENCY);
+        const outcomes = await Promise.allSettled(
+          batch.map(async (scene) => {
+            const { results } = await searchWikimediaImages(scene.title, { pageSize: 1 });
+            const top = results[0];
+            if (!top) throw new Error(`No Wikimedia Commons results for "${scene.title}"`);
+            await addSceneImageFromUrl(scene.id, top.url, attributionFromWikimedia(top));
           }),
         );
         outcomes.forEach((outcome, j) => {

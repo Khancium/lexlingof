@@ -995,7 +995,25 @@ export type OpenverseImageResult = {
 
 export type OpenverseSearchResponse = { results: OpenverseImageResult[]; resultCount: number; pageCount: number; page: number };
 
-/** One row of concept_media/scene_media -- sourceProvider/sourceUrl/attribution are only ever populated for an Openverse-sourced image. */
+export type WikimediaImageResult = {
+  id: string;
+  title: string | null;
+  creator: string | null;
+  creatorUrl: string | null;
+  url: string;
+  thumbnail: string | null;
+  foreignLandingUrl: string;
+  license: string;
+  licenseVersion: string | null;
+  provider: string | null;
+  width: number | null;
+  height: number | null;
+  attribution: string;
+};
+
+export type WikimediaSearchResponse = { results: WikimediaImageResult[]; resultCount: number; pageCount: number; page: number };
+
+/** One row of concept_media/scene_media -- sourceProvider/sourceUrl/attribution are only ever populated for an Openverse- or Wikimedia-sourced image. */
 export type ConceptMedia = {
   id: string;
   conceptId: string;
@@ -1538,7 +1556,11 @@ export const api = {
       apiClient
         .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/concepts/${id}/media/openverse`, { image })
         .then((r) => r.data),
-    /** Every image on this concept, however it got there (upload, URL, or Openverse). */
+    addConceptMediaWikimedia: (id: string, image: WikimediaImageResult) =>
+      apiClient
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/concepts/${id}/media/wikimedia`, { image })
+        .then((r) => r.data),
+    /** Every image on this concept, however it got there (upload, URL, Openverse, or Wikimedia). */
     getConceptMedia: (id: string) =>
       apiClient.get<{ items: ConceptMedia[] }>(`/api/v1/admin/concepts/${id}/media`).then((r) => r.data.items),
     deleteConceptMedia: (id: string, mediaId: string) =>
@@ -1555,6 +1577,9 @@ export const api = {
     /** Searches Openverse by each concept's own label and attaches the top result -- omit `ids` to target every concept in the corpus with no image at all. */
     bulkOpenverseAutofillConcepts: (ids?: string[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/openverse-autofill", { ids }).then((r) => r.data),
+    /** Same idea, searching Wikimedia Commons instead. */
+    bulkWikimediaAutofillConcepts: (ids?: string[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/concepts/media/wikimedia-autofill", { ids }).then((r) => r.data),
     bulkUploadConcepts: (file: File) => {
       const form = new FormData();
       form.append("file", file);
@@ -1568,6 +1593,11 @@ export const api = {
     searchOpenverse: (q: string, page = 1, pageSize = 20) =>
       apiClient
         .get<OpenverseSearchResponse>("/api/v1/admin/openverse/search", { params: { q, page, pageSize } })
+        .then((r) => r.data),
+    /** Same idea, searching Wikimedia Commons directly. */
+    searchWikimedia: (q: string, page = 1, pageSize = 20) =>
+      apiClient
+        .get<WikimediaSearchResponse>("/api/v1/admin/wikimedia/search", { params: { q, page, pageSize } })
         .then((r) => r.data),
 
     createScene: (data: AdminSceneInput) =>
@@ -1601,7 +1631,11 @@ export const api = {
       apiClient
         .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/scenes/${id}/media/openverse`, { image })
         .then((r) => r.data),
-    /** Every image on this scene, however it got there (upload, URL, or Openverse). */
+    addSceneMediaWikimedia: (id: string, image: WikimediaImageResult) =>
+      apiClient
+        .post<{ id: string; publicUrl: string } | PendingResult>(`/api/v1/admin/scenes/${id}/media/wikimedia`, { image })
+        .then((r) => r.data),
+    /** Every image on this scene, however it got there (upload, URL, Openverse, or Wikimedia). */
     getSceneMedia: (id: string) =>
       apiClient.get<{ items: SceneMedia[] }>(`/api/v1/admin/scenes/${id}/media`).then((r) => r.data.items),
     deleteSceneMedia: (id: string, mediaId: string) =>
@@ -1618,6 +1652,8 @@ export const api = {
     /** Searches Openverse by each scene's own title and attaches the top result -- omit `ids` to target every scene with no image at all. */
     bulkOpenverseAutofillScenes: (ids?: string[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/openverse-autofill", { ids }).then((r) => r.data),
+    bulkWikimediaAutofillScenes: (ids?: string[]) =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/scenes/media/wikimedia-autofill", { ids }).then((r) => r.data),
     bulkUploadScenes: (file: File) => {
       const form = new FormData();
       form.append("file", file);

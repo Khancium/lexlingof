@@ -475,6 +475,38 @@ collections, etc.) instead of only manual upload / "From URL":
   mismatched credit line would be a data-quality issue, not a security one, the same trust
   level already extended to an admin's own "From URL" input.
 
+#### Wikimedia Commons, alongside Openverse (`services/wikimedia.service.ts`)
+
+A second, independent image source: searches [Wikimedia Commons](https://commons.wikimedia.org)'
+own media library directly via its `action=query&generator=search` API, rather than through
+Openverse's aggregated (and comparatively smaller) slice of it — useful when Openverse hasn't
+indexed an image yet, or an admin specifically wants Commons' much larger catalog. Mirrors the
+Openverse integration's shape exactly, as a parallel, not a replacement:
+
+- **Search** (`GET /admin/wikimedia/search`, same `requireAnyPermission()` gate) queries the
+  `File:` namespace and reads each result's `imageinfo.extmetadata.License` slug (e.g.
+  `cc-by-sa-4.0`, `cc0`, `pd`) — Commons has no built-in `license_type` filter like Openverse, so
+  this is checked client-side in the service: anything tagged non-commercial (`nc`) or
+  no-derivatives (`nd`) is dropped, same commercial-use-and-modification policy as Openverse.
+  Total hit count comes from a `list=search&srinfo=totalhits` sub-query folded into the same
+  request, used to compute a `pageCount` matching `OpenverseSearchResponse`'s shape.
+  Unauthenticated (Commons' search API needs no key), but requires a descriptive `User-Agent`
+  per Wikimedia's API etiquette (their anti-abuse tooling is aggressive toward anonymous-looking
+  traffic) — a static `Lexlingo/1.0 (...)` string, same idea as the browser-like `User-Agent`
+  `storage.service.ts` sends when fetching an admin-submitted "From URL" image.
+- **Attribution is reconstructed**, not verbatim — unlike Openverse, Commons' `imageinfo` has no
+  single ready-to-use credit-line field; `buildAttribution()` assembles one from the title,
+  the `Artist` field (HTML-stripped), and the parsed license slug.
+- **Same storage columns, a different `source_provider`**: `"wikimedia"` instead of
+  `"openverse"`, same `source_url` (the Commons file description page) / `attribution` pair on
+  `concept_media`/`scene_media` — no schema change needed, `source_provider` was always a plain
+  string.
+- **Manual picker and bulk auto-fill** (`AdminWikimediaPicker`, `AdminOpenverseAutofill` reused
+  with a `providerLabel="Wikimedia Commons"` prop rather than a second duplicate component) sit
+  right next to their Openverse counterparts on both admin pages — `POST
+  /admin/{concepts,scenes}/:id/media/wikimedia` for a manually-picked image, `POST
+  /admin/{concepts,scenes}/media/wikimedia-autofill` for the bulk sweep.
+
 ### 3.10 Paste-a-list bulk create (categories, concepts, scenes)
 
 A lighter-weight sibling of the CSV/JSON bulk upload for the common case of just wanting to

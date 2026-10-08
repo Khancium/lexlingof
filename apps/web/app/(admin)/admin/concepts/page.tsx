@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { api, type Category, type ConceptListItem, type OpenverseImageResult } from "@/lib/api";
+import { api, type Category, type ConceptListItem, type OpenverseImageResult, type WikimediaImageResult } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
@@ -18,10 +18,13 @@ import { AdminCreateCategory } from "@/components/admin-create-category";
 
 // Loaded on demand only -- both are sizeable modals rendered for a small
 // fraction of page visits (cropping a freshly-picked file, or opening the
-// Openverse search), so there's no reason to ship them in this page's main
-// bundle for every admin who never touches either feature this visit.
+// Openverse/Wikimedia search), so there's no reason to ship them in this
+// page's main bundle for every admin who never touches either feature this visit.
 const ImageCropper = dynamic(() => import("@/components/image-cropper").then((m) => m.ImageCropper), { ssr: false });
 const AdminOpenversePicker = dynamic(() => import("@/components/admin-openverse-picker").then((m) => m.AdminOpenversePicker), {
+  ssr: false,
+});
+const AdminWikimediaPicker = dynamic(() => import("@/components/admin-wikimedia-picker").then((m) => m.AdminWikimediaPicker), {
   ssr: false,
 });
 
@@ -67,6 +70,7 @@ export default function AdminConceptsPage() {
   const [uploadMessage, setUploadMessage] = useState<{ id: string; text: string; error?: boolean } | null>(null);
   const [urlEntryId, setUrlEntryId] = useState<string | null>(null);
   const [openverseConceptId, setOpenverseConceptId] = useState<string | null>(null);
+  const [wikimediaConceptId, setWikimediaConceptId] = useState<string | null>(null);
   const [imagesConceptId, setImagesConceptId] = useState<string | null>(null);
   const [cropTarget, setCropTarget] = useState<{ conceptId: string; url: string } | null>(null);
   const [urlEntryValue, setUrlEntryValue] = useState("");
@@ -214,6 +218,20 @@ export default function AdminConceptsPage() {
     }
   }
 
+  async function handleAddImageWikimedia(conceptId: string, image: WikimediaImageResult) {
+    setUploadingId(conceptId);
+    setUploadMessage(null);
+    try {
+      const result = await api.admin.addConceptMediaWikimedia(conceptId, image);
+      setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added from Wikimedia Commons" });
+    } catch (err) {
+      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      throw err;
+    } finally {
+      setUploadingId(null);
+    }
+  }
+
   function startUrlEntry(conceptId: string) {
     setUrlEntryId(conceptId);
     setUrlEntryValue("");
@@ -333,6 +351,21 @@ export default function AdminConceptsPage() {
     setBulkAutofillInfo(null);
     try {
       const result = await api.admin.bulkOpenverseAutofillConcepts([...selected]);
+      setBulkAutofillInfo(
+        `Added ${result.created} image(s).` + (result.errors.length > 0 ? ` ${result.errors.length} failed.` : ""),
+      );
+      setSelected(new Set());
+      await load({ silent: true });
+    } finally {
+      setIsBulkAutofilling(false);
+    }
+  }
+
+  async function handleBulkAutofillWikimedia() {
+    setIsBulkAutofilling(true);
+    setBulkAutofillInfo(null);
+    try {
+      const result = await api.admin.bulkWikimediaAutofillConcepts([...selected]);
       setBulkAutofillInfo(
         `Added ${result.created} image(s).` + (result.errors.length > 0 ? ` ${result.errors.length} failed.` : ""),
       );
@@ -465,6 +498,13 @@ export default function AdminConceptsPage() {
             onDone={() => load({ silent: true })}
           />
 
+          <AdminOpenverseAutofill
+            label="Auto-fill Missing Concept Images from Wikimedia Commons"
+            providerLabel="Wikimedia Commons"
+            onSubmit={() => api.admin.bulkWikimediaAutofillConcepts()}
+            onDone={() => load({ silent: true })}
+          />
+
           <AdminBulkBar
             count={selected.size}
             onClear={() => setSelected(new Set())}
@@ -496,6 +536,13 @@ export default function AdminConceptsPage() {
               className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
             >
               {isBulkAutofilling ? "Adding images..." : "Add images from Openverse"}
+            </button>
+            <button
+              onClick={handleBulkAutofillWikimedia}
+              disabled={isBulkAutofilling}
+              className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink hover:bg-border disabled:opacity-50"
+            >
+              {isBulkAutofilling ? "Adding images..." : "Add images from Wikimedia"}
             </button>
             <button
               onClick={handleBulkDeleteImages}
@@ -756,6 +803,13 @@ export default function AdminConceptsPage() {
                           </button>
                           <span className="text-ink-muted">·</span>
                           <button
+                            onClick={() => setWikimediaConceptId(concept.id)}
+                            className="text-xs font-semibold text-brand hover:underline"
+                          >
+                            Wikimedia
+                          </button>
+                          <span className="text-ink-muted">·</span>
+                          <button
                             onClick={() => setImagesConceptId(imagesConceptId === concept.id ? null : concept.id)}
                             className="text-xs font-semibold text-brand hover:underline"
                           >
@@ -852,6 +906,14 @@ export default function AdminConceptsPage() {
           defaultQuery={concepts.find((c) => c.id === openverseConceptId)?.labelEnglish ?? ""}
           onSelect={(image) => handleAddImageOpenverse(openverseConceptId, image)}
           onClose={() => setOpenverseConceptId(null)}
+        />
+      ) : null}
+
+      {wikimediaConceptId ? (
+        <AdminWikimediaPicker
+          defaultQuery={concepts.find((c) => c.id === wikimediaConceptId)?.labelEnglish ?? ""}
+          onSelect={(image) => handleAddImageWikimedia(wikimediaConceptId, image)}
+          onClose={() => setWikimediaConceptId(null)}
         />
       ) : null}
 
