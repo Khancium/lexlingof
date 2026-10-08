@@ -18,6 +18,17 @@ type ContributionModule = (typeof contributionModule.enumValues)[number];
 const MAX_FETCHED_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 const FETCH_IMAGE_TIMEOUT_MS = 15_000;
 
+// Wikimedia's file servers (upload.wikimedia.org) rate-limit anonymous-
+// looking traffic much more aggressively than a generic browser User-Agent
+// would suggest -- a request re-hosting a just-picked Wikimedia Commons
+// image (wikimedia.service.ts's picker/autofill) was coming back HTTP 429
+// with the browser-impersonating header below. Same identifying UA the
+// Commons search API itself already sends, per Wikimedia's API etiquette.
+const WIKIMEDIA_USER_AGENT = "Lexlingo/1.0 (https://github.com/Khancium/lexlingof)";
+function isWikimediaHost(hostname: string): boolean {
+  return hostname === "wikimedia.org" || hostname.endsWith(".wikimedia.org") || hostname.endsWith(".wikipedia.org");
+}
+
 const r2 = new S3Client({
   endpoint: process.env.R2_ENDPOINT,
   region: "auto",
@@ -296,7 +307,9 @@ class StorageService {
       response = await fetch(parsed, {
         signal: controller.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "User-Agent": isWikimediaHost(parsed.hostname)
+            ? WIKIMEDIA_USER_AGENT
+            : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
           Accept: "image/*,*/*;q=0.8",
         },
       });
