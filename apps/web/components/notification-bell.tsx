@@ -23,8 +23,13 @@ function iconFor(notificationType: string): string {
   if (notificationType === "LEVEL_UP") return "🎉";
   if (notificationType.includes("BADGE")) return "🏅";
   if (notificationType.includes("VERIFIED")) return "✅";
+  if (notificationType === "FORUM_COMMENT") return "💬";
+  if (notificationType === "FORUM_REPLY") return "↩️";
+  if (notificationType === "FORUM_REACTION") return "❤️";
   return "🔔";
 }
+
+const FORUM_NOTIFICATION_TYPES = new Set(["FORUM_COMMENT", "FORUM_REPLY", "FORUM_REACTION"]);
 
 export default function NotificationBell() {
   const router = useRouter();
@@ -104,6 +109,13 @@ export default function NotificationBell() {
   function handleView(item: NotificationItem) {
     markRead(item);
     setOpen(false);
+
+    if (FORUM_NOTIFICATION_TYPES.has(item.notificationType)) {
+      const postId = item.data.postId;
+      router.push(typeof postId === "string" ? `/forum/${postId}` : "/forum");
+      return;
+    }
+
     const pendingSubmissionId = item.data.pendingSubmissionId;
     router.push(
       typeof pendingSubmissionId === "string" ? `/contributions?failed=${pendingSubmissionId}` : "/contributions",
@@ -161,6 +173,16 @@ export default function NotificationBell() {
                               handleView(item);
                             }}
                             className="rounded-full bg-red-600 px-3 py-1 text-[11px] font-semibold text-white hover:bg-red-500"
+                          >
+                            View
+                          </button>
+                        ) : FORUM_NOTIFICATION_TYPES.has(item.notificationType) ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleView(item);
+                            }}
+                            className="rounded-full bg-brand px-3 py-1 text-[11px] font-semibold text-ink-inverted hover:bg-brand-dark"
                           >
                             View
                           </button>

@@ -12,11 +12,54 @@ import {
   forumPollVotes,
   forumPostReactions,
   forumPosts,
+  notifications,
   sentences,
   users,
 } from "../../db/schema.js";
+import { sendPushToUser } from "../notifications/push.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
+
+/**
+ * Shared by every forum action below that reaches another user (a comment,
+ * reply, or reaction) -- persists an in-app row the same way every other
+ * notification type does, then best-effort pushes it (a failed push never
+ * blocks the underlying forum action, same pattern as gamification's badge
+ * push). Silently a no-op when the recipient is the actor themself, e.g.
+ * commenting on or reacting to your own post -- nobody needs to be told
+ * about their own activity.
+ */
+async function notifyForumActivity(params: {
+  recipientId: string;
+  actorId: string;
+  notificationType: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+}): Promise<void> {
+  if (params.recipientId === params.actorId) return;
+
+  await db.insert(notifications).values({
+    userId: params.recipientId,
+    channel: "push",
+    notificationType: params.notificationType,
+    title: params.title,
+    body: params.body,
+    data: params.data,
+  });
+
+  try {
+    await sendPushToUser(params.recipientId, params.title, params.body, params.data);
+  } catch (err) {
+    console.error(`[forum] push notification failed (${params.notificationType}):`, err);
+  }
+}
+
+/** Trims a comment/post body down to something that fits in a push notification. */
+function snippet(body: string, maxLength = 100): string {
+  const trimmed = body.trim();
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength - 1)}…` : trimmed;
+}
 
 export type ForumReactionType = (typeof forumPostReactions.$inferInsert)["reactionType"];
 
@@ -358,20 +401,26 @@ export async function createComment(
   postId: string,
   input: { body: string; parentCommentId?: string },
 ) {
-  const [post] = await db.select({ id: forumPosts.id }).from(forumPosts).where(and(eq(forumPosts.id, postId), isNull(forumPosts.deletedAt))).limit(1);
+  const [post] = await db
+    .select({ id: forumPosts.id, authorId: forumPosts.authorId })
+    .from(forumPosts)
+    .where(and(eq(forumPosts.id, postId), isNull(forumPosts.deletedAt)))
+    .limit(1);
   if (!post) {
     throw new HttpError(404, "NOT_FOUND", "Post not found");
   }
 
+  let parentAuthorId: string | null = null;
   if (input.parentCommentId) {
     const [parent] = await db
-      .select({ id: forumComments.id })
+      .select({ id: forumComments.id, authorId: forumComments.authorId })
       .from(forumComments)
       .where(and(eq(forumComments.id, input.parentCommentId), eq(forumComments.postId, postId), isNull(forumComments.deletedAt)))
       .limit(1);
     if (!parent) {
       throw new HttpError(404, "NOT_FOUND", "The comment you're replying to no longer exists");
     }
+    parentAuthorId = parent.authorId;
   }
 
   const [comment] = await db
@@ -383,6 +432,32 @@ export async function createComment(
       body: input.body,
     })
     .returning();
+
+  const [actor] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.id, userId)).limit(1);
+  const actorName = actor?.displayName ?? "Someone";
+
+  // A reply notifies the comment it replies to, not also the post author --
+  // keeps a busy reply thread from double-notifying the same person once
+  // per reply. A top-level comment notifies the post author.
+  if (parentAuthorId) {
+    await notifyForumActivity({
+      recipientId: parentAuthorId,
+      actorId: userId,
+      notificationType: "FORUM_REPLY",
+      title: `${actorName} replied to your comment`,
+      body: snippet(input.body),
+      data: { postId, commentId: comment!.id },
+    });
+  } else {
+    await notifyForumActivity({
+      recipientId: post.authorId,
+      actorId: userId,
+      notificationType: "FORUM_COMMENT",
+      title: `${actorName} commented on your post`,
+      body: snippet(input.body),
+      data: { postId, commentId: comment!.id },
+    });
+  }
 
   return comment!;
 }
@@ -404,13 +479,37 @@ export async function deleteComment(id: string): Promise<void> {
 }
 
 export async function setPostReaction(postId: string, userId: string, reactionType: ForumReactionType) {
-  const [post] = await db.select({ id: forumPosts.id }).from(forumPosts).where(and(eq(forumPosts.id, postId), isNull(forumPosts.deletedAt))).limit(1);
+  const [post] = await db
+    .select({ id: forumPosts.id, authorId: forumPosts.authorId })
+    .from(forumPosts)
+    .where(and(eq(forumPosts.id, postId), isNull(forumPosts.deletedAt)))
+    .limit(1);
   if (!post) throw new HttpError(404, "NOT_FOUND", "Post not found");
+
+  // Only the first reaction from this user notifies -- switching which
+  // emoji they picked (still the same upsert) doesn't re-notify the author.
+  const [existing] = await db
+    .select({ id: forumPostReactions.id })
+    .from(forumPostReactions)
+    .where(and(eq(forumPostReactions.postId, postId), eq(forumPostReactions.userId, userId)))
+    .limit(1);
 
   await db
     .insert(forumPostReactions)
     .values({ postId, userId, reactionType })
     .onConflictDoUpdate({ target: [forumPostReactions.postId, forumPostReactions.userId], set: { reactionType } });
+
+  if (!existing) {
+    const [actor] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.id, userId)).limit(1);
+    await notifyForumActivity({
+      recipientId: post.authorId,
+      actorId: userId,
+      notificationType: "FORUM_REACTION",
+      title: `${actor?.displayName ?? "Someone"} reacted to your post`,
+      body: "Tap to see the reaction.",
+      data: { postId },
+    });
+  }
 }
 
 export async function removePostReaction(postId: string, userId: string): Promise<void> {
@@ -419,16 +518,34 @@ export async function removePostReaction(postId: string, userId: string): Promis
 
 export async function setCommentReaction(commentId: string, userId: string, reactionType: ForumReactionType) {
   const [comment] = await db
-    .select({ id: forumComments.id })
+    .select({ id: forumComments.id, authorId: forumComments.authorId, postId: forumComments.postId })
     .from(forumComments)
     .where(and(eq(forumComments.id, commentId), isNull(forumComments.deletedAt)))
     .limit(1);
   if (!comment) throw new HttpError(404, "NOT_FOUND", "Comment not found");
 
+  const [existing] = await db
+    .select({ id: forumCommentReactions.id })
+    .from(forumCommentReactions)
+    .where(and(eq(forumCommentReactions.commentId, commentId), eq(forumCommentReactions.userId, userId)))
+    .limit(1);
+
   await db
     .insert(forumCommentReactions)
     .values({ commentId, userId, reactionType })
     .onConflictDoUpdate({ target: [forumCommentReactions.commentId, forumCommentReactions.userId], set: { reactionType } });
+
+  if (!existing) {
+    const [actor] = await db.select({ displayName: users.displayName }).from(users).where(eq(users.id, userId)).limit(1);
+    await notifyForumActivity({
+      recipientId: comment.authorId,
+      actorId: userId,
+      notificationType: "FORUM_REACTION",
+      title: `${actor?.displayName ?? "Someone"} reacted to your comment`,
+      body: "Tap to see the reaction.",
+      data: { postId: comment.postId, commentId },
+    });
+  }
 }
 
 export async function removeCommentReaction(commentId: string, userId: string): Promise<void> {
