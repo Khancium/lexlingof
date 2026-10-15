@@ -6,6 +6,7 @@ import {
   categories,
   concepts,
   conceptMedia,
+  contributions,
   contributorDemographics,
   contributorProfiles,
   dialects,
@@ -34,6 +35,15 @@ export type PublicRecording = {
   village: string | null;
 };
 
+export type PublicRelatedWord = { id: string; word: string };
+
+/** tribe/city/village are plain display-name strings here (as disclosed to the public), not internal uuids -- a visitor picks from the values getPublicDictionaryFilterOptions() returns, which are the same strings. */
+export type LocationFilter = { tribe?: string; city?: string; village?: string };
+
+function hasLocationFilter(f: LocationFilter): boolean {
+  return Boolean(f.tribe || f.city || f.village);
+}
+
 const CONTRIBUTOR_SELECT = {
   language: languages.nameEnglish,
   dialect: dialects.nameEnglish,
@@ -49,21 +59,37 @@ function privacyFields(row: { city: string | null; tribeName: string | null; vil
   return { city: shared ? row.city : null, tribe: shared ? row.tribeName : null, village: shared ? row.villageName : null };
 }
 
+/**
+ * The same showLocation-gated tribe/city/village equality checks, reused by
+ * every query that needs to filter recordings down to a specific tribe/
+ * city/village -- a visitor can only filter on what a contributor agreed to
+ * disclose, so "filter by tribe X" and "disclose tribe X" share one gate.
+ */
+function locationConditions(f: LocationFilter) {
+  const conditions = [];
+  if (f.tribe) conditions.push(and(eq(contributorProfiles.showLocation, true), eq(tribes.name, f.tribe))!);
+  if (f.city) conditions.push(and(eq(contributorProfiles.showLocation, true), eq(contributorDemographics.city, f.city))!);
+  if (f.village) conditions.push(and(eq(contributorProfiles.showLocation, true), eq(villages.name, f.village))!);
+  return conditions;
+}
+
 export type PublicDictionaryEntry = {
   id: string;
   word: string;
   category: string;
   imageUrl: string | null;
   recordings: PublicRecording[];
+  relatedWords: PublicRelatedWord[];
 };
 
-export async function getPublicDictionary(params: { search?: string; categoryId?: string; limit: number; offset: number }) {
+export async function getPublicDictionary(params: { search?: string; categoryId?: string; limit: number; offset: number } & LocationFilter) {
   const conditions = [sql`${concepts.deletedAt} is null`, eq(concepts.isActive, true)];
   if (params.search) conditions.push(ilike(concepts.labelEnglish, `%${params.search}%`));
   if (params.categoryId) conditions.push(eq(concepts.categoryId, params.categoryId));
-  // Only concepts an admin has actually published at least one recording for.
-  const publishedConceptIds = db.selectDistinct({ conceptId: publishedWordRecordings.conceptId }).from(publishedWordRecordings);
-  conditions.push(inArray(concepts.id, publishedConceptIds));
+  // Only concepts with at least one published recording -- matching the
+  // tribe/city/village filter too, when one is set, so a word with published
+  // recordings that all fail the filter doesn't appear with an empty list.
+  conditions.push(inArray(concepts.id, conceptIdsWithPublishedRecording(params)));
   const whereClause = and(...conditions);
 
   const [rows, [totalRow]] = await Promise.all([
@@ -71,6 +97,7 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
       .select({
         id: concepts.id,
         word: concepts.labelEnglish,
+        categoryId: concepts.categoryId,
         category: categories.nameEnglish,
         imageUrl: conceptMedia.publicUrl,
       })
@@ -85,18 +112,46 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
   ]);
 
   const conceptIds = rows.map((r) => r.id);
-  const recordingsByConcept = await getPublishedRecordingsByConcepts(conceptIds);
+  const [recordingsByConcept, relatedByConcept] = await Promise.all([
+    getPublishedRecordingsByConcepts(conceptIds, params),
+    relatedWordsByCategory(new Map(rows.map((r) => [r.id, r.categoryId]))),
+  ]);
 
   return {
-    items: rows.map((r) => ({ id: r.id, word: r.word, category: r.category, imageUrl: r.imageUrl, recordings: recordingsByConcept.get(r.id) ?? [] })),
+    items: rows.map((r) => ({
+      id: r.id,
+      word: r.word,
+      category: r.category,
+      imageUrl: r.imageUrl,
+      recordings: recordingsByConcept.get(r.id) ?? [],
+      relatedWords: relatedByConcept.get(r.id) ?? [],
+    })),
     total: totalRow?.value ?? 0,
     limit: params.limit,
     offset: params.offset,
   };
 }
 
-async function getPublishedRecordingsByConcepts(conceptIds: string[]): Promise<Map<string, PublicRecording[]>> {
+/** Concept ids with >=1 published recording -- narrowed to recordings matching the location filter, when one is given. */
+function conceptIdsWithPublishedRecording(locationFilter: LocationFilter) {
+  if (!hasLocationFilter(locationFilter)) {
+    return db.selectDistinct({ conceptId: publishedWordRecordings.conceptId }).from(publishedWordRecordings);
+  }
+  return db
+    .selectDistinct({ conceptId: publishedWordRecordings.conceptId })
+    .from(publishedWordRecordings)
+    .innerJoin(wordRecordings, eq(wordRecordings.id, publishedWordRecordings.wordRecordingId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, wordRecordings.userId))
+    .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+    .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+    .leftJoin(contributorProfiles, eq(contributorProfiles.userId, wordRecordings.userId))
+    .where(and(...locationConditions(locationFilter)));
+}
+
+async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFilter: LocationFilter): Promise<Map<string, PublicRecording[]>> {
   if (conceptIds.length === 0) return new Map();
+
+  const conditions = [inArray(publishedWordRecordings.conceptId, conceptIds), ...locationConditions(locationFilter)];
 
   const rows = await db
     .select({
@@ -112,12 +167,15 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[]): Promise<M
     .from(publishedWordRecordings)
     .innerJoin(wordRecordings, eq(wordRecordings.id, publishedWordRecordings.wordRecordingId))
     .innerJoin(audioFiles, eq(audioFiles.id, wordRecordings.audioFileId))
+    .leftJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
+    .leftJoin(languages, eq(languages.id, contributions.languageId))
+    .leftJoin(dialects, eq(dialects.id, contributions.dialectId))
     .leftJoin(contributorDemographics, eq(contributorDemographics.userId, wordRecordings.userId))
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .leftJoin(contributorProfiles, eq(contributorProfiles.userId, wordRecordings.userId))
     .leftJoin(users, eq(users.id, wordRecordings.userId))
-    .where(inArray(publishedWordRecordings.conceptId, conceptIds))
+    .where(and(...conditions))
     .orderBy(asc(publishedWordRecordings.sortOrder), desc(publishedWordRecordings.publishedAt));
 
   // Promise.all preserves input order in its RETURN array regardless of
@@ -150,6 +208,72 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[]): Promise<M
   return byConcept;
 }
 
+/**
+ * For every concept in the current page, a handful of other PUBLISHED
+ * concepts sharing the same category -- "other words like this one", used
+ * for the dictionary's "related words" suggestions. Scoped to published
+ * concepts only, since suggesting a word with no audio to play would be a
+ * dead end.
+ */
+async function relatedWordsByCategory(categoryByConceptId: Map<string, string>, limitPerConcept = 6): Promise<Map<string, PublicRelatedWord[]>> {
+  const categoryIds = [...new Set(categoryByConceptId.values())];
+  if (categoryIds.length === 0) return new Map();
+
+  const publishedConceptIds = db.selectDistinct({ conceptId: publishedWordRecordings.conceptId }).from(publishedWordRecordings);
+  const rows = await db
+    .select({ id: concepts.id, word: concepts.labelEnglish, categoryId: concepts.categoryId })
+    .from(concepts)
+    .where(
+      and(
+        inArray(concepts.categoryId, categoryIds),
+        eq(concepts.isActive, true),
+        sql`${concepts.deletedAt} is null`,
+        inArray(concepts.id, publishedConceptIds),
+      ),
+    )
+    .orderBy(asc(concepts.labelEnglish));
+
+  const byCategory = new Map<string, PublicRelatedWord[]>();
+  for (const r of rows) {
+    const list = byCategory.get(r.categoryId) ?? [];
+    list.push({ id: r.id, word: r.word });
+    byCategory.set(r.categoryId, list);
+  }
+
+  const relatedByConceptId = new Map<string, PublicRelatedWord[]>();
+  for (const [conceptId, categoryId] of categoryByConceptId) {
+    const candidates = (byCategory.get(categoryId) ?? []).filter((c) => c.id !== conceptId);
+    relatedByConceptId.set(conceptId, candidates.slice(0, limitPerConcept));
+  }
+  return relatedByConceptId;
+}
+
+/** Distinct tribe/city/village values a dictionary visitor can actually filter by -- only ones disclosed (showLocation) on a published recording. Populates the filter dropdowns. */
+export async function getPublicDictionaryFilterOptions(): Promise<{ tribes: string[]; cities: string[]; villages: string[] }> {
+  const rows = await db
+    .selectDistinct({ tribe: tribes.name, city: contributorDemographics.city, village: villages.name })
+    .from(publishedWordRecordings)
+    .innerJoin(wordRecordings, eq(wordRecordings.id, publishedWordRecordings.wordRecordingId))
+    .innerJoin(contributorProfiles, eq(contributorProfiles.userId, wordRecordings.userId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, wordRecordings.userId))
+    .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+    .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+    .where(eq(contributorProfiles.showLocation, true));
+  return collectLocationOptions(rows);
+}
+
+function collectLocationOptions(rows: { tribe: string | null; city: string | null; village: string | null }[]) {
+  const tribeSet = new Set<string>();
+  const citySet = new Set<string>();
+  const villageSet = new Set<string>();
+  for (const r of rows) {
+    if (r.tribe) tribeSet.add(r.tribe);
+    if (r.city) citySet.add(r.city);
+    if (r.village) villageSet.add(r.village);
+  }
+  return { tribes: [...tribeSet].sort(), cities: [...citySet].sort(), villages: [...villageSet].sort() };
+}
+
 export type PublicSentenceEntry = {
   id: string;
   sentence: string;
@@ -157,12 +281,13 @@ export type PublicSentenceEntry = {
   translations: PublicRecording[];
 };
 
-export async function getPublicLanguageLearning(params: { search?: string; categoryId?: string; limit: number; offset: number }) {
+export async function getPublicLanguageLearning(
+  params: { search?: string; categoryId?: string; limit: number; offset: number } & LocationFilter,
+) {
   const conditions = [sql`${sentences.deletedAt} is null`, eq(sentences.isActive, true)];
   if (params.search) conditions.push(ilike(sentences.englishText, `%${params.search}%`));
   if (params.categoryId) conditions.push(eq(sentences.categoryId, params.categoryId));
-  const publishedSentenceIds = db.selectDistinct({ sentenceId: publishedTranslations.sentenceId }).from(publishedTranslations);
-  conditions.push(inArray(sentences.id, publishedSentenceIds));
+  conditions.push(inArray(sentences.id, sentenceIdsWithPublishedTranslation(params)));
   const whereClause = and(...conditions);
 
   const [rows, [totalRow]] = await Promise.all([
@@ -178,7 +303,7 @@ export async function getPublicLanguageLearning(params: { search?: string; categ
   ]);
 
   const sentenceIds = rows.map((r) => r.id);
-  const translationsBySentence = await getPublishedTranslationsBySentences(sentenceIds);
+  const translationsBySentence = await getPublishedTranslationsBySentences(sentenceIds, params);
 
   return {
     items: rows.map((r) => ({ id: r.id, sentence: r.sentence, category: r.category, translations: translationsBySentence.get(r.id) ?? [] })),
@@ -188,8 +313,28 @@ export async function getPublicLanguageLearning(params: { search?: string; categ
   };
 }
 
-async function getPublishedTranslationsBySentences(sentenceIds: string[]): Promise<Map<string, PublicRecording[]>> {
+function sentenceIdsWithPublishedTranslation(locationFilter: LocationFilter) {
+  if (!hasLocationFilter(locationFilter)) {
+    return db.selectDistinct({ sentenceId: publishedTranslations.sentenceId }).from(publishedTranslations);
+  }
+  return db
+    .selectDistinct({ sentenceId: publishedTranslations.sentenceId })
+    .from(publishedTranslations)
+    .innerJoin(translations, eq(translations.id, publishedTranslations.translationId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, translations.userId))
+    .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+    .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+    .leftJoin(contributorProfiles, eq(contributorProfiles.userId, translations.userId))
+    .where(and(...locationConditions(locationFilter)));
+}
+
+async function getPublishedTranslationsBySentences(
+  sentenceIds: string[],
+  locationFilter: LocationFilter,
+): Promise<Map<string, PublicRecording[]>> {
   if (sentenceIds.length === 0) return new Map();
+
+  const conditions = [inArray(publishedTranslations.sentenceId, sentenceIds), ...locationConditions(locationFilter)];
 
   const rows = await db
     .select({
@@ -205,12 +350,15 @@ async function getPublishedTranslationsBySentences(sentenceIds: string[]): Promi
     .from(publishedTranslations)
     .innerJoin(translations, eq(translations.id, publishedTranslations.translationId))
     .leftJoin(audioFiles, eq(audioFiles.id, translations.audioFileId))
+    .leftJoin(contributions, eq(contributions.id, translations.contributionId))
+    .leftJoin(languages, eq(languages.id, contributions.languageId))
+    .leftJoin(dialects, eq(dialects.id, contributions.dialectId))
     .leftJoin(contributorDemographics, eq(contributorDemographics.userId, translations.userId))
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .leftJoin(contributorProfiles, eq(contributorProfiles.userId, translations.userId))
     .leftJoin(users, eq(users.id, translations.userId))
-    .where(inArray(publishedTranslations.sentenceId, sentenceIds))
+    .where(and(...conditions))
     .orderBy(asc(publishedTranslations.sortOrder), desc(publishedTranslations.publishedAt));
 
   const resolved = await Promise.all(
@@ -236,4 +384,18 @@ async function getPublishedTranslationsBySentences(sentenceIds: string[]): Promi
     bySentence.set(sentenceId, list);
   }
   return bySentence;
+}
+
+/** Same idea as getPublicDictionaryFilterOptions, scoped to published translations. */
+export async function getPublicLanguageLearningFilterOptions(): Promise<{ tribes: string[]; cities: string[]; villages: string[] }> {
+  const rows = await db
+    .selectDistinct({ tribe: tribes.name, city: contributorDemographics.city, village: villages.name })
+    .from(publishedTranslations)
+    .innerJoin(translations, eq(translations.id, publishedTranslations.translationId))
+    .innerJoin(contributorProfiles, eq(contributorProfiles.userId, translations.userId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, translations.userId))
+    .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
+    .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
+    .where(eq(contributorProfiles.showLocation, true));
+  return collectLocationOptions(rows);
 }
