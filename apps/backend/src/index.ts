@@ -18,6 +18,8 @@ import geoRoutes from "./modules/users/geo.routes.js";
 import audioUploadRoutes from "./modules/contributions/audio/audio-upload.routes.js";
 import sceneRoutes from "./modules/contributions/scene/scene.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
+import publishingRoutes from "./modules/admin/publishing.routes.js";
+import publicContentRoutes from "./modules/public-content/public-content.routes.js";
 import gamificationRoutes from "./modules/gamification/gamification.routes.js";
 import reviewsRoutes from "./modules/reviews/reviews.routes.js";
 import translationRoutes from "./modules/contributions/translation/translation.routes.js";
@@ -107,6 +109,8 @@ await server.register(notificationsRoutes, { prefix: "/api/v1/notifications" });
 // adminRoutes already covers both /api/v1/admin/* and /api/v1/superadmin/*
 // internally (there is no separate superAdminRoutes module).
 await server.register(adminRoutes, { prefix: "/api/v1" });
+await server.register(publishingRoutes, { prefix: "/api/v1" });
+await server.register(publicContentRoutes, { prefix: "/api/v1" });
 await server.register(forumRoutes, { prefix: "/api/v1/forum" });
 
 // Health checks. The versioned one is what was asked for; the bare one is

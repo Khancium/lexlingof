@@ -1131,6 +1131,34 @@ export type VolunteerListItem = {
 export type VolunteerActivity = { pendingChanges: PendingChange[]; auditLog: AuditLog[] };
 
 /* -------------------------------------------------------------------------- */
+/*                                  Publishing                                */
+/* -------------------------------------------------------------------------- */
+
+export type PublishingConceptItem = { id: string; labelEnglish: string; categoryName: string; eligibleCount: number; publishedCount: number };
+export type PublishingSentenceItem = { id: string; englishText: string; categoryName: string | null; eligibleCount: number; publishedCount: number };
+export type PublishingListResponse<T> = { items: T[]; total: number; limit: number; offset: number };
+
+/** One contributor's verified recording, as shown in the curation UI -- city/tribe/village are already null here unless that contributor opted in, same privacy gate the public API applies. */
+export type PublishableRecording = {
+  id: string;
+  nativeText: string | null;
+  romanization: string | null;
+  ipa: string | null;
+  audioUrl: string;
+  durationMs: number | null;
+  contributorName: string;
+  language: string | null;
+  dialect: string | null;
+  city: string | null;
+  tribe: string | null;
+  village: string | null;
+  locationShared: boolean;
+  isPublished: boolean;
+  publicationId: string | null;
+  sortOrder: number;
+};
+
+/* -------------------------------------------------------------------------- */
 /*                                     API                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -1731,6 +1759,30 @@ export const api = {
       apiClient
         .post<{ rejected: number; errors: { id: string; message?: string }[] }>("/api/v1/admin/pending-changes/bulk-reject", { ids, reason })
         .then((r) => r.data),
+  },
+
+  publishing: {
+    getConcepts: (params?: { search?: string; categoryId?: string; limit?: number; offset?: number }) =>
+      apiClient.get<PublishingListResponse<PublishingConceptItem>>("/api/v1/admin/publishing/concepts", { params }).then((r) => r.data),
+    getConceptRecordings: (conceptId: string) =>
+      apiClient
+        .get<{ items: PublishableRecording[] }>(`/api/v1/admin/publishing/concepts/${conceptId}/recordings`)
+        .then((r) => r.data.items),
+    publishRecording: (conceptId: string, recordingId: string) =>
+      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
+    unpublishRecording: (conceptId: string, recordingId: string) =>
+      apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
+
+    getSentences: (params?: { search?: string; categoryId?: string; limit?: number; offset?: number }) =>
+      apiClient.get<PublishingListResponse<PublishingSentenceItem>>("/api/v1/admin/publishing/sentences", { params }).then((r) => r.data),
+    getSentenceTranslations: (sentenceId: string) =>
+      apiClient
+        .get<{ items: PublishableRecording[] }>(`/api/v1/admin/publishing/sentences/${sentenceId}/translations`)
+        .then((r) => r.data.items),
+    publishTranslation: (sentenceId: string, translationId: string) =>
+      apiClient.put(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`),
+    unpublishTranslation: (sentenceId: string, translationId: string) =>
+      apiClient.delete(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`),
   },
 
   superadmin: {

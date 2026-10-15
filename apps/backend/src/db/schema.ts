@@ -2025,3 +2025,62 @@ export const contributorDemographicsRelations = relations(contributorDemographic
   village: one(villages, { fields: [contributorDemographics.villageId], references: [villages.id] }),
   quarter: one(quarters, { fields: [contributorDemographics.quarterId], references: [quarters.id] }),
 }));
+
+/* -------------------------------------------------------------------------- */
+/*                 Publishing -- public dictionary & language learning        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * An admin's curated pick: this one contributor's recording of this concept
+ * is good enough (and, often, interesting enough as a dialect sample) to show
+ * on the public dictionary. A concept can have zero, one, or several of
+ * these -- publishing a second/third recording for the same concept is how
+ * several contributors' pronunciations of the same word end up shown side by
+ * side (e.g. a Kandahar vs. a Peshawar speaker), not a replacement scheme
+ * like wordRecordings.isCurrent. Each individual recording can only be
+ * published once (uq below) -- publishing it again just moves its sortOrder.
+ */
+export const publishedWordRecordings = pgTable(
+  "published_word_recordings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    conceptId: uuid("concept_id")
+      .notNull()
+      .references(() => concepts.id, { onDelete: "cascade" }),
+    wordRecordingId: uuid("word_recording_id")
+      .notNull()
+      .references(() => wordRecordings.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    publishedBy: uuid("published_by")
+      .notNull()
+      .references(() => users.id),
+    publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_published_word_recordings_recording").on(t.wordRecordingId),
+    index("ix_published_word_recordings_concept").on(t.conceptId),
+  ],
+);
+
+/** Same idea as publishedWordRecordings, for Module 3 sentence translations. */
+export const publishedTranslations = pgTable(
+  "published_translations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    sentenceId: uuid("sentence_id")
+      .notNull()
+      .references(() => sentences.id, { onDelete: "cascade" }),
+    translationId: uuid("translation_id")
+      .notNull()
+      .references(() => translations.id, { onDelete: "cascade" }),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    publishedBy: uuid("published_by")
+      .notNull()
+      .references(() => users.id),
+    publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_published_translations_translation").on(t.translationId),
+    index("ix_published_translations_sentence").on(t.sentenceId),
+  ],
+);

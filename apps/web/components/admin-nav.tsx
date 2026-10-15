@@ -22,6 +22,7 @@ const LINKS = [
   { href: "/admin/sentences", label: "Sentences" },
   { href: "/admin/volunteers", label: "Volunteers" },
   { href: "/admin/suggestions", label: "Suggestions" },
+  { href: "/admin/publishing", label: "Publishing" },
 ];
 
 const SUPER_ADMIN_LINKS = [
