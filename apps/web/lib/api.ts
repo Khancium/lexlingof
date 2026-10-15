@@ -1170,6 +1170,7 @@ export type PublishableRecording = {
   contributorName: string;
   language: string | null;
   dialect: string | null;
+  status: ContributionStatusValue;
   city: string | null;
   tribe: string | null;
   village: string | null;

@@ -117,6 +117,7 @@ export type PublishableRecording = {
   contributorName: string;
   language: string | null;
   dialect: string | null;
+  status: (typeof contributions.status.enumValues)[number];
   city: string | null;
   tribe: string | null;
   village: string | null;
@@ -180,7 +181,7 @@ export async function listConceptsForPublishing(params: PublishingFilters) {
           .select({ conceptId: wordRecordings.conceptId, value: sql<number>`count(*)`.mapWith(Number) })
           .from(wordRecordings)
           .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
-          .where(and(inArray(wordRecordings.conceptId, conceptIds), eq(contributions.status, "verified"), eq(wordRecordings.isCurrent, true)))
+          .where(and(inArray(wordRecordings.conceptId, conceptIds), eq(wordRecordings.isCurrent, true)))
           .groupBy(wordRecordings.conceptId)
       : [],
     conceptIds.length
@@ -217,6 +218,7 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
       ipa: wordRecordings.ipa,
       audioStorageKey: audioFiles.storageKey,
       durationMs: wordRecordings.durationMs,
+      status: contributions.status,
       publicationId: publishedWordRecordings.id,
       sortOrder: publishedWordRecordings.sortOrder,
       ...CONTRIBUTOR_SELECT,
@@ -232,7 +234,7 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .leftJoin(contributorProfiles, eq(contributorProfiles.userId, wordRecordings.userId))
     .leftJoin(publishedWordRecordings, eq(publishedWordRecordings.wordRecordingId, wordRecordings.id))
-    .where(and(eq(wordRecordings.conceptId, conceptId), eq(contributions.status, "verified"), eq(wordRecordings.isCurrent, true)))
+    .where(and(eq(wordRecordings.conceptId, conceptId), eq(wordRecordings.isCurrent, true)))
     .orderBy(desc(wordRecordings.createdAt));
 
   return Promise.all(
@@ -246,6 +248,7 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
       contributorName: r.contributorName,
       language: r.language,
       dialect: r.dialect,
+      status: r.status,
       isPublished: r.publicationId !== null,
       publicationId: r.publicationId,
       sortOrder: r.sortOrder ?? 0,
@@ -303,7 +306,7 @@ export async function listSentencesForPublishing(params: PublishingFilters) {
           .select({ sentenceId: translations.sentenceId, value: sql<number>`count(*)`.mapWith(Number) })
           .from(translations)
           .innerJoin(contributions, eq(contributions.id, translations.contributionId))
-          .where(and(inArray(translations.sentenceId, sentenceIds), eq(contributions.status, "verified"), eq(translations.isCurrent, true)))
+          .where(and(inArray(translations.sentenceId, sentenceIds), eq(translations.isCurrent, true)))
           .groupBy(translations.sentenceId)
       : [],
     sentenceIds.length
@@ -340,6 +343,7 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
       ipa: translations.ipa,
       audioStorageKey: audioFiles.storageKey,
       durationMs: audioFiles.durationMs,
+      status: contributions.status,
       publicationId: publishedTranslations.id,
       sortOrder: publishedTranslations.sortOrder,
       ...CONTRIBUTOR_SELECT,
@@ -355,7 +359,7 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .leftJoin(contributorProfiles, eq(contributorProfiles.userId, translations.userId))
     .leftJoin(publishedTranslations, eq(publishedTranslations.translationId, translations.id))
-    .where(and(eq(translations.sentenceId, sentenceId), eq(contributions.status, "verified"), eq(translations.isCurrent, true)))
+    .where(and(eq(translations.sentenceId, sentenceId), eq(translations.isCurrent, true)))
     .orderBy(desc(translations.createdAt));
 
   const withAudio = rows.filter((r): r is typeof r & { audioStorageKey: string } => r.audioStorageKey !== null);
@@ -371,6 +375,7 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
       contributorName: r.contributorName,
       language: r.language,
       dialect: r.dialect,
+      status: r.status,
       isPublished: r.publicationId !== null,
       publicationId: r.publicationId,
       sortOrder: r.sortOrder ?? 0,

@@ -71,6 +71,23 @@ function MetaBadge({ label }: { label: string }) {
   return <span className="rounded-full bg-surface-card px-2 py-0.5 text-[11px] font-medium text-ink-muted ring-1 ring-border">{label}</span>;
 }
 
+const STATUS_COLOR: Record<ContributionStatusValue, string> = {
+  draft: "bg-slate-600",
+  pending: "bg-yellow-600",
+  under_review: "bg-yellow-600",
+  verified: "bg-emerald-600",
+  needs_correction: "bg-orange-600",
+  rejected: "bg-red-600",
+};
+
+function StatusBadge({ status }: { status: ContributionStatusValue }) {
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold text-white ${STATUS_COLOR[status]}`}>
+      {status.replace("_", " ")}
+    </span>
+  );
+}
+
 /** One contributor's recording -- audio player, metadata badges, and the publish/unpublish toggle. Shared by the words and sentences tabs. */
 function RecordingRow({
   recording,
@@ -91,6 +108,7 @@ function RecordingRow({
         <p className="truncate text-xs text-ink-muted">{recording.contributorName}</p>
       </div>
       <div className="flex flex-wrap gap-1.5">
+        <StatusBadge status={recording.status} />
         {recording.language ? <MetaBadge label={recording.language} /> : null}
         {recording.dialect ? <MetaBadge label={recording.dialect} /> : null}
         {recording.locationShared ? (
