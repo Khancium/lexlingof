@@ -1138,6 +1138,27 @@ export type PublishingConceptItem = { id: string; labelEnglish: string; category
 export type PublishingSentenceItem = { id: string; englishText: string; categoryName: string | null; eligibleCount: number; publishedCount: number };
 export type PublishingListResponse<T> = { items: T[]; total: number; limit: number; offset: number };
 
+/** Same contributor-attribute filter set as the Contributions admin page's getContributions params, applied here to narrow which concepts/sentences show up. */
+export type PublishingQueryParams = {
+  search?: string;
+  categoryId?: string;
+  status?: ContributionStatusValue[];
+  languageId?: string[];
+  dialectId?: string[];
+  userId?: string;
+  tribeId?: string[];
+  subTribeId?: string[];
+  country?: string;
+  city?: string;
+  villageId?: string[];
+  quarterId?: string[];
+  gender?: GenderOption[];
+  educationLevel?: EducationLevel[];
+  profession?: string;
+  limit?: number;
+  offset?: number;
+};
+
 /** One contributor's verified recording, as shown in the curation UI -- city/tribe/village are already null here unless that contributor opted in, same privacy gate the public API applies. */
 export type PublishableRecording = {
   id: string;
@@ -1157,6 +1178,12 @@ export type PublishableRecording = {
   publicationId: string | null;
   sortOrder: number;
 };
+
+/** Same array-to-CSV flattening api.admin.getContributions uses -- the backend's csvOf() query parsers expect one comma-joined string per filter, not axios's default repeated-key array serialization. */
+function flattenPublishingParams(params?: PublishingQueryParams): Record<string, string | number | undefined> | undefined {
+  if (!params) return undefined;
+  return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, Array.isArray(v) ? v.join(",") : v]));
+}
 
 /* -------------------------------------------------------------------------- */
 /*                                     API                                    */
@@ -1762,8 +1789,10 @@ export const api = {
   },
 
   publishing: {
-    getConcepts: (params?: { search?: string; categoryId?: string; limit?: number; offset?: number }) =>
-      apiClient.get<PublishingListResponse<PublishingConceptItem>>("/api/v1/admin/publishing/concepts", { params }).then((r) => r.data),
+    getConcepts: (params?: PublishingQueryParams) =>
+      apiClient
+        .get<PublishingListResponse<PublishingConceptItem>>("/api/v1/admin/publishing/concepts", { params: flattenPublishingParams(params) })
+        .then((r) => r.data),
     getConceptRecordings: (conceptId: string) =>
       apiClient
         .get<{ items: PublishableRecording[] }>(`/api/v1/admin/publishing/concepts/${conceptId}/recordings`)
@@ -1773,8 +1802,10 @@ export const api = {
     unpublishRecording: (conceptId: string, recordingId: string) =>
       apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
 
-    getSentences: (params?: { search?: string; categoryId?: string; limit?: number; offset?: number }) =>
-      apiClient.get<PublishingListResponse<PublishingSentenceItem>>("/api/v1/admin/publishing/sentences", { params }).then((r) => r.data),
+    getSentences: (params?: PublishingQueryParams) =>
+      apiClient
+        .get<PublishingListResponse<PublishingSentenceItem>>("/api/v1/admin/publishing/sentences", { params: flattenPublishingParams(params) })
+        .then((r) => r.data),
     getSentenceTranslations: (sentenceId: string) =>
       apiClient
         .get<{ items: PublishableRecording[] }>(`/api/v1/admin/publishing/sentences/${sentenceId}/translations`)

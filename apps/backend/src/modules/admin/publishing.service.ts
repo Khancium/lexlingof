@@ -1,4 +1,5 @@
-import { and, asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 
 import { db } from "../../db/index.js";
 import {
@@ -9,6 +10,8 @@ import {
   contributorDemographics,
   contributorProfiles,
   dialects,
+  educationLevelEnum,
+  genderEnum,
   languages,
   publishedTranslations,
   publishedWordRecordings,
@@ -21,6 +24,76 @@ import {
 } from "../../db/schema.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
+
+/**
+ * The same contributor-attribute filter set the Contributions admin page
+ * offers (admin.routes.ts's contributionsQuerySchema) -- applied here to
+ * narrow which CONCEPTS/SENTENCES appear (via an exists-against-their-
+ * contributions subquery), not to list contributions directly. Every field
+ * is optional; with none set, the only requirement is "has at least one
+ * non-deleted contribution of any status" -- i.e. has been contributed for
+ * at all.
+ */
+export type PublishingFilters = {
+  search?: string;
+  categoryId?: string;
+  status?: (typeof contributions.status.enumValues)[number][];
+  languageId?: string[];
+  dialectId?: string[];
+  userId?: string;
+  tribeId?: string[];
+  subTribeId?: string[];
+  country?: string;
+  city?: string;
+  villageId?: string[];
+  quarterId?: string[];
+  gender?: (typeof genderEnum.enumValues)[number][];
+  educationLevel?: (typeof educationLevelEnum.enumValues)[number][];
+  profession?: string;
+  limit: number;
+  offset: number;
+};
+
+/** Same conditions for both the word-recordings and translations paths -- only the "which user" column differs, since both tables denormalize userId directly (see schema.ts comments on wordRecordings.userId/translations.userId). */
+function buildContributionConditions(q: PublishingFilters, recordingUserId: PgColumn): SQL[] {
+  const conditions: SQL[] = [];
+  if (q.status?.length) conditions.push(inArray(contributions.status, q.status));
+  if (q.languageId?.length) conditions.push(inArray(contributions.languageId, q.languageId));
+  if (q.dialectId?.length) conditions.push(inArray(contributions.dialectId, q.dialectId));
+  if (q.userId) conditions.push(eq(recordingUserId, q.userId));
+  if (q.tribeId?.length) conditions.push(inArray(contributorDemographics.tribeId, q.tribeId));
+  if (q.subTribeId?.length) conditions.push(inArray(contributorDemographics.subTribeId, q.subTribeId));
+  if (q.country) conditions.push(eq(contributorDemographics.country, q.country));
+  if (q.city) conditions.push(eq(contributorDemographics.city, q.city));
+  if (q.villageId?.length) conditions.push(inArray(contributorDemographics.villageId, q.villageId));
+  if (q.quarterId?.length) conditions.push(inArray(contributorDemographics.quarterId, q.quarterId));
+  if (q.gender?.length) conditions.push(inArray(contributorDemographics.gender, q.gender));
+  if (q.educationLevel?.length) conditions.push(inArray(contributorDemographics.educationLevel, q.educationLevel));
+  if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
+  return conditions;
+}
+
+/** Concept ids with at least one non-deleted word recording matching the given filters -- the base "has been contributed for" case when no filters are set. */
+function conceptIdsMatchingFilters(q: PublishingFilters) {
+  const conditions = [sql`${wordRecordings.deletedAt} is null`, ...buildContributionConditions(q, wordRecordings.userId)];
+  return db
+    .selectDistinct({ conceptId: wordRecordings.conceptId })
+    .from(wordRecordings)
+    .innerJoin(contributions, eq(contributions.id, wordRecordings.contributionId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, wordRecordings.userId))
+    .where(and(...conditions));
+}
+
+/** Same idea as conceptIdsMatchingFilters, for sentences/translations. */
+function sentenceIdsMatchingFilters(q: PublishingFilters) {
+  const conditions = [sql`${translations.deletedAt} is null`, ...buildContributionConditions(q, translations.userId)];
+  return db
+    .selectDistinct({ sentenceId: translations.sentenceId })
+    .from(translations)
+    .innerJoin(contributions, eq(contributions.id, translations.contributionId))
+    .leftJoin(contributorDemographics, eq(contributorDemographics.userId, translations.userId))
+    .where(and(...conditions));
+}
 
 /**
  * One contributor's recording of a concept/sentence, with everything the
@@ -78,8 +151,8 @@ function applyLocationPrivacy<T extends { city: string | null; tribeName: string
 
 /* ---------------------------------- Concepts / words --------------------------------- */
 
-export async function listConceptsForPublishing(params: { search?: string; categoryId?: string; limit: number; offset: number }) {
-  const conditions = [sql`${concepts.deletedAt} is null`];
+export async function listConceptsForPublishing(params: PublishingFilters) {
+  const conditions = [sql`${concepts.deletedAt} is null`, inArray(concepts.id, conceptIdsMatchingFilters(params))];
   if (params.search) conditions.push(ilike(concepts.labelEnglish, `%${params.search}%`));
   if (params.categoryId) conditions.push(eq(concepts.categoryId, params.categoryId));
   const whereClause = and(...conditions);
@@ -201,8 +274,8 @@ export async function unpublishWordRecording(wordRecordingId: string): Promise<v
 
 /* --------------------------------- Sentences / translations --------------------------- */
 
-export async function listSentencesForPublishing(params: { search?: string; categoryId?: string; limit: number; offset: number }) {
-  const conditions = [sql`${sentences.deletedAt} is null`];
+export async function listSentencesForPublishing(params: PublishingFilters) {
+  const conditions = [sql`${sentences.deletedAt} is null`, inArray(sentences.id, sentenceIdsMatchingFilters(params))];
   if (params.search) conditions.push(ilike(sentences.englishText, `%${params.search}%`));
   if (params.categoryId) conditions.push(eq(sentences.categoryId, params.categoryId));
   const whereClause = and(...conditions);

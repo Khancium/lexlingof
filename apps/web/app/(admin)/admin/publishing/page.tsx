@@ -1,12 +1,71 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, type PublishableRecording, type PublishingConceptItem, type PublishingSentenceItem } from "@/lib/api";
+import { useCallback, useEffect, useState } from "react";
+import {
+  api,
+  type AdminUserOption,
+  type ContributionStatusValue,
+  type EducationLevel,
+  type GenderOption,
+  type Language,
+  type NamedOption,
+  type PublishableRecording,
+  type PublishingConceptItem,
+  type PublishingQueryParams,
+  type PublishingSentenceItem,
+} from "@/lib/api";
+import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS } from "@/lib/demographics-constants";
 import { Pagination } from "@/components/admin-pagination";
+import { AdminMultiSelect as MultiSelect } from "@/components/admin-multi-select";
 
 const PAGE_SIZE = 20;
 
 type Tab = "words" | "sentences";
+
+const STATUS_OPTIONS: ContributionStatusValue[] = ["draft", "pending", "under_review", "verified", "needs_correction", "rejected"];
+
+const selectClass = "rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border";
+const inputClass = "rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border";
+
+type Filters = {
+  search: string;
+  status: ContributionStatusValue[];
+  userId: string;
+  languageId: string[];
+  dialectId: string[];
+  tribeId: string[];
+  subTribeId: string[];
+  country: string;
+  city: string;
+  villageId: string[];
+  quarterId: string[];
+  gender: GenderOption[];
+  educationLevel: EducationLevel[];
+  profession: string;
+};
+
+const EMPTY_FILTERS: Filters = {
+  search: "",
+  status: [],
+  userId: "",
+  languageId: [],
+  dialectId: [],
+  tribeId: [],
+  subTribeId: [],
+  country: "",
+  city: "",
+  villageId: [],
+  quarterId: [],
+  gender: [],
+  educationLevel: [],
+  profession: "",
+};
+
+function dedupeById<T extends { id: string }>(lists: T[][]): T[] {
+  const map = new Map<string, T>();
+  for (const list of lists) for (const item of list) map.set(item.id, item);
+  return Array.from(map.values());
+}
 
 function MetaBadge({ label }: { label: string }) {
   return <span className="rounded-full bg-surface-card px-2 py-0.5 text-[11px] font-medium text-ink-muted ring-1 ring-border">{label}</span>;
@@ -62,7 +121,7 @@ function RecordingRow({
 
 export default function AdminPublishingPage() {
   const [tab, setTab] = useState<Tab>("words");
-  const [search, setSearch] = useState("");
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [offset, setOffset] = useState(0);
 
   const [conceptItems, setConceptItems] = useState<PublishingConceptItem[]>([]);
@@ -75,9 +134,34 @@ export default function AdminPublishingPage() {
   const [recordingsLoading, setRecordingsLoading] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
-  function load() {
+  // Filter dropdown data sources -- same shape as the Contributions page.
+  const [users, setUsers] = useState<AdminUserOption[]>([]);
+  const [languages, setLanguages] = useState<Language[]>([]);
+  const [tribes, setTribes] = useState<NamedOption[]>([]);
+  const [subTribes, setSubTribes] = useState<NamedOption[]>([]);
+  const [villages, setVillages] = useState<NamedOption[]>([]);
+  const [quarters, setQuarters] = useState<NamedOption[]>([]);
+
+  const load = useCallback(() => {
     setLoading(true);
-    const params = { search: search.trim() || undefined, limit: PAGE_SIZE, offset };
+    const params: PublishingQueryParams = {
+      search: filters.search.trim() || undefined,
+      status: filters.status.length ? filters.status : undefined,
+      userId: filters.userId || undefined,
+      languageId: filters.languageId.length ? filters.languageId : undefined,
+      dialectId: filters.dialectId.length ? filters.dialectId : undefined,
+      tribeId: filters.tribeId.length ? filters.tribeId : undefined,
+      subTribeId: filters.subTribeId.length ? filters.subTribeId : undefined,
+      country: filters.country.trim() || undefined,
+      city: filters.city.trim() || undefined,
+      villageId: filters.villageId.length ? filters.villageId : undefined,
+      quarterId: filters.quarterId.length ? filters.quarterId : undefined,
+      gender: filters.gender.length ? filters.gender : undefined,
+      educationLevel: filters.educationLevel.length ? filters.educationLevel : undefined,
+      profession: filters.profession.trim() || undefined,
+      limit: PAGE_SIZE,
+      offset,
+    };
     const request = tab === "words" ? api.publishing.getConcepts(params) : api.publishing.getSentences(params);
     request
       .then((res) => {
@@ -86,16 +170,74 @@ export default function AdminPublishingPage() {
         setTotal(res.total);
       })
       .finally(() => setLoading(false));
-  }
+  }, [tab, filters, offset]);
+
+  // Debounced the same way the Contributions page debounces its own text/demographic filters.
+  useEffect(() => {
+    const timer = setTimeout(load, 300);
+    return () => clearTimeout(timer);
+  }, [load]);
 
   useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, offset]);
+    api.admin.getUserOptions().then(setUsers).catch(() => setUsers([]));
+    api.languages.getAll().then(setLanguages).catch(() => setLanguages([]));
+    api.demographics.getTribes().then(setTribes).catch(() => setTribes([]));
+  }, []);
 
-  function handleSearchSubmit() {
+  useEffect(() => {
+    if (filters.tribeId.length) {
+      Promise.all(filters.tribeId.map((id) => api.demographics.getSubTribes(id)))
+        .then((lists) => setSubTribes(dedupeById(lists)))
+        .catch(() => setSubTribes([]));
+    } else {
+      setSubTribes([]);
+    }
+  }, [filters.tribeId]);
+
+  useEffect(() => {
+    if (filters.country.trim() && filters.city.trim()) {
+      api.demographics.getVillages(filters.country.trim(), filters.city.trim()).then(setVillages).catch(() => setVillages([]));
+    } else {
+      setVillages([]);
+    }
+  }, [filters.country, filters.city]);
+
+  useEffect(() => {
+    if (filters.villageId.length) {
+      Promise.all(filters.villageId.map((id) => api.demographics.getQuarters(id)))
+        .then((lists) => setQuarters(dedupeById(lists)))
+        .catch(() => setQuarters([]));
+    } else {
+      setQuarters([]);
+    }
+  }, [filters.villageId]);
+
+  const availableDialects = dedupeById(languages.filter((l) => filters.languageId.includes(l.id)).map((l) => l.dialects));
+
+  function setFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setOffset(0);
-    load();
+    setFilters((prev) => {
+      const next = { ...prev, [key]: value };
+      if (key === "languageId") next.dialectId = [];
+      if (key === "tribeId") next.subTribeId = [];
+      if (key === "country" || key === "city") {
+        next.villageId = [];
+        next.quarterId = [];
+      }
+      if (key === "villageId") next.quarterId = [];
+      return next;
+    });
+  }
+
+  function clearFilters() {
+    setFilters(EMPTY_FILTERS);
+    setOffset(0);
+  }
+
+  function switchTab(next: Tab) {
+    setTab(next);
+    setOffset(0);
+    setExpandedId(null);
   }
 
   function toggleExpand(id: string) {
@@ -130,59 +272,131 @@ export default function AdminPublishingPage() {
   const items = tab === "words" ? conceptItems : sentenceItems;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-ink">Publishing</h1>
         <p className="text-sm text-ink-muted">
           Choose which verified recordings appear on the public dictionary and language-learning site. A word or sentence can have several
-          published recordings at once -- publish more than one to show different dialects side by side.
+          published recordings at once -- publish more than one to show different dialects side by side. Only words and sentences that have
+          actually been contributed for appear below.
         </p>
       </div>
 
       <div className="flex gap-2">
         <button
           type="button"
-          onClick={() => {
-            setTab("words");
-            setOffset(0);
-            setExpandedId(null);
-          }}
+          onClick={() => switchTab("words")}
           className={`btn-duo px-4 py-2 text-sm font-semibold ${tab === "words" ? "bg-brand text-ink-inverted" : "btn-duo-secondary bg-surface-card text-ink"}`}
         >
           Words (Dictionary)
         </button>
         <button
           type="button"
-          onClick={() => {
-            setTab("sentences");
-            setOffset(0);
-            setExpandedId(null);
-          }}
+          onClick={() => switchTab("sentences")}
           className={`btn-duo px-4 py-2 text-sm font-semibold ${tab === "sentences" ? "bg-brand text-ink-inverted" : "btn-duo-secondary bg-surface-card text-ink"}`}
         >
           Sentences (Language Learning)
         </button>
       </div>
 
-      <div className="flex gap-2">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") handleSearchSubmit();
-          }}
-          placeholder={tab === "words" ? "Search words..." : "Search sentences..."}
-          className="flex-1 rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border"
-        />
-        <button onClick={handleSearchSubmit} className="btn-duo btn-duo-secondary bg-surface-card px-4 py-2 text-sm font-semibold text-ink">
-          Search
-        </button>
+      <div className="card-duo space-y-3 rounded-2xl bg-surface p-5 shadow-sm">
+        <div className="flex flex-wrap gap-3">
+          <input
+            value={filters.search}
+            onChange={(e) => setFilter("search", e.target.value)}
+            placeholder={tab === "words" ? "Search words..." : "Search sentences..."}
+            className={`${inputClass} min-w-64 flex-1`}
+          />
+          <select value={filters.userId} onChange={(e) => setFilter("userId", e.target.value)} className={selectClass}>
+            <option value="">All contributors</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.displayName} ({u.email})
+              </option>
+            ))}
+          </select>
+          <MultiSelect
+            label="statuses"
+            options={STATUS_OPTIONS.map((s) => ({ value: s, label: s.replace("_", " ") }))}
+            selected={filters.status}
+            onChange={(v) => setFilter("status", v)}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-3 border-t border-border pt-3">
+          <MultiSelect
+            label="languages"
+            options={languages.map((l) => ({ value: l.id, label: l.nameEnglish }))}
+            selected={filters.languageId}
+            onChange={(v) => setFilter("languageId", v)}
+          />
+          <MultiSelect
+            label="dialects"
+            options={availableDialects.map((d) => ({ value: d.id, label: d.nameEnglish }))}
+            selected={filters.dialectId}
+            onChange={(v) => setFilter("dialectId", v)}
+            disabled={filters.languageId.length === 0}
+          />
+          <MultiSelect
+            label="genders"
+            options={GENDER_OPTIONS.map((g) => ({ value: g.value, label: g.label }))}
+            selected={filters.gender}
+            onChange={(v) => setFilter("gender", v)}
+          />
+          <MultiSelect
+            label="education levels"
+            options={EDUCATION_LEVEL_OPTIONS.map((e) => ({ value: e.value, label: e.label }))}
+            selected={filters.educationLevel}
+            onChange={(v) => setFilter("educationLevel", v)}
+          />
+          <input
+            value={filters.profession}
+            onChange={(e) => setFilter("profession", e.target.value)}
+            placeholder="Profession contains..."
+            className={inputClass}
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-3">
+          <MultiSelect
+            label="tribes"
+            options={tribes.map((t) => ({ value: t.id, label: t.name }))}
+            selected={filters.tribeId}
+            onChange={(v) => setFilter("tribeId", v)}
+          />
+          <MultiSelect
+            label="sub-tribes"
+            options={subTribes.map((s) => ({ value: s.id, label: s.name }))}
+            selected={filters.subTribeId}
+            onChange={(v) => setFilter("subTribeId", v)}
+            disabled={filters.tribeId.length === 0}
+          />
+          <input value={filters.country} onChange={(e) => setFilter("country", e.target.value)} placeholder="Country" className={inputClass} />
+          <input value={filters.city} onChange={(e) => setFilter("city", e.target.value)} placeholder="City" className={inputClass} />
+          <MultiSelect
+            label="villages"
+            options={villages.map((v) => ({ value: v.id, label: v.name }))}
+            selected={filters.villageId}
+            onChange={(v) => setFilter("villageId", v)}
+            disabled={villages.length === 0}
+          />
+          <MultiSelect
+            label="quarters"
+            options={quarters.map((q) => ({ value: q.id, label: q.name }))}
+            selected={filters.quarterId}
+            onChange={(v) => setFilter("quarterId", v)}
+            disabled={filters.villageId.length === 0}
+          />
+          <button onClick={clearFilters} className="text-sm font-semibold text-brand hover:underline">
+            Clear filters
+          </button>
+        </div>
       </div>
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
       ) : items.length === 0 ? (
-        <p className="text-ink-muted">No results.</p>
+        <p className="text-ink-muted">No {tab === "words" ? "words" : "sentences"} match these filters.</p>
       ) : (
         <div className="space-y-2">
           {items.map((item) => {
