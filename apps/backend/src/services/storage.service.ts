@@ -1,4 +1,7 @@
-import type { Readable } from "node:stream";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { isIPv4, isIPv6 } from "node:net";
+import { Readable } from "node:stream";
+import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 
 import {
   DeleteObjectCommand,
@@ -17,6 +20,54 @@ type ContributionModule = (typeof contributionModule.enumValues)[number];
 
 const MAX_FETCHED_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 const FETCH_IMAGE_TIMEOUT_MS = 15_000;
+
+/**
+ * SSRF guard for fetchImageFromUrl: rejects loopback/private/link-local/
+ * reserved IP ranges (including the 169.254.169.254 cloud metadata address)
+ * so an admin-supplied "image URL" can't be used to make the backend reach
+ * internal services. This resolves DNS once and checks every returned
+ * address -- it does not defend against a TOCTOU DNS-rebind (an attacker's
+ * nameserver answering differently a moment later), which would need a
+ * fixed-IP fetch dispatcher to fully close; that's judged out of scope here
+ * since the attacker already has to be an admin-level account to reach this
+ * endpoint at all.
+ */
+function isPrivateOrReservedIp(address: string): boolean {
+  if (isIPv4(address)) {
+    const [a = 0, b = 0] = address.split(".").map(Number);
+    return (
+      a === 10 || // 10.0.0.0/8
+      a === 127 || // loopback
+      a === 0 || // 0.0.0.0/8
+      (a === 169 && b === 254) || // link-local, incl. cloud metadata
+      (a === 172 && b >= 16 && b <= 31) || // 172.16.0.0/12
+      (a === 192 && b === 168) || // 192.168.0.0/16
+      (a === 100 && b >= 64 && b <= 127) || // 100.64.0.0/10 (CGNAT)
+      a >= 224 // multicast (224/4) + reserved (240/4)
+    );
+  }
+  if (isIPv6(address)) {
+    const normalized = address.toLowerCase();
+    if (normalized === "::1" || normalized === "::") return true;
+    if (normalized.startsWith("fe80:") || normalized.startsWith("fc") || normalized.startsWith("fd")) return true; // link-local + unique-local
+    // IPv4-mapped (::ffff:a.b.c.d) -- check the embedded IPv4 too.
+    const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped?.[1]) return isPrivateOrReservedIp(mapped[1]);
+  }
+  return false;
+}
+
+async function assertPublicHostname(hostname: string): Promise<void> {
+  let addresses: { address: string }[];
+  try {
+    addresses = await dnsLookup(hostname, { all: true });
+  } catch {
+    throw new HttpError(400, "FETCH_FAILED", "Could not resolve that URL's host");
+  }
+  if (addresses.length === 0 || addresses.some((a) => isPrivateOrReservedIp(a.address))) {
+    throw new HttpError(400, "INVALID_URL", "That URL points to a private or internal address, which isn't allowed");
+  }
+}
 
 // Wikimedia's file servers (upload.wikimedia.org) rate-limit anonymous-
 // looking traffic much more aggressively than a generic browser User-Agent
@@ -341,6 +392,7 @@ class StorageService {
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
       throw new HttpError(400, "INVALID_URL", "Only http:// and https:// URLs are supported");
     }
+    await assertPublicHostname(parsed.hostname);
 
     // pixabay.com's own domain (both the /photos/<slug> page AND its
     // /images/download/... "download" link) sits behind Cloudflare bot
@@ -407,10 +459,27 @@ class StorageService {
       throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_FETCHED_IMAGE_BYTES} byte limit`);
     }
 
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > MAX_FETCHED_IMAGE_BYTES) {
-      throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_FETCHED_IMAGE_BYTES} byte limit`);
+    // Read the body as a stream and enforce the byte cap WHILE reading,
+    // rather than buffering the whole thing first and checking after -- a
+    // response with no (or a lying) Content-Length header could otherwise
+    // force an arbitrarily large body fully into memory before this ever
+    // rejected it.
+    if (!response.body) {
+      throw new HttpError(400, "FETCH_FAILED", "That URL returned an empty response");
     }
+    const bodyStream = Readable.fromWeb(response.body as NodeReadableStream<Uint8Array>);
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of bodyStream) {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buf.byteLength;
+      if (total > MAX_FETCHED_IMAGE_BYTES) {
+        bodyStream.destroy();
+        throw new HttpError(400, "FILE_TOO_LARGE", `Image exceeds the ${MAX_FETCHED_IMAGE_BYTES} byte limit`);
+      }
+      chunks.push(buf);
+    }
+    const buffer = Buffer.concat(chunks);
 
     const filename = decodeURIComponent(parsed.pathname.split("/").pop() || "image") || "image";
     return { buffer, filename };

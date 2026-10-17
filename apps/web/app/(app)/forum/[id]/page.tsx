@@ -24,6 +24,7 @@ export default function ForumPostPage() {
   const [isCommenting, setIsCommenting] = useState(false);
   const [commentError, setCommentError] = useState<string | null>(null);
   const [isDeletingPost, setIsDeletingPost] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -55,21 +56,34 @@ export default function ForumPostPage() {
   }
 
   async function handleReact(reactionType: Parameters<typeof api.forum.setPostReaction>[1]) {
-    await api.forum.setPostReaction(params.id, reactionType);
-    load();
+    setActionError(null);
+    try {
+      await api.forum.setPostReaction(params.id, reactionType);
+      load();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to react"));
+    }
   }
 
   async function handleUnreact() {
-    await api.forum.removePostReaction(params.id);
-    load();
+    setActionError(null);
+    try {
+      await api.forum.removePostReaction(params.id);
+      load();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to remove reaction"));
+    }
   }
 
   async function handleDeletePost() {
     if (!confirm("Delete this post? This cannot be undone.")) return;
     setIsDeletingPost(true);
+    setActionError(null);
     try {
       await api.forum.deletePost(params.id);
       router.push("/forum");
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to delete post"));
     } finally {
       setIsDeletingPost(false);
     }
@@ -148,6 +162,7 @@ export default function ForumPostPage() {
             {post.poll ? <ForumPollView postId={post.id} poll={post.poll} onVoted={load} /> : null}
 
             <ForumReactionBar reactionCounts={post.reactionCounts} myReaction={post.myReaction} onReact={handleReact} onUnreact={handleUnreact} />
+            {actionError ? <p className="text-xs text-red-600">{actionError}</p> : null}
           </div>
 
           <div className="card-duo space-y-3 rounded-2xl bg-surface p-4 shadow-sm">

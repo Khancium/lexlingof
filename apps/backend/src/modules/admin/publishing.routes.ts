@@ -17,7 +17,7 @@ import {
   listSentencesForPublishing,
   publishTranslation,
   publishWordRecording,
-  setConceptGrammar,
+  setRecordingsGrammar,
   unpublishAllRecordingsForConcept,
   unpublishAllTranslationsForSentence,
   unpublishTranslation,
@@ -66,7 +66,10 @@ const recordingIdParamSchema = z.object({ id: z.string().uuid(), recordingId: z.
 const translationIdParamSchema = z.object({ id: z.string().uuid(), translationId: z.string().uuid() });
 
 // Each field nullable-and-optional: omit to leave as-is, send null to clear, send a value to set.
-const conceptGrammarSchema = z.object({
+// recordingIds: which of the concept's recordings to apply this to -- one id
+// for a single edit, several for mass assignment across a multi-select.
+const recordingGrammarSchema = z.object({
+  recordingIds: z.array(z.string().uuid()).min(1),
   grammaticalGender: z.enum(conceptGrammaticalGender.enumValues).nullable().optional(),
   partOfSpeech: z.enum(conceptPartOfSpeech.enumValues).nullable().optional(),
   grammaticalNumber: z.enum(conceptGrammaticalNumber.enumValues).nullable().optional(),
@@ -111,10 +114,12 @@ export default async function publishingRoutes(fastify: FastifyInstance) {
     reply.code(204).send();
   });
 
-  fastify.put("/admin/publishing/concepts/:id/grammar", async (request, reply) => {
+  // Applies to every recordingId in the body at once -- a single id for one
+  // recording, several for mass assignment across a multi-select.
+  fastify.put("/admin/publishing/concepts/:id/recordings/grammar", async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
-    const grammar = conceptGrammarSchema.parse(request.body);
-    await setConceptGrammar(id, grammar);
+    const { recordingIds, ...grammar } = recordingGrammarSchema.parse(request.body);
+    await setRecordingsGrammar(id, recordingIds, grammar);
     reply.code(204).send();
   });
 

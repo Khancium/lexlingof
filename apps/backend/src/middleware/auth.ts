@@ -202,6 +202,20 @@ export function requirePermission(permission: string) {
 /*                           requireReviewerEligibility                       */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The boolean form of requireReviewerEligibility's check -- shared so a
+ * handler that needs to branch on "could this user review" (rather than
+ * reject the whole request) doesn't duplicate the SILVER-level lookup.
+ */
+export async function isReviewerEligible(userId: string, role: Role): Promise<boolean> {
+  if (role !== "contributor") return true;
+
+  const [stats] = await db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1);
+  const level = stats?.level ?? "BRONZE";
+  // Peer review unlocks at SILVER -- see requireReviewerEligibility below.
+  return level !== "BRONZE";
+}
+
 export function requireReviewerEligibility() {
   return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
     if (!request.user) {
@@ -209,25 +223,13 @@ export function requireReviewerEligibility() {
       return;
     }
 
-    if (request.user.role !== "contributor") {
-      return;
-    }
-
-    const [stats] = await db
-      .select({ level: userStats.level })
-      .from(userStats)
-      .where(eq(userStats.userId, request.user.id))
-      .limit(1);
-
-    const level = stats?.level ?? "BRONZE";
-
     // Peer review unlocks at SILVER -- this used to require GOLD, which
     // silently contradicted the frontend's canReview() gate and copy (both
     // already said SILVER), so a SILVER contributor got "Unlock Review
     // Access" showing 100%/threshold met and then a 403 the moment they
     // actually tried to load the queue.
-    if (level === "BRONZE") {
-      reply.code(403).send({ code: "INSUFFICIENT_LEVEL", currentLevel: level, required: "SILVER" });
+    if (!(await isReviewerEligible(request.user.id, request.user.role))) {
+      reply.code(403).send({ code: "INSUFFICIENT_LEVEL", required: "SILVER" });
       return;
     }
   };

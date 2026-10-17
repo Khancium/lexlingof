@@ -4,6 +4,7 @@ import { db } from "../db/index.js";
 import { audioFiles, audioFormat, contributionModule } from "../db/schema.js";
 import { trimSilence } from "./audio-trim.service.js";
 import { HttpError } from "../utils/http-error.js";
+import { sanitizeFilename } from "../utils/filename.js";
 import { storageService } from "./storage.service.js";
 
 // Silence trimming only applies to the two modules the dictionary/language-
@@ -88,14 +89,11 @@ export async function storeAudioBuffer(params: {
     });
   }
 
-  const ext = params.filename.includes(".") ? params.filename.split(".").pop() : undefined;
-  if (!ext) {
-    throw new HttpError(400, "INVALID_FILENAME", "filename must include a file extension");
-  }
-
-  const audioFileId = randomUUID();
-  const storageKey = `audio/${params.module.toLowerCase()}/${params.userId}/${audioFileId}.${ext}`;
+  // The extension comes from the already-validated mime type, not the
+  // client-supplied filename -- see sanitizeFilename's docstring.
   const format = MIME_TYPE_TO_FORMAT[mimeType];
+  const audioFileId = randomUUID();
+  const storageKey = `audio/${params.module.toLowerCase()}/${params.userId}/${audioFileId}.${format}`;
 
   // Clip long leading/trailing silence before this ever reaches R2 -- the
   // buffered flow already holds the bytes server-side, so this is the
@@ -118,7 +116,7 @@ export async function storeAudioBuffer(params: {
     db.insert(audioFiles).values({
       id: audioFileId,
       storageKey,
-      originalFilename: params.filename,
+      originalFilename: sanitizeFilename(params.filename),
       mimeType,
       format,
       fileSizeBytes: finalBuffer.byteLength,

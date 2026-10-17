@@ -1,14 +1,16 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 
-// Note: the refresh token lives in sessionStorage (per the explicit
-// auth.login instruction, "for now"), not a cookie -- the 401-retry flow
-// below reads from the same place login()/register() write to, since a
-// cookie-based read would never see a token that was actually stored in
-// sessionStorage.
-const REFRESH_TOKEN_KEY = "lexlingo_refresh_token";
+// The refresh token itself lives in an httpOnly cookie the backend sets
+// (auth.routes.ts) -- this JS can't read it and never tries to. This flag is
+// NOT a secret, just a plain marker ("a login happened in this browser, a
+// session cookie might still be valid") so loadUser() can skip firing GET
+// /users/me on every page load when there's plainly nothing to restore --
+// the same optimization the old sessionStorage-token read gave for free,
+// now done with a value that leaks nothing if read by an injected script.
+const SESSION_HINT_KEY = "lexlingo_has_session";
 
-// In-memory only -- never persisted, so it's gone on a full page reload
-// (the refresh token in sessionStorage is what re-establishes a session).
+// In-memory only -- never persisted, so it's gone on a full page reload (the
+// refresh cookie is what re-establishes a session on the next boot).
 let accessToken: string | null = null;
 
 type ZodIssueLike = { path?: (string | number)[]; message?: string };
@@ -34,39 +36,37 @@ function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
-function getStoredRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.sessionStorage.getItem(REFRESH_TOKEN_KEY);
-}
-
 // Lets loadUser() skip GET /users/me entirely when there's plainly no
 // session to restore, instead of firing it unconditionally on every app
 // boot and letting it 401 for every anonymous visitor (harmless -- caught
 // and treated as "not logged in" -- but a needless round trip, and shows up
 // as a red 401 in the browser's network tab on the login/register pages).
+// This is a plain presence flag, not the token itself -- see the
+// SESSION_HINT_KEY comment above.
 export function hasStoredRefreshToken(): boolean {
-  return getStoredRefreshToken() !== null;
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(SESSION_HINT_KEY) !== null;
 }
 
-function setStoredRefreshToken(token: string | null): void {
+function setSessionHint(present: boolean): void {
   if (typeof window === "undefined") return;
-  if (token) {
-    window.sessionStorage.setItem(REFRESH_TOKEN_KEY, token);
+  if (present) {
+    window.localStorage.setItem(SESSION_HINT_KEY, "1");
   } else {
-    window.sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    window.localStorage.removeItem(SESSION_HINT_KEY);
   }
 }
 
 // Only redirects when a session actually existed and its refresh failed
 // (e.g. an expired/revoked refresh token) -- NOT when there was simply never
-// a refresh token to begin with (loadUser() skips calling getMe() at all in
-// that case, but any other authenticated call made with no session would
+// a session to begin with (loadUser() skips calling getMe() at all in that
+// case, but any other authenticated call made with no session would
 // otherwise 401 into here too) -- without this distinction, that case would
 // force-redirect to /login for someone who was never logged in to begin with.
-function clearSessionAndRedirectToLogin(hadRefreshToken: boolean): void {
+function clearSessionAndRedirectToLogin(hadSession: boolean): void {
   setAccessToken(null);
-  setStoredRefreshToken(null);
-  if (hadRefreshToken && typeof window !== "undefined") {
+  setSessionHint(false);
+  if (hadSession && typeof window !== "undefined") {
     window.location.href = "/login";
   }
 }
@@ -74,6 +74,9 @@ function clearSessionAndRedirectToLogin(hadRefreshToken: boolean): void {
 const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001",
   timeout: 30000,
+  // Required for the browser to send the httpOnly refresh-token cookie
+  // (auth.routes.ts) on cross-origin requests to the API.
+  withCredentials: true,
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -89,19 +92,16 @@ type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
-  const storedRefreshToken = getStoredRefreshToken();
-  if (!storedRefreshToken) {
+  if (!hasStoredRefreshToken()) {
     return null;
   }
 
-  const response = await axios.post<TokenPair>(
-    `${apiClient.defaults.baseURL}/api/v1/auth/refresh`,
-    { refreshToken: storedRefreshToken },
-  );
-  const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data;
+  // Not apiClient -- a plain axios call still needs withCredentials set
+  // explicitly, since that option isn't inherited from apiClient's defaults.
+  const response = await axios.post<TokenPair>(`${apiClient.defaults.baseURL}/api/v1/auth/refresh`, {}, { withCredentials: true });
+  const { accessToken: newAccessToken } = response.data;
 
   setAccessToken(newAccessToken);
-  setStoredRefreshToken(newRefreshToken);
 
   return newAccessToken;
 }
@@ -118,7 +118,7 @@ async function refreshAccessToken(): Promise<string | null> {
  */
 export async function ensureAccessToken(): Promise<string | null> {
   if (accessToken) return accessToken;
-  if (!getStoredRefreshToken()) return null;
+  if (!hasStoredRefreshToken()) return null;
   if (!refreshPromise) {
     refreshPromise = refreshAccessToken().finally(() => {
       refreshPromise = null;
@@ -142,7 +142,7 @@ apiClient.interceptors.response.use(
       return Promise.reject(error);
     }
     originalRequest._retry = true;
-    const hadRefreshToken = !!getStoredRefreshToken();
+    const hadSession = hasStoredRefreshToken();
 
     try {
       if (!refreshPromise) {
@@ -159,7 +159,7 @@ apiClient.interceptors.response.use(
       originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
       return apiClient(originalRequest);
     } catch (refreshError) {
-      clearSessionAndRedirectToLogin(hadRefreshToken);
+      clearSessionAndRedirectToLogin(hadSession);
       return Promise.reject(refreshError);
     }
   },
@@ -174,7 +174,9 @@ export type ModuleType = "WORD" | "TRANSCRIPTION" | "TRANSLATION" | "SCENE";
 export type SceneDifficulty = "easy" | "medium" | "hard" | "expert";
 export type ReviewDecision = "valid" | "needs_correction" | "invalid" | "cannot_decide";
 
-type TokenPair = { accessToken: string; refreshToken: string };
+// The refresh token never appears in a response body -- it's set directly as
+// an httpOnly cookie by the backend (auth.routes.ts).
+type TokenPair = { accessToken: string };
 
 export type AuthUser = {
   id: string;
@@ -713,6 +715,17 @@ export type ForumPostDetail = Omit<ForumPost, "commentCount"> & { comments: Foru
 
 export type ContributionStatusValue = "draft" | "pending" | "under_review" | "verified" | "needs_correction" | "rejected";
 
+// detail's shape varies by moduleType -- these are the fields the row UI
+// reads directly (word/sentence text next to the audio player); the rest of
+// whatever the backend sends is preserved for the raw "Details" JSON dump.
+export type AdminContributionDetail = Record<string, unknown> & {
+  conceptLabelEnglish?: string | null; // WORD
+  nativeWord?: string | null; // WORD
+  englishText?: string | null; // TRANSLATION
+  nativeText?: string | null; // TRANSLATION
+  title?: string | null; // TRANSCRIPTION / SCENE
+};
+
 export type AdminContributionListItem = {
   contributionId: string;
   moduleType: ModuleType;
@@ -720,7 +733,7 @@ export type AdminContributionListItem = {
   submittedAt: string;
   remarks: string | null;
   contributor: { id: string; displayName: string; email: string };
-  detail: Record<string, unknown>;
+  detail: AdminContributionDetail;
 };
 export type AdminContributionsResponse = {
   items: AdminContributionListItem[];
@@ -1152,14 +1165,14 @@ export type ConceptPartOfSpeech = (typeof CONCEPT_PART_OF_SPEECH_OPTIONS)[number
 export const CONCEPT_GRAMMATICAL_NUMBER_OPTIONS = ["singular", "plural", "dual"] as const;
 export type ConceptGrammaticalNumber = (typeof CONCEPT_GRAMMATICAL_NUMBER_OPTIONS)[number];
 
-/** Hand-entered per-concept grammar metadata, set in the Publishing module post-processing -- null means not set yet. */
-export type ConceptGrammar = {
+/** Hand-entered per-RECORDING grammar metadata, set in the Publishing module post-processing -- null means not set yet. Word recordings only; a translation never has these. */
+export type RecordingGrammar = {
   grammaticalGender: ConceptGrammaticalGender | null;
   partOfSpeech: ConceptPartOfSpeech | null;
   grammaticalNumber: ConceptGrammaticalNumber | null;
 };
 
-export type PublishingConceptItem = { id: string; labelEnglish: string; categoryName: string; eligibleCount: number; publishedCount: number } & ConceptGrammar;
+export type PublishingConceptItem = { id: string; labelEnglish: string; categoryName: string; eligibleCount: number; publishedCount: number };
 export type PublishingSentenceItem = { id: string; englishText: string; categoryName: string | null; eligibleCount: number; publishedCount: number };
 export type PublishingListResponse<T> = { items: T[]; total: number; limit: number; offset: number };
 
@@ -1203,7 +1216,7 @@ export type PublishableRecording = {
   isPublished: boolean;
   publicationId: string | null;
   sortOrder: number;
-};
+} & RecordingGrammar;
 
 /** Same array-to-CSV flattening api.admin.getContributions uses -- the backend's csvOf() query parsers expect one comma-joined string per filter, not axios's default repeated-key array serialization. */
 function flattenPublishingParams(params?: PublishingQueryParams): Record<string, string | number | undefined> | undefined {
@@ -1220,44 +1233,42 @@ export const api = {
     // Also establishes the session (like login()) -- a freshly registered
     // user is logged in immediately, and without this, an immediate
     // api.users.getMe() call would have neither an in-memory access token
-    // nor a stored refresh token to fall back on.
+    // nor a session to fall back on. The refresh token itself arrives as an
+    // httpOnly cookie (set by the backend response, never in this JSON body).
     register: async (email: string, password: string) => {
       const data = await apiClient
         .post<AuthResponse>("/api/v1/auth/register", { email, password })
         .then((r) => r.data);
       setAccessToken(data.accessToken);
-      setStoredRefreshToken(data.refreshToken);
+      setSessionHint(true);
       return data;
     },
 
-    // Stores the access token in memory and the refresh token in
-    // sessionStorage (for now -- see the module-level note above).
+    // Access token stays in memory only; the refresh token arrives as an
+    // httpOnly cookie this JS never touches directly.
     login: async (email: string, password: string) => {
       const data = await apiClient.post<AuthResponse>("/api/v1/auth/login", { email, password }).then((r) => r.data);
       setAccessToken(data.accessToken);
-      setStoredRefreshToken(data.refreshToken);
+      setSessionHint(true);
       return data;
     },
 
     logout: async () => {
-      const refreshToken = getStoredRefreshToken();
-      if (refreshToken) {
-        await apiClient.post("/api/v1/auth/logout", { refreshToken }).catch(() => {
-          // Best-effort -- local session is cleared below regardless.
-        });
-      }
+      // The refresh cookie is sent automatically (withCredentials); the
+      // backend reads and revokes it, and clears the cookie on its response.
+      await apiClient.post("/api/v1/auth/logout").catch(() => {
+        // Best-effort -- local session is cleared below regardless.
+      });
       setAccessToken(null);
-      setStoredRefreshToken(null);
+      setSessionHint(false);
     },
 
     refresh: async () => {
-      const refreshToken = getStoredRefreshToken();
-      if (!refreshToken) {
-        throw new Error("No refresh token available");
+      if (!hasStoredRefreshToken()) {
+        throw new Error("No session to refresh");
       }
-      const data = await apiClient.post<TokenPair>("/api/v1/auth/refresh", { refreshToken }).then((r) => r.data);
+      const data = await apiClient.post<TokenPair>("/api/v1/auth/refresh").then((r) => r.data);
       setAccessToken(data.accessToken);
-      setStoredRefreshToken(data.refreshToken);
       return data;
     },
 
@@ -1829,8 +1840,10 @@ export const api = {
       apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
     // Withdraws the whole concept from the public dictionary at once.
     unpublishAllRecordings: (conceptId: string) => apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings`),
-    setConceptGrammar: (conceptId: string, grammar: Partial<ConceptGrammar>) =>
-      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/grammar`, grammar),
+    // Applies to every id in recordingIds at once -- pass one for a single
+    // recording, several for mass assignment across a multi-select.
+    setRecordingsGrammar: (conceptId: string, recordingIds: string[], grammar: Partial<RecordingGrammar>) =>
+      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/grammar`, { recordingIds, ...grammar }),
 
     getSentences: (params?: PublishingQueryParams) =>
       apiClient

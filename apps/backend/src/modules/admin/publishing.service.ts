@@ -125,6 +125,13 @@ export type PublishableRecording = {
   isPublished: boolean;
   publicationId: string | null;
   sortOrder: number;
+  // Word recordings only (null for every translation) -- hand-entered in the
+  // Publishing admin module, per individual recording, since different
+  // contributors' takes on the same word can differ (e.g. a dialectal
+  // synonym that's a different part of speech).
+  grammaticalGender: (typeof wordRecordings.grammaticalGender.enumValues)[number] | null;
+  partOfSpeech: (typeof wordRecordings.partOfSpeech.enumValues)[number] | null;
+  grammaticalNumber: (typeof wordRecordings.grammaticalNumber.enumValues)[number] | null;
 };
 
 const CONTRIBUTOR_SELECT = {
@@ -164,9 +171,6 @@ export async function listConceptsForPublishing(params: PublishingFilters) {
         id: concepts.id,
         labelEnglish: concepts.labelEnglish,
         categoryName: categories.nameEnglish,
-        grammaticalGender: concepts.grammaticalGender,
-        partOfSpeech: concepts.partOfSpeech,
-        grammaticalNumber: concepts.grammaticalNumber,
       })
       .from(concepts)
       .innerJoin(categories, eq(categories.id, concepts.categoryId))
@@ -203,9 +207,6 @@ export async function listConceptsForPublishing(params: PublishingFilters) {
       id: r.id,
       labelEnglish: r.labelEnglish,
       categoryName: r.categoryName,
-      grammaticalGender: r.grammaticalGender,
-      partOfSpeech: r.partOfSpeech,
-      grammaticalNumber: r.grammaticalNumber,
       eligibleCount: eligibleByConcept.get(r.id) ?? 0,
       publishedCount: publishedByConcept.get(r.id) ?? 0,
     })),
@@ -227,6 +228,9 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
       status: contributions.status,
       publicationId: publishedWordRecordings.id,
       sortOrder: publishedWordRecordings.sortOrder,
+      grammaticalGender: wordRecordings.grammaticalGender,
+      partOfSpeech: wordRecordings.partOfSpeech,
+      grammaticalNumber: wordRecordings.grammaticalNumber,
       ...CONTRIBUTOR_SELECT,
     })
     .from(wordRecordings)
@@ -258,6 +262,9 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
       isPublished: r.publicationId !== null,
       publicationId: r.publicationId,
       sortOrder: r.sortOrder ?? 0,
+      grammaticalGender: r.grammaticalGender,
+      partOfSpeech: r.partOfSpeech,
+      grammaticalNumber: r.grammaticalNumber,
       ...applyLocationPrivacy(r),
     })),
   );
@@ -286,21 +293,35 @@ export async function unpublishAllRecordingsForConcept(conceptId: string): Promi
   await db.delete(publishedWordRecordings).where(eq(publishedWordRecordings.conceptId, conceptId));
 }
 
-export type ConceptGrammar = {
-  grammaticalGender: (typeof concepts.grammaticalGender.enumValues)[number] | null;
-  partOfSpeech: (typeof concepts.partOfSpeech.enumValues)[number] | null;
-  grammaticalNumber: (typeof concepts.grammaticalNumber.enumValues)[number] | null;
+export type RecordingGrammar = {
+  grammaticalGender: (typeof wordRecordings.grammaticalGender.enumValues)[number] | null;
+  partOfSpeech: (typeof wordRecordings.partOfSpeech.enumValues)[number] | null;
+  grammaticalNumber: (typeof wordRecordings.grammaticalNumber.enumValues)[number] | null;
 };
 
-/** Hand-entered grammatical metadata for a concept, set in the Publishing module post-processing -- null fields mean "not set yet". Passing null for a field clears it. */
-export async function setConceptGrammar(conceptId: string, grammar: Partial<ConceptGrammar>): Promise<void> {
-  const [concept] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, conceptId)).limit(1);
-  if (!concept) throw new HttpError(404, "NOT_FOUND", "Concept not found");
+/**
+ * Hand-entered grammatical metadata, set in the Publishing module
+ * post-processing -- null fields mean "not set yet", passing null for a
+ * field clears it. Applies to every recording id given at once (mass
+ * assignment across however many of a concept's recordings the admin
+ * selected), all scoped to one concept so a stray id from elsewhere can't be
+ * mis-tagged.
+ */
+export async function setRecordingsGrammar(conceptId: string, wordRecordingIds: string[], grammar: Partial<RecordingGrammar>): Promise<void> {
+  if (wordRecordingIds.length === 0) return;
+
+  const matching = await db
+    .select({ id: wordRecordings.id })
+    .from(wordRecordings)
+    .where(and(inArray(wordRecordings.id, wordRecordingIds), eq(wordRecordings.conceptId, conceptId)));
+  if (matching.length !== wordRecordingIds.length) {
+    throw new HttpError(404, "NOT_FOUND", "One or more recordings were not found for this concept");
+  }
 
   await db
-    .update(concepts)
+    .update(wordRecordings)
     .set({ ...grammar, updatedAt: new Date() })
-    .where(eq(concepts.id, conceptId));
+    .where(inArray(wordRecordings.id, wordRecordingIds));
 }
 
 /* --------------------------------- Sentences / translations --------------------------- */
@@ -407,6 +428,10 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
       isPublished: r.publicationId !== null,
       publicationId: r.publicationId,
       sortOrder: r.sortOrder ?? 0,
+      // Grammar metadata is a word-recording-only concept -- translations don't carry it.
+      grammaticalGender: null,
+      partOfSpeech: null,
+      grammaticalNumber: null,
       ...applyLocationPrivacy(r),
     })),
   );

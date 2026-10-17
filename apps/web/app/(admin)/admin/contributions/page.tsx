@@ -37,6 +37,21 @@ const MODULE_LABEL: Record<ModuleType, string> = {
 const STATUS_OPTIONS: ContributionStatusValue[] = ["draft", "pending", "under_review", "verified", "needs_correction", "rejected"];
 const MODULE_OPTIONS: ModuleType[] = ["WORD", "TRANSCRIPTION", "TRANSLATION", "SCENE"];
 
+/** The exact word/sentence text a contribution's audio is for -- shown inline next to Play so an admin doesn't have to open "Details" to know what they're listening to. */
+function contentText(item: AdminContributionListItem): string | null {
+  switch (item.moduleType) {
+    case "WORD":
+      return item.detail.conceptLabelEnglish || item.detail.nativeWord || null;
+    case "TRANSLATION":
+      return item.detail.englishText || item.detail.nativeText || null;
+    case "TRANSCRIPTION":
+    case "SCENE":
+      return item.detail.title || null;
+    default:
+      return null;
+  }
+}
+
 const STATUS_COLOR: Record<string, string> = {
   draft: "bg-slate-600",
   pending: "bg-yellow-600",
@@ -620,6 +635,7 @@ export default function AdminContributionsPage() {
                 </th>
                 <th className="px-4 py-3">Contributor</th>
                 <th className="px-4 py-3">Module</th>
+                <th className="px-4 py-3">Content</th>
                 <th className="px-4 py-3">Status</th>
                 <th className="px-4 py-3">Submitted</th>
                 <th className="px-4 py-3">Actions</th>
@@ -642,6 +658,9 @@ export default function AdminContributionsPage() {
                       <div className="text-xs text-ink-muted">{item.contributor.email}</div>
                     </td>
                     <td className="px-4 py-3 text-ink-muted">{MODULE_LABEL[item.moduleType]}</td>
+                    <td className="max-w-xs px-4 py-3 text-ink">
+                      {contentText(item) || <span className="italic text-ink-muted">(no text)</span>}
+                    </td>
                     <td className="px-4 py-3">
                       <span
                         className={`rounded-full px-2 py-0.5 text-xs font-semibold capitalize text-white ${STATUS_COLOR[item.status] ?? "bg-slate-500"}`}
@@ -707,7 +726,7 @@ export default function AdminContributionsPage() {
                   </tr>
                   {expandedId === item.contributionId ? (
                     <tr className="border-b border-border bg-surface-card/50 last:border-0">
-                      <td colSpan={6} className="px-4 py-4">
+                      <td colSpan={7} className="px-4 py-4">
                         <div className="grid gap-4 sm:grid-cols-2">
                           <div className="space-y-3">
                             <div>

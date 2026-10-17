@@ -267,6 +267,13 @@
       "when": 1792235857962,
       "tag": "0037_round_wonder_man",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792241282448,
+      "tag": "0038_jittery_bromley",
+      "breakpoints": true
     }
   ]
 }

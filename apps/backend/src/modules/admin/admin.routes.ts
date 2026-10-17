@@ -59,6 +59,7 @@ import { gateVolunteerAction, getPendingChangeById, requirePendingRow, markAppro
 import { storageService } from "../../services/storage.service.js";
 import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
 import { HttpError } from "../../utils/http-error.js";
+import { safeExtension } from "../../utils/filename.js";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 
@@ -112,7 +113,7 @@ async function readImageFile(request: FastifyRequest) {
 type MediaAttribution = { sourceProvider: string; sourceUrl: string; attribution: string };
 
 async function insertConceptMedia(conceptId: string, buffer: Buffer, filename: string, source?: MediaAttribution) {
-  const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+  const ext = safeExtension(filename) ?? "jpg";
   const storageFilename = `concepts/${conceptId}/${randomUUID()}.${ext}`;
   const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadConceptImage(buffer, storageFilename);
 
@@ -155,7 +156,7 @@ async function addConceptImageFromUrl(conceptId: string, imageUrl: string, sourc
 }
 
 async function insertSceneMedia(sceneId: string, buffer: Buffer, filename: string, source?: MediaAttribution) {
-  const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+  const ext = safeExtension(filename) ?? "jpg";
   const storageFilename = `scenes/${sceneId}/${randomUUID()}.${ext}`;
   const { path, publicUrl, mimeType } = await storageService.uploadSceneImage(buffer, storageFilename);
 
@@ -1503,6 +1504,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           wordNativeWord: wordRecordings.nativeWord,
           wordDurationMs: wordRecordings.durationMs,
           wordAudioFileId: wordRecordings.audioFileId,
+          wordConceptLabel: concepts.labelEnglish,
           audioTitle: audioUploads.title,
           audioNativeText: transcriptions.nativeText,
           audioAudioFileId: audioUploads.audioFileId,
@@ -1516,6 +1518,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         .innerJoin(users, eq(users.id, contributions.userId))
         .leftJoin(contributorDemographics, eq(contributorDemographics.userId, users.id))
         .leftJoin(wordRecordings, eq(wordRecordings.id, contributions.wordRecordingId))
+        .leftJoin(concepts, eq(concepts.id, wordRecordings.conceptId))
         .leftJoin(audioUploads, eq(audioUploads.id, contributions.audioUploadId))
         .leftJoin(transcriptions, and(eq(transcriptions.audioUploadId, audioUploads.id), eq(transcriptions.isCurrent, true)))
         .leftJoin(translations, eq(translations.id, contributions.translationId))
@@ -1538,7 +1541,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       let detail: Record<string, unknown> = {};
       switch (row.moduleType) {
         case "WORD":
-          detail = { nativeWord: row.wordNativeWord, durationMs: row.wordDurationMs, audioFileId: row.wordAudioFileId };
+          detail = {
+            nativeWord: row.wordNativeWord,
+            conceptLabelEnglish: row.wordConceptLabel,
+            durationMs: row.wordDurationMs,
+            audioFileId: row.wordAudioFileId,
+          };
           break;
         case "TRANSCRIPTION":
           detail = { title: row.audioTitle, nativeText: row.audioNativeText, audioFileId: row.audioAudioFileId };
@@ -2688,7 +2696,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       }
 
       const { buffer, filename } = await readImageFile(request);
-      const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+      const ext = safeExtension(filename) ?? "jpg";
       const storageFilename = `concepts/${id}/${randomUUID()}.${ext}`;
       const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadPrecroppedConceptImage(buffer, storageFilename);
 
@@ -3309,7 +3317,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     const { buffer, filename } = await readImageFile(request);
-    const ext = filename.includes(".") ? filename.split(".").pop() : "jpg";
+    const ext = safeExtension(filename) ?? "jpg";
     const storageFilename = `scenes/${id}/${randomUUID()}.${ext}`;
     const { path, publicUrl, mimeType } = await storageService.uploadPrecroppedSceneImage(buffer, storageFilename);
 

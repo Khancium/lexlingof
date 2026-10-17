@@ -32,6 +32,15 @@ async function sendMail(to: string, subject: string, text: string, html: string)
   const client = getTransporter();
 
   if (!client) {
+    // Logging the full body (which can contain a live, single-use secret
+    // like a password-reset link) is fine for local dev -- there's no real
+    // mail provider and no real user data at stake -- but in production an
+    // unconfigured SMTP_HOST must never silently succeed-by-logging: that
+    // would both leak any token straight into the log stream and leave the
+    // user never actually receiving their email. Fail loudly instead.
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(`SMTP is not configured -- cannot send "${subject}" to ${to}`);
+    }
     console.log(`[mailer] SMTP not configured -- would send "${subject}" to ${to}:\n${text}`);
     return;
   }

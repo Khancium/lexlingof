@@ -2,7 +2,7 @@
 
 import { Fragment, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { api, type Category, type ConceptListItem, type OpenverseImageResult, type WikimediaImageResult } from "@/lib/api";
+import { api, getErrorMessage, type Category, type ConceptListItem, type OpenverseImageResult, type WikimediaImageResult } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkImageUrlUpload } from "@/components/admin-bulk-image-url-upload";
@@ -261,6 +261,8 @@ export default function AdminConceptsPage() {
       const result = await api.admin.deleteConcept(concept.id);
       if ("pending" in result) alert(result.message);
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to delete concept"));
     } finally {
       setDeletingId(null);
     }
@@ -275,6 +277,8 @@ export default function AdminConceptsPage() {
     try {
       await api.admin.updateConcept(concept.id, { isActive: !concept.isActive });
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to update concept"));
     } finally {
       setTogglingActiveId(null);
     }
@@ -297,6 +301,8 @@ export default function AdminConceptsPage() {
       });
       setEditingId(null);
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to save changes"));
     } finally {
       setIsSaving(false);
     }

@@ -358,12 +358,6 @@ export const concepts = pgTable(
     // when a volunteer is allowed to see a delete button at all) has
     // something to filter on.
     createdBy: uuid("created_by").references(() => users.id),
-    // Grammatical metadata assigned by hand in the Publishing admin module,
-    // post-processing -- not populated at creation time, nullable until an
-    // admin sets it.
-    grammaticalGender: conceptGrammaticalGender("grammatical_gender"),
-    partOfSpeech: conceptPartOfSpeech("part_of_speech"),
-    grammaticalNumber: conceptGrammaticalNumber("grammatical_number"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
@@ -722,6 +716,15 @@ export const wordRecordings = pgTable(
     ipa: text("ipa"),
     synonymIndex: smallint("synonym_index").default(1).notNull(),
     durationMs: integer("duration_ms").notNull(),
+    // Grammatical metadata assigned by hand in the Publishing admin module,
+    // post-processing -- not populated at creation time, nullable until an
+    // admin sets it. Per RECORDING, not per concept: different contributors'
+    // takes on the same word can differ (e.g. a dialectal synonym with a
+    // different part of speech), so this can't be shared across a concept's
+    // recordings.
+    grammaticalGender: conceptGrammaticalGender("grammatical_gender"),
+    partOfSpeech: conceptPartOfSpeech("part_of_speech"),
+    grammaticalNumber: conceptGrammaticalNumber("grammatical_number"),
     isCurrent: boolean("is_current").default(true).notNull(),
     supersededBy: uuid("superseded_by").references((): AnyPgColumn => wordRecordings.id),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

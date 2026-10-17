@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, getErrorMessage, type ForumConceptPreview, type ForumSentencePreview } from "@/lib/api";
 import { EmojiPicker } from "@/components/emoji-picker";
 
@@ -76,6 +76,21 @@ export function ForumPostComposer({ onPosted, anchor }: { onPosted: () => void; 
   const trimmedPollOptions = pollOptions.map((o) => o.trim()).filter((o) => o.length > 0);
   const pollInvalid = showPoll && trimmedPollOptions.length < 2;
 
+  // Created once per `image` (not on every render -- JSX calling
+  // URL.createObjectURL directly would mint a new, never-revoked blob URL on
+  // every keystroke in the textarea above) and revoked whenever `image`
+  // changes or the composer unmounts.
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!image) {
+      setImagePreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(image);
+    setImagePreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [image]);
+
   async function handleSubmit() {
     if (body.trim().length === 0 || pollInvalid) return;
     setIsSubmitting(true);
@@ -112,10 +127,10 @@ export function ForumPostComposer({ onPosted, anchor }: { onPosted: () => void; 
         className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
       />
 
-      {image ? (
+      {image && imagePreviewUrl ? (
         <div className="relative inline-block">
           {/* eslint-disable-next-line @next/next/no-img-element -- a local blob: URL, which next/image cannot load */}
-          <img src={URL.createObjectURL(image)} alt="" className="h-20 w-auto rounded-lg object-cover ring-1 ring-border" />
+          <img src={imagePreviewUrl} alt="" className="h-20 w-auto rounded-lg object-cover ring-1 ring-border" />
           <button
             type="button"
             onClick={() => setImage(null)}

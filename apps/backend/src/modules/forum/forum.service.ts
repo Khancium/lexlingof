@@ -19,6 +19,7 @@ import {
 import { sendPushToUser } from "../notifications/push.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { HttpError } from "../../utils/http-error.js";
+import { safeExtension } from "../../utils/filename.js";
 
 /**
  * Shared by every forum action below that reaches another user (a comment,
@@ -128,7 +129,7 @@ export async function createPost(userId: string, input: CreatePostInput) {
   let imageUrl: string | null = null;
   let imageStorageKey: string | null = null;
   if (input.image) {
-    const ext = input.image.filename.includes(".") ? input.image.filename.split(".").pop() : "jpg";
+    const ext = safeExtension(input.image.filename) ?? "jpg";
     // Reuses the generic (no fixed crop ratio) uploader built for the
     // suggestion box -- a forum photo is exactly the same kind of asset:
     // reference material shown as-is, not a live corpus image that needs a

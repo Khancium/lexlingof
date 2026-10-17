@@ -29,6 +29,7 @@ import { deleteUserAccount } from "../../services/account.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { computeStreakDisplay } from "../../services/streak.service.js";
 import { HttpError } from "../../utils/http-error.js";
+import { safeExtension } from "../../utils/filename.js";
 
 const MAX_AVATAR_BYTES = 10 * 1024 * 1024; // 10MB
 const MAX_SUGGESTION_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -474,7 +475,7 @@ export default async function usersRoutes(fastify: FastifyInstance) {
     let imageUrl: string | null = null;
     let imageStorageKey: string | null = null;
     if (image) {
-      const ext = image.filename.includes(".") ? image.filename.split(".").pop() : "jpg";
+      const ext = safeExtension(image.filename) ?? "jpg";
       const uploaded = await storageService.uploadSuggestionImage(image.buffer, `suggestions/${randomUUID()}.${ext}`);
       imageUrl = uploaded.publicUrl;
       imageStorageKey = uploaded.path;

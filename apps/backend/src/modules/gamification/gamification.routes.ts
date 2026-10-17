@@ -47,6 +47,15 @@ const PERIOD_POINTS_COLUMN = {
   monthly: userStats.pointsThisMonth,
 } as const;
 
+// Unauthenticated and likely polled often -- but only the default
+// first-page request (no explicit limit/offset) is cached, keyed by period,
+// so this stays a fixed 3-entry cache (one per period) instead of growing
+// unboundedly from a caller varying limit/offset (this endpoint has no
+// auth, so that's attacker-controllable, not just a theoretical caller
+// mistake).
+const LEADERBOARD_CACHE_TTL_MS = 2 * 60 * 1000;
+const leaderboardCache = new Map<string, { data: unknown; expiresAt: number }>();
+
 /* -------------------------------------------------------------------------- */
 /*                                Corpus stats                                */
 /* -------------------------------------------------------------------------- */
@@ -165,6 +174,13 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
 
   fastify.get("/leaderboard", async (request) => {
     const { limit, offset, period } = leaderboardQuerySchema.parse(request.query);
+
+    const isDefaultPage = offset === 0 && limit === 50;
+    if (isDefaultPage) {
+      const cached = leaderboardCache.get(period);
+      if (cached && cached.expiresAt > Date.now()) return cached.data;
+    }
+
     const pointsColumn = PERIOD_POINTS_COLUMN[period];
 
     const rows = await db
@@ -192,7 +208,7 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
       .limit(limit)
       .offset(offset);
 
-    return rows.map((row) => ({
+    const result = rows.map((row) => ({
       rank: row.rank,
       userId: row.userId,
       displayName: row.displayName,
@@ -206,6 +222,9 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
       }).currentStreak,
       language: row.languageId ? { id: row.languageId, code: row.languageCode, nameEnglish: row.languageNameEnglish } : null,
     }));
+
+    if (isDefaultPage) leaderboardCache.set(period, { data: result, expiresAt: Date.now() + LEADERBOARD_CACHE_TTL_MS });
+    return result;
   });
 
   fastify.get("/corpus/stats", async () => {

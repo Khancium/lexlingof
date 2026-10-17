@@ -34,6 +34,11 @@ export type PublicRecording = {
   tribe: string | null;
   village: string | null;
   gender: string | null;
+  // Word recordings only (always null for a translation) -- hand-entered in
+  // the Publishing admin module, per individual recording.
+  grammaticalGender: (typeof wordRecordings.grammaticalGender.enumValues)[number] | null;
+  partOfSpeech: (typeof wordRecordings.partOfSpeech.enumValues)[number] | null;
+  grammaticalNumber: (typeof wordRecordings.grammaticalNumber.enumValues)[number] | null;
 };
 
 export type PublicRelatedWord = { id: string; word: string };
@@ -91,10 +96,6 @@ export type PublicDictionaryEntry = {
   word: string;
   category: string;
   imageUrl: string | null;
-  // Hand-entered in the Publishing admin module, post-processing -- null until an admin sets it.
-  grammaticalGender: (typeof concepts.grammaticalGender.enumValues)[number] | null;
-  partOfSpeech: (typeof concepts.partOfSpeech.enumValues)[number] | null;
-  grammaticalNumber: (typeof concepts.grammaticalNumber.enumValues)[number] | null;
   recordings: PublicRecording[];
   relatedWords: PublicRelatedWord[];
 };
@@ -117,9 +118,6 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
         categoryId: concepts.categoryId,
         category: categories.nameEnglish,
         imageUrl: conceptMedia.publicUrl,
-        grammaticalGender: concepts.grammaticalGender,
-        partOfSpeech: concepts.partOfSpeech,
-        grammaticalNumber: concepts.grammaticalNumber,
       })
       .from(concepts)
       .innerJoin(categories, eq(categories.id, concepts.categoryId))
@@ -143,9 +141,6 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
       word: r.word,
       category: r.category,
       imageUrl: r.imageUrl,
-      grammaticalGender: r.grammaticalGender,
-      partOfSpeech: r.partOfSpeech,
-      grammaticalNumber: r.grammaticalNumber,
       recordings: recordingsByConcept.get(r.id) ?? [],
       relatedWords: relatedByConcept.get(r.id) ?? [],
     })),
@@ -185,6 +180,9 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFi
       ipa: wordRecordings.ipa,
       audioStorageKey: audioFiles.storageKey,
       sortOrder: publishedWordRecordings.sortOrder,
+      grammaticalGender: wordRecordings.grammaticalGender,
+      partOfSpeech: wordRecordings.partOfSpeech,
+      grammaticalNumber: wordRecordings.grammaticalNumber,
       ...CONTRIBUTOR_SELECT,
     })
     .from(publishedWordRecordings)
@@ -217,6 +215,9 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFi
         audioUrl: await storageService.generatePublicAudioPlayUrl(r.audioStorageKey),
         language: r.language,
         dialect: r.dialect,
+        grammaticalGender: r.grammaticalGender,
+        partOfSpeech: r.partOfSpeech,
+        grammaticalNumber: r.grammaticalNumber,
         ...privacyFields(r),
       } satisfies PublicRecording,
     })),
@@ -395,6 +396,10 @@ async function getPublishedTranslationsBySentences(
         audioUrl: r.audioStorageKey ? await storageService.generatePublicAudioPlayUrl(r.audioStorageKey) : "",
         language: r.language,
         dialect: r.dialect,
+        // Grammar metadata is a word-recording-only concept -- translations don't carry it.
+        grammaticalGender: null,
+        partOfSpeech: null,
+        grammaticalNumber: null,
         ...privacyFields(r),
       } satisfies PublicRecording,
     })),

@@ -2,8 +2,10 @@
 import "dotenv/config";
 
 import Fastify from "fastify";
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
+import rateLimit from "@fastify/rate-limit";
 import { ZodError } from "zod";
 
 import audioRoutes from "./modules/audio/audio.routes.js";
@@ -32,15 +34,33 @@ import { HttpError } from "./utils/http-error.js";
 // 2. Create the Fastify instance.
 const server = Fastify({ logger: true });
 
-// 3. CORS.
+// 3. CORS. `credentials: true` is required for the browser to send/accept
+// the httpOnly refresh-token cookie (auth.routes.ts) on cross-origin
+// requests between the web app and this API -- which also means `origin`
+// can never be "*" (the spec forbids combining a wildcard origin with
+// credentials), so this stays an explicit allowlist.
 server.register(cors, {
   origin: process.env.ALLOWED_ORIGINS?.split(",") || ["http://localhost:3000"],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  credentials: true,
 });
+
+// Parses the refresh-token cookie auth.routes.ts reads/sets -- no signing
+// secret configured since the cookie's value is itself an opaque random
+// token already validated against its hash in the database (signing would
+// only protect against tampering with a value that's meaningless to modify).
+server.register(cookie);
 
 // 4. Multipart, registered once at the top level so every route (admin
 // concept/scene image uploads included) shares this same configuration.
 server.register(multipart, { limits: { fileSize: 110 * 1024 * 1024 } });
+
+// Global rate limit -- a generous per-IP ceiling meant only to blunt crude
+// scripted abuse/DoS, not to throttle normal usage. Individual routes
+// (auth.routes.ts's login/register/forgot-password/reset-password) set
+// their own much tighter per-route config for brute-force/credential-
+// stuffing protection specifically.
+server.register(rateLimit, { global: true, max: 300, timeWindow: "1 minute" });
 
 // 5. Every request gets its id echoed back so a client can correlate a
 // response (or a support request) with the corresponding server log line.

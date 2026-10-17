@@ -28,6 +28,7 @@ export function ForumCommentThread({
   const [isSubmittingReply, setIsSubmittingReply] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   async function submitReply() {
     if (replyBody.trim().length === 0) return;
@@ -48,22 +49,35 @@ export function ForumCommentThread({
   async function handleDelete() {
     if (!confirm("Delete this comment?")) return;
     setIsDeleting(true);
+    setActionError(null);
     try {
       await api.forum.deleteComment(comment.id);
       onRefresh();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to delete comment"));
     } finally {
       setIsDeleting(false);
     }
   }
 
   async function handleReact(reactionType: Parameters<typeof api.forum.setCommentReaction>[1]) {
-    await api.forum.setCommentReaction(comment.id, reactionType);
-    onRefresh();
+    setActionError(null);
+    try {
+      await api.forum.setCommentReaction(comment.id, reactionType);
+      onRefresh();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to react"));
+    }
   }
 
   async function handleUnreact() {
-    await api.forum.removeCommentReaction(comment.id);
-    onRefresh();
+    setActionError(null);
+    try {
+      await api.forum.removeCommentReaction(comment.id);
+      onRefresh();
+    } catch (err) {
+      setActionError(getErrorMessage(err, "Failed to remove reaction"));
+    }
   }
 
   return (
@@ -74,6 +88,7 @@ export function ForumCommentThread({
           <span>{new Date(comment.createdAt).toLocaleString()}</span>
         </div>
         <p className="mt-1 whitespace-pre-wrap text-sm text-ink">{comment.body}</p>
+        {actionError ? <p className="mt-1 text-xs text-red-600">{actionError}</p> : null}
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <ForumReactionBar size="sm" reactionCounts={comment.reactionCounts} myReaction={comment.myReaction} onReact={handleReact} onUnreact={handleUnreact} />
           <button type="button" onClick={() => setReplying((v) => !v)} className="text-xs font-semibold text-ink-muted hover:underline">

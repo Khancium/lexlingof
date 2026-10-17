@@ -7,7 +7,7 @@ import {
   CONCEPT_GRAMMATICAL_NUMBER_OPTIONS,
   CONCEPT_PART_OF_SPEECH_OPTIONS,
   type AdminUserOption,
-  type ConceptGrammar,
+  type RecordingGrammar,
   type ContributionStatusValue,
   type EducationLevel,
   type GenderOption,
@@ -98,73 +98,112 @@ function prettify(value: string) {
 
 const grammarSelectClass = "rounded-lg bg-surface-card px-2 py-1 text-xs text-ink ring-1 ring-border";
 
-/** The three hand-entered grammar dropdowns (gender/part of speech/number) shown on each word's card -- words only, set directly from the list without expanding the card. */
-function ConceptGrammarFields({
-  concept,
+/**
+ * Mass-assignment toolbar for the three hand-entered grammar fields
+ * (gender/part of speech/number) -- shown above a word's recording list,
+ * applies to however many recordings are checked. Each dropdown fires
+ * immediately on change (no separate "Apply" step) since "select some
+ * recordings, then pick a value" is the whole interaction.
+ */
+function GrammarBulkAssign({
+  selectedCount,
   saving,
-  onChange,
+  onAssign,
+  onSelectAll,
+  onClearSelection,
 }: {
-  concept: ConceptGrammar;
+  selectedCount: number;
   saving: boolean;
-  onChange: (field: keyof ConceptGrammar, value: string) => void;
+  onAssign: (field: keyof RecordingGrammar, value: string) => void;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
 }) {
   return (
-    <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
-      <select
-        value={concept.grammaticalGender ?? ""}
-        disabled={saving}
-        onChange={(e) => onChange("grammaticalGender", e.target.value)}
-        className={grammarSelectClass}
-      >
-        <option value="">Gender</option>
-        {CONCEPT_GRAMMATICAL_GENDER_OPTIONS.map((v) => (
-          <option key={v} value={v}>
-            {prettify(v)}
-          </option>
-        ))}
-      </select>
-      <select
-        value={concept.partOfSpeech ?? ""}
-        disabled={saving}
-        onChange={(e) => onChange("partOfSpeech", e.target.value)}
-        className={grammarSelectClass}
-      >
-        <option value="">Grammar</option>
-        {CONCEPT_PART_OF_SPEECH_OPTIONS.map((v) => (
-          <option key={v} value={v}>
-            {prettify(v)}
-          </option>
-        ))}
-      </select>
-      <select
-        value={concept.grammaticalNumber ?? ""}
-        disabled={saving}
-        onChange={(e) => onChange("grammaticalNumber", e.target.value)}
-        className={grammarSelectClass}
-      >
-        <option value="">Number</option>
-        {CONCEPT_GRAMMATICAL_NUMBER_OPTIONS.map((v) => (
-          <option key={v} value={v}>
-            {prettify(v)}
-          </option>
-        ))}
-      </select>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl bg-surface-card p-2.5 ring-1 ring-border">
+      <span className="text-xs font-semibold text-ink-muted">
+        {selectedCount > 0 ? `${selectedCount} selected` : "Select recordings to tag"}
+      </span>
+      <button type="button" onClick={onSelectAll} className="text-xs font-semibold text-brand hover:underline">
+        Select all
+      </button>
+      {selectedCount > 0 ? (
+        <button type="button" onClick={onClearSelection} className="text-xs font-semibold text-ink-muted hover:underline">
+          Clear
+        </button>
+      ) : null}
+      <div className="ml-auto flex flex-wrap gap-2">
+        <select
+          value=""
+          disabled={saving || selectedCount === 0}
+          onChange={(e) => onAssign("grammaticalGender", e.target.value)}
+          className={`${grammarSelectClass} disabled:opacity-50`}
+        >
+          <option value="">Set gender...</option>
+          {CONCEPT_GRAMMATICAL_GENDER_OPTIONS.map((v) => (
+            <option key={v} value={v}>
+              {prettify(v)}
+            </option>
+          ))}
+        </select>
+        <select
+          value=""
+          disabled={saving || selectedCount === 0}
+          onChange={(e) => onAssign("partOfSpeech", e.target.value)}
+          className={`${grammarSelectClass} disabled:opacity-50`}
+        >
+          <option value="">Set grammar...</option>
+          {CONCEPT_PART_OF_SPEECH_OPTIONS.map((v) => (
+            <option key={v} value={v}>
+              {prettify(v)}
+            </option>
+          ))}
+        </select>
+        <select
+          value=""
+          disabled={saving || selectedCount === 0}
+          onChange={(e) => onAssign("grammaticalNumber", e.target.value)}
+          className={`${grammarSelectClass} disabled:opacity-50`}
+        >
+          <option value="">Set number...</option>
+          {CONCEPT_GRAMMATICAL_NUMBER_OPTIONS.map((v) => (
+            <option key={v} value={v}>
+              {prettify(v)}
+            </option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
 
-/** One contributor's recording -- audio player, metadata badges, and the publish/unpublish toggle. Shared by the words and sentences tabs. */
+/** One contributor's recording -- audio player, metadata badges, and the publish/unpublish toggle. Shared by the words and sentences tabs. `selectable` (words only) adds a checkbox for mass grammar assignment. */
 function RecordingRow({
   recording,
   onToggle,
   isToggling,
+  selectable,
+  selected,
+  onToggleSelect,
 }: {
   recording: PublishableRecording;
   onToggle: () => void;
   isToggling: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
+  const hasGrammar = recording.grammaticalGender || recording.partOfSpeech || recording.grammaticalNumber;
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-card p-3">
+      {selectable ? (
+        <input
+          type="checkbox"
+          checked={selected ?? false}
+          onChange={onToggleSelect}
+          className="h-4 w-4 shrink-0 rounded border-border"
+          aria-label="Select this recording for mass grammar assignment"
+        />
+      ) : null}
       <audio controls preload="none" src={recording.audioUrl} className="h-9 w-56" />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-ink">
@@ -185,6 +224,13 @@ function RecordingRow({
         ) : (
           <span className="text-[11px] italic text-ink-faint">Location not shared</span>
         )}
+        {hasGrammar ? (
+          <>
+            {recording.partOfSpeech ? <MetaBadge label={prettify(recording.partOfSpeech)} /> : null}
+            {recording.grammaticalGender ? <MetaBadge label={prettify(recording.grammaticalGender)} /> : null}
+            {recording.grammaticalNumber ? <MetaBadge label={prettify(recording.grammaticalNumber)} /> : null}
+          </>
+        ) : null}
       </div>
       <button
         type="button"
@@ -217,7 +263,8 @@ export default function AdminPublishingPage() {
   const [recordingsLoading, setRecordingsLoading] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [unpublishingId, setUnpublishingId] = useState<string | null>(null);
-  const [grammarSavingId, setGrammarSavingId] = useState<string | null>(null);
+  const [selectedRecordingIds, setSelectedRecordingIds] = useState<Set<string>>(new Set());
+  const [grammarSaving, setGrammarSaving] = useState(false);
 
   // Filter dropdown data sources -- same shape as the Contributions page.
   const [users, setUsers] = useState<AdminUserOption[]>([]);
@@ -323,9 +370,11 @@ export default function AdminPublishingPage() {
     setTab(next);
     setOffset(0);
     setExpandedId(null);
+    setSelectedRecordingIds(new Set());
   }
 
   function toggleExpand(id: string) {
+    setSelectedRecordingIds(new Set());
     if (expandedId === id) {
       setExpandedId(null);
       setRecordings([]);
@@ -335,6 +384,15 @@ export default function AdminPublishingPage() {
     setRecordingsLoading(true);
     const request = tab === "words" ? api.publishing.getConceptRecordings(id) : api.publishing.getSentenceTranslations(id);
     request.then(setRecordings).finally(() => setRecordingsLoading(false));
+  }
+
+  function toggleSelectRecording(recordingId: string) {
+    setSelectedRecordingIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(recordingId)) next.delete(recordingId);
+      else next.add(recordingId);
+      return next;
+    });
   }
 
   async function handleToggle(parentId: string, recording: PublishableRecording) {
@@ -368,14 +426,16 @@ export default function AdminPublishingPage() {
     }
   }
 
-  async function handleGrammarChange(conceptId: string, field: keyof ConceptGrammar, value: string) {
-    const nextValue = value === "" ? null : (value as ConceptGrammar[typeof field]);
-    setConceptItems((prev) => prev.map((c) => (c.id === conceptId ? { ...c, [field]: nextValue } : c)));
-    setGrammarSavingId(conceptId);
+  async function handleGrammarBulkAssign(conceptId: string, field: keyof RecordingGrammar, value: string) {
+    if (selectedRecordingIds.size === 0 || value === "") return;
+    const ids = Array.from(selectedRecordingIds);
+    const nextValue = value as RecordingGrammar[typeof field];
+    setGrammarSaving(true);
     try {
-      await api.publishing.setConceptGrammar(conceptId, { [field]: nextValue });
+      await api.publishing.setRecordingsGrammar(conceptId, ids, { [field]: nextValue });
+      setRecordings((prev) => prev.map((r) => (selectedRecordingIds.has(r.id) ? { ...r, [field]: nextValue } : r)));
     } finally {
-      setGrammarSavingId(null);
+      setGrammarSaving(false);
     }
   }
 
@@ -545,16 +605,6 @@ export default function AdminPublishingPage() {
                   </div>
                 </button>
 
-                {tab === "words" ? (
-                  <div className="mt-3">
-                    <ConceptGrammarFields
-                      concept={item as PublishingConceptItem}
-                      saving={grammarSavingId === id}
-                      onChange={(field, value) => handleGrammarChange(id, field, value)}
-                    />
-                  </div>
-                ) : null}
-
                 {isExpanded ? (
                   <div className="mt-4 space-y-2 border-t border-border pt-4">
                     {recordingsLoading ? (
@@ -562,9 +612,28 @@ export default function AdminPublishingPage() {
                     ) : recordings.length === 0 ? (
                       <p className="text-sm text-ink-muted">No verified recordings yet for this {tab === "words" ? "word" : "sentence"}.</p>
                     ) : (
-                      recordings.map((r) => (
-                        <RecordingRow key={r.id} recording={r} isToggling={togglingId === r.id} onToggle={() => handleToggle(id, r)} />
-                      ))
+                      <>
+                        {tab === "words" ? (
+                          <GrammarBulkAssign
+                            selectedCount={selectedRecordingIds.size}
+                            saving={grammarSaving}
+                            onAssign={(field, value) => handleGrammarBulkAssign(id, field, value)}
+                            onSelectAll={() => setSelectedRecordingIds(new Set(recordings.map((r) => r.id)))}
+                            onClearSelection={() => setSelectedRecordingIds(new Set())}
+                          />
+                        ) : null}
+                        {recordings.map((r) => (
+                          <RecordingRow
+                            key={r.id}
+                            recording={r}
+                            isToggling={togglingId === r.id}
+                            onToggle={() => handleToggle(id, r)}
+                            selectable={tab === "words"}
+                            selected={selectedRecordingIds.has(r.id)}
+                            onToggleSelect={() => toggleSelectRecording(r.id)}
+                          />
+                        ))}
+                      </>
                     )}
                   </div>
                 ) : null}

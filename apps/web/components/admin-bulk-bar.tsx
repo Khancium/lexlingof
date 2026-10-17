@@ -27,6 +27,8 @@ export function AdminBulkBar({
     setIsDeleting(true);
     try {
       await onDelete();
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to delete"));
     } finally {
       setIsDeleting(false);
     }
