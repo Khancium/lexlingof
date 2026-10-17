@@ -44,9 +44,11 @@ export const MIME_TYPE_TO_FORMAT: Record<AllowedAudioMimeType, (typeof audioForm
   "video/webm": "webm",
 };
 
-// Module 1 (WORD) clips are capped at 3 seconds, so 500KB comfortably covers
-// any codec at a reasonable bitrate. Every other module uses the 100MB limit
-// from gamification_config's modules.audio.max_file_bytes.
+// Module 1 (WORD) clips are capped at 10 seconds; the recorder's own bitrate
+// table (apps/web/lib/upload.ts) tops out at 40kbps, so even a full 10s clip
+// is well under 100KB -- 500KB stays comfortable headroom for any codec.
+// Every other module uses the 100MB limit from gamification_config's
+// modules.audio.max_file_bytes.
 export const WORD_MAX_FILE_SIZE_BYTES = 500_000;
 export const DEFAULT_MAX_FILE_SIZE_BYTES = 104_857_600;
 
@@ -82,9 +84,9 @@ export async function storeAudioBuffer(params: {
   }
 
   // Module 1 (WORD) ONLY. NEVER apply this check to any other module.
-  if (params.module === "WORD" && params.durationMs > 5000) {
-    throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 5 seconds (5000ms)", {
-      maxAllowed: 5000,
+  if (params.module === "WORD" && params.durationMs > 10000) {
+    throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 10 seconds (10000ms)", {
+      maxAllowed: 10000,
       received: params.durationMs,
     });
   }

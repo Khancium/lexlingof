@@ -156,9 +156,9 @@ export default async function audioRoutes(fastify: FastifyInstance) {
     }
 
     // Module 1 (WORD) ONLY. NEVER apply this check to any other module.
-    if (audioFile.moduleType === "WORD" && body.durationMs > 5000) {
-      throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 5 seconds (5000ms)", {
-        maxAllowed: 5000,
+    if (audioFile.moduleType === "WORD" && body.durationMs > 10000) {
+      throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 10 seconds (10000ms)", {
+        maxAllowed: 10000,
         received: body.durationMs,
       });
     }

@@ -676,7 +676,7 @@ export const pendingSubmissions = pgTable(
 /**
  * Module 1 word recordings.
  *
- * The 5-second cap (`ck_word_recording_max_duration`) applies to THIS TABLE ONLY.
+ * The 10-second cap (`ck_word_recording_max_duration`) applies to THIS TABLE ONLY.
  * NEVER apply a duration limit to audio_uploads, translations or
  * scene_contributions — those modules accept audio of any length.
  */
@@ -738,7 +738,7 @@ export const wordRecordings = pgTable(
       .where(sql`${t.deletedAt} is null`),
     index("ix_word_recordings_concept").on(t.conceptId),
     /** Module 1 ONLY. 3-second limit. NEVER apply to other tables. */
-    check("ck_word_recording_max_duration", sql`${t.durationMs} <= 5000`),
+    check("ck_word_recording_max_duration", sql`${t.durationMs} <= 10000`),
     check("ck_word_recording_min_duration", sql`${t.durationMs} > 0`),
     check("ck_word_recording_synonym_index", sql`${t.synonymIndex} between 1 and 3`),
   ],

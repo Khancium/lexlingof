@@ -403,7 +403,7 @@ function ConceptPageInner() {
               <div className="card-duo flex flex-col items-center justify-center gap-2 rounded-2xl bg-surface py-6 shadow-sm">
                 <AudioRecorder
                   key={synonymIndex}
-                  maxDurationMs={5000}
+                  maxDurationMs={10000}
                   onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
                   onError={(message) => setSubmitError(message)}
                 />

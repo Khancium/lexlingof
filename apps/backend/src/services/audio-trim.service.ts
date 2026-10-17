@@ -50,6 +50,7 @@ export async function trimSilence(input: Buffer, format: string): Promise<TrimRe
   try {
     await mkdir(workDir, { recursive: true });
     await writeFile(inPath, input);
+    const originalDurationMs = await probeDurationMs(inPath);
 
     // adelay only prepends silence -- there's no version-portable
     // duration-based "pad the end" option (apad's pad_dur/whole_dur aren't
@@ -73,8 +74,14 @@ export async function trimSilence(input: Buffer, format: string): Promise<TrimRe
 
     const [trimmedBuffer, trimmedDurationMs] = await Promise.all([readFile(outPath), probeDurationMs(outPath)]);
 
-    if (trimmedDurationMs < MIN_RESULT_DURATION_MS) {
-      const originalDurationMs = await probeDurationMs(inPath);
+    // If the clip didn't have at least EDGE_PADDING_SECONDS*2 of real silence
+    // at its edges to begin with (the common case for a recording where the
+    // contributor starts speaking almost immediately), padding back onto a
+    // tight trim can leave the result LONGER than the original -- which for
+    // WORD recordings (hard 10000ms cap, enforced against this very value)
+    // would turn an already-valid recording into a rejected submission. Only
+    // ever accept a result that's actually shorter than what came in.
+    if (trimmedDurationMs < MIN_RESULT_DURATION_MS || trimmedDurationMs >= originalDurationMs) {
       return { buffer: input, durationMs: originalDurationMs, trimmed: false };
     }
 

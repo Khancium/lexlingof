@@ -14,7 +14,7 @@ const QUICK_ACTIONS = [
     icon: "🎙️",
     color: "border-brand",
     description: "Pick an everyday object from a category and say its name in your language.",
-    detail: "Up to 3 different words per object, about 5 seconds each. Add spelling and pronunciation if you know them.",
+    detail: "Up to 3 different words per object, up to 10 seconds each. Add spelling and pronunciation if you know them.",
   },
   {
     href: "/contribute/audio",

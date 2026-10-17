@@ -66,11 +66,11 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
 
   // Second duration enforcement layer (first is Zod at the route; the DB
   // CHECK constraint ck_word_recording_max_duration is the third and last).
-  if (durationMs > 5000) {
+  if (durationMs > 10000) {
     throw new HttpError(
       400,
       "DURATION_LIMIT_EXCEEDED",
-      "Word recordings cannot exceed 5 seconds. This is the second enforcement layer.",
+      "Word recordings cannot exceed 10 seconds. This is the second enforcement layer.",
     );
   }
 
