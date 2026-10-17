@@ -31,8 +31,14 @@ import forumRoutes from "./modules/forum/forum.routes.js";
 import { startSubmissionBufferWorker } from "./services/submission-buffer.service.js";
 import { HttpError } from "./utils/http-error.js";
 
-// 2. Create the Fastify instance.
-const server = Fastify({ logger: true });
+// 2. Create the Fastify instance. trustProxy is required on Railway (and any
+// platform that sits behind a proxy/load balancer) -- without it, Fastify
+// reports every request's IP as the proxy's own internal address rather than
+// reading it from X-Forwarded-For, which collapses the rate limiter below
+// into one shared budget across the ENTIRE user base instead of one per
+// real visitor. That bug was intermittently 429-ing unrelated users' word
+// submissions whenever combined traffic crossed the per-minute ceiling.
+const server = Fastify({ logger: true, trustProxy: true });
 
 // 3. CORS. `credentials: true` is required for the browser to send/accept
 // the httpOnly refresh-token cookie (auth.routes.ts) on cross-origin
