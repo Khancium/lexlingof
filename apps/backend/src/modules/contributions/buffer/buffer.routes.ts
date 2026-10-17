@@ -1,5 +1,4 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { MultipartValue } from "@fastify/multipart";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
@@ -88,25 +87,37 @@ const sceneMetaSchema = z.object({
 });
 
 async function readMultipartSubmission(request: FastifyRequest): Promise<{ meta: unknown; audio: { buffer: Buffer; mimetype: string; filename: string } }> {
-  const file = await request.file();
-  if (!file) {
-    throw new HttpError(400, "MISSING_FILE", "An audio file is required");
+  // request.file() only sees fields that arrived BEFORE the file part in the
+  // stream -- if a client ever sends "file" before "meta" (field order is
+  // caller-controlled, not guaranteed), file.fields.meta would silently be
+  // undefined and this would 400 with MISSING_META even though meta was
+  // sent. Iterating every part instead works regardless of order.
+  let audio: { buffer: Buffer; mimetype: string; filename: string } | undefined;
+  let metaValue: string | undefined;
+
+  for await (const part of request.parts()) {
+    if (part.type === "file") {
+      audio = { buffer: await part.toBuffer(), mimetype: part.mimetype, filename: part.filename };
+    } else if (part.fieldname === "meta") {
+      metaValue = part.value as string;
+    }
   }
 
-  const metaField = file.fields.meta as MultipartValue<string> | undefined;
-  if (!metaField) {
+  if (!audio) {
+    throw new HttpError(400, "MISSING_FILE", "An audio file is required");
+  }
+  if (!metaValue) {
     throw new HttpError(400, "MISSING_META", "A 'meta' field containing the submission JSON is required");
   }
 
   let meta: unknown;
   try {
-    meta = JSON.parse(metaField.value);
+    meta = JSON.parse(metaValue);
   } catch {
     throw new HttpError(400, "INVALID_META", "meta must be valid JSON");
   }
 
-  const buffer = await file.toBuffer();
-  return { meta, audio: { buffer, mimetype: file.mimetype, filename: file.filename } };
+  return { meta, audio };
 }
 
 export default async function bufferRoutes(fastify: FastifyInstance) {
