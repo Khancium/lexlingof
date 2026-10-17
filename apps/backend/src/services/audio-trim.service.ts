@@ -13,8 +13,18 @@ ffmpeg.setFfprobePath(ffprobeInstaller.path);
 // Below this level, a run of near-silence at the very start/end of a clip is
 // trimmed; a pause inside the recording (between words, mid-sentence) is left
 // alone since it isn't at either edge.
-const SILENCE_THRESHOLD_DB = "-40dB";
-const MIN_SILENCE_RUN_SECONDS = 0.3;
+//
+// -40dB was too aggressive: a soft-spoken onset, a trailing consonant's
+// decay, or just a quieter microphone/device can easily sit below -40dB
+// while still being genuine speech -- and once silenceremove decides a
+// stretch is silence, padding afterward only adds dead air back, it can't
+// un-trim content that was already cut. -55dB only catches audio close to
+// the actual noise floor, and the minimum run length is raised too so a
+// brief dip (not a real pause) can't trigger a trim on its own -- between
+// the two, this errs heavily toward leaving genuine speech alone over
+// aggressively trimming silence.
+const SILENCE_THRESHOLD_DB = "-55dB";
+const MIN_SILENCE_RUN_SECONDS = 0.5;
 // silenceremove's detected boundary sits right at the amplitude threshold
 // crossing, which is tighter than where a listener actually perceives speech
 // starting/ending -- trimming exactly to that boundary was clipping the soft
