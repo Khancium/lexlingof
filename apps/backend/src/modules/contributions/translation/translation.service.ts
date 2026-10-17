@@ -484,6 +484,12 @@ async function overrideTranslation(
         rejectedBy: null,
         rejectionReason: null,
         version: sql`${contributions.version} + 1`,
+        // My Contributions (users.routes.ts GET /me/contributions) orders by
+        // submittedAt, not updatedAt -- without bumping this too, a retake
+        // succeeds completely but stays sorted at its ORIGINAL submission
+        // time, so it can get buried under newer contributions and look like
+        // it never happened even though it worked.
+        submittedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(contributions.id, existing.contributionId));
