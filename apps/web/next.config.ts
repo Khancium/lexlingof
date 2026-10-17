@@ -13,10 +13,15 @@ const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "img-src 'self' data: https:",
+  // blob: covers every locally-generated preview before upload -- a fresh
+  // mic recording (audio-recorder.tsx), a cropped image (image-cropper.tsx),
+  // and a picked-but-not-yet-posted forum image (forum-post-composer.tsx)
+  // are all played/shown from a local URL.createObjectURL(...) blob, which
+  // img-src/media-src must allow or the browser silently refuses to load it.
+  "img-src 'self' data: blob: https:",
   "font-src 'self' https://fonts.gstatic.com data:",
   `connect-src 'self' ${apiOrigin}`,
-  "media-src 'self' https://*.r2.cloudflarestorage.com",
+  "media-src 'self' blob: https://*.r2.cloudflarestorage.com",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

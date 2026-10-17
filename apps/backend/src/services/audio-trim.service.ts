@@ -15,21 +15,32 @@ ffmpeg.setFfprobePath(ffprobeInstaller.path);
 // alone since it isn't at either edge.
 const SILENCE_THRESHOLD_DB = "-40dB";
 const MIN_SILENCE_RUN_SECONDS = 0.3;
+// silenceremove's detected boundary sits right at the amplitude threshold
+// crossing, which is tighter than where a listener actually perceives speech
+// starting/ending -- trimming exactly to that boundary was clipping the soft
+// onset/decay of real words (a quiet consonant, a trailing vowel). Padding
+// back a fixed amount of true silence on each side after the tight trim
+// fixes that without having to fight with the detection threshold itself.
+const EDGE_PADDING_SECONDS = 0.6;
 // Guards against a clip that's almost entirely silence (or a false positive
 // on a very quiet real recording) getting trimmed down to effectively
 // nothing -- if the result would be shorter than this, the original is kept
-// untouched instead.
-const MIN_RESULT_DURATION_MS = 200;
+// untouched instead. Smaller than the padding added back on each side (which
+// alone totals 1200ms) so this only fires when the content between the pads
+// is itself negligible, not because the padding exists.
+const MIN_RESULT_DURATION_MS = 1200 + 200;
 
 export type TrimResult = { buffer: Buffer; durationMs: number; trimmed: boolean };
 
 /**
  * Detects and clips long silence at the very start and end of a recording
- * (ffmpeg's silenceremove filter), then re-measures the actual duration of
- * the result rather than trusting anything client-reported. Never throws --
- * any failure (corrupt input, ffmpeg missing, trimmed-to-nothing) falls back
- * to the original buffer untouched, so a processing hiccup never blocks an
- * upload.
+ * (ffmpeg's silenceremove filter), then pads exactly EDGE_PADDING_SECONDS of
+ * true silence back onto each end (adelay prepends, apad appends) so the
+ * trim never sits flush against the first/last audible moment. Re-measures
+ * the actual duration of the result rather than trusting anything
+ * client-reported. Never throws -- any failure (corrupt input, ffmpeg
+ * missing, trimmed-to-nothing) falls back to the original buffer untouched,
+ * so a processing hiccup never blocks an upload.
  */
 export async function trimSilence(input: Buffer, format: string): Promise<TrimResult> {
   const workDir = path.join(tmpdir(), `lexlingo-trim-${randomUUID()}`);
@@ -40,11 +51,20 @@ export async function trimSilence(input: Buffer, format: string): Promise<TrimRe
     await mkdir(workDir, { recursive: true });
     await writeFile(inPath, input);
 
+    // adelay only prepends silence -- there's no version-portable
+    // duration-based "pad the end" option (apad's pad_dur/whole_dur aren't
+    // available on every ffmpeg build this might run on, pad_len/whole_len
+    // need a sample count we don't know ahead of time). Reversing the audio,
+    // prepending the same delay again, then reversing back turns a second
+    // adelay into an append -- the standard portable trick for padding both
+    // ends with just adelay+areverse.
+    const paddingMs = Math.round(EDGE_PADDING_SECONDS * 1000);
     await new Promise<void>((resolve, reject) => {
       ffmpeg(inPath)
         .audioFilters(
           `silenceremove=start_periods=1:start_duration=${MIN_SILENCE_RUN_SECONDS}:start_threshold=${SILENCE_THRESHOLD_DB}:` +
-            `stop_periods=1:stop_duration=${MIN_SILENCE_RUN_SECONDS}:stop_threshold=${SILENCE_THRESHOLD_DB}:detection=peak`,
+            `stop_periods=1:stop_duration=${MIN_SILENCE_RUN_SECONDS}:stop_threshold=${SILENCE_THRESHOLD_DB}:detection=peak,` +
+            `adelay=${paddingMs},areverse,adelay=${paddingMs},areverse`,
         )
         .on("error", reject)
         .on("end", () => resolve())
