@@ -71,6 +71,12 @@ function ConceptPageInner() {
   const [lastSubmittedRecording, setLastSubmittedRecording] = useState<Recording | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  // Separate from lastSubmittedRecording (which only locks the button) --
+  // for a synonym that was ALREADY recorded, the "✓ recorded" checkmark and
+  // "Already recorded" note are both showing before the retake even starts,
+  // so a successful override looks visually identical to doing nothing
+  // without an explicit confirmation here.
+  const [justSubmitted, setJustSubmitted] = useState(false);
 
   useEffect(() => {
     api.categories.getAll().then((all) => {
@@ -182,12 +188,14 @@ function ConceptPageInner() {
     setIpa("");
     setDetailsOpen(false);
     setSubmitError(null);
+    setJustSubmitted(false);
   }
 
   async function handleSubmit() {
     if (!concept || !languageId || !recording) return;
     setIsSubmitting(true);
     setSubmitError(null);
+    setJustSubmitted(false);
     try {
       // A single request hands the audio + fields to the backend's buffer,
       // which acks immediately and finishes the R2 upload + DB write in the
@@ -210,6 +218,7 @@ function ConceptPageInner() {
 
       setLastSubmittedRecording(recording);
       setRecordedSynonyms((prev) => (prev ? { ...prev, [synonymIndex]: true } : prev));
+      setJustSubmitted(true);
       // Same auto-advance the translate module already does on submit --
       // Previous/Next stay fully functional, this just saves the extra
       // click to move on when there's a next object in the current list.
@@ -404,7 +413,10 @@ function ConceptPageInner() {
                 <AudioRecorder
                   key={synonymIndex}
                   maxDurationMs={10000}
-                  onRecordingComplete={(file, durationMs, checksum) => setRecording({ file, durationMs, checksum })}
+                  onRecordingComplete={(file, durationMs, checksum) => {
+                    setRecording({ file, durationMs, checksum });
+                    setJustSubmitted(false);
+                  }}
                   onError={(message) => setSubmitError(message)}
                 />
               </div>
@@ -446,6 +458,9 @@ function ConceptPageInner() {
                 <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
               ) : null}
               {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+              {justSubmitted && !submitError ? (
+                <p className="text-center font-semibold text-emerald-600">✓ Recording saved</p>
+              ) : null}
 
               <button
                 onClick={handleSubmit}
