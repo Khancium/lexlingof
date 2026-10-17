@@ -295,6 +295,14 @@ function ContributionsPageInner() {
                         {p.target?.label ?? "(no additional detail)"}
                         {p.target?.synonymIndex ? ` (synonym ${p.target.synonymIndex})` : ""}
                       </p>
+                      {p.errorMessage ? (
+                        <details className="w-full text-left">
+                          <summary className="cursor-pointer text-[11px] font-medium text-red-600 hover:underline">Why did this fail?</summary>
+                          <p className="mt-1 max-h-24 overflow-y-auto break-words rounded-lg bg-red-100 p-2 text-[10px] text-red-800">
+                            {p.errorMessage}
+                          </p>
+                        </details>
+                      ) : null}
                       {href ? (
                         <Link
                           href={href}

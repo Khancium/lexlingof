@@ -95,13 +95,55 @@ export async function trimSilence(input: Buffer, format: string): Promise<TrimRe
   }
 }
 
+/**
+ * A browser's MediaRecorder produces webm by streaming chunks rather than
+ * finalizing a seekable file, so the container's own header never gets a
+ * duration written into it -- ffprobe reports `format.duration` as the
+ * string "N/A" for exactly this case (confirmed against real MediaRecorder-
+ * shaped output, not just a hypothetical). The old `seconds == null` check
+ * didn't catch that (a non-empty string isn't null), so `Math.round("N/A" *
+ * 1000)` silently produced NaN -- which every downstream caller then tried
+ * to persist as durationMs, failing the whole submission with a Postgres
+ * "invalid input syntax for type integer" error. This was the actual cause
+ * behind WORD submissions consistently failing for real microphone
+ * recordings (synthetic WAV test fixtures never hit it, since WAV always
+ * has an exact duration in its own header).
+ */
 function probeDurationMs(filePath: string): Promise<number> {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, data) => {
       if (err) return reject(err);
       const seconds = data.format.duration;
-      if (seconds == null) return reject(new Error("ffprobe returned no duration"));
-      resolve(Math.round(seconds * 1000));
+      if (typeof seconds === "number" && Number.isFinite(seconds)) {
+        resolve(Math.round(seconds * 1000));
+        return;
+      }
+      // Fall back to actually decoding the file -- this always yields a
+      // real duration regardless of what the container's own metadata says.
+      decodeDurationMs(filePath).then(resolve, reject);
     });
   });
+}
+
+function decodeDurationMs(filePath: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    let lastMs = 0;
+    ffmpeg(filePath)
+      .format("null")
+      .output("-")
+      .on("progress", (p: { timemark?: string }) => {
+        const ms = parseTimemark(p.timemark);
+        if (ms != null) lastMs = ms;
+      })
+      .on("error", reject)
+      .on("end", () => resolve(lastMs))
+      .run();
+  });
+}
+
+function parseTimemark(timemark: string | undefined): number | null {
+  if (!timemark) return null;
+  const match = /^(\d+):(\d{2}):(\d{2}(?:\.\d+)?)$/.exec(timemark);
+  if (!match || !match[1] || !match[2] || !match[3]) return null;
+  return (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000;
 }
