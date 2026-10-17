@@ -28,7 +28,7 @@ export function AdminMediaManager({
   onChanged,
 }: {
   itemId: string;
-  aspectRatio: number;
+  aspectRatio: number | null;
   outputWidth: number;
   outputHeight: number;
   getMedia: (id: string) => Promise<MediaItem[]>;

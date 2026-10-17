@@ -116,6 +116,20 @@ export const dataAccessLevel = pgEnum("data_access_level", [
 
 export const sceneDifficulty = pgEnum("scene_difficulty", ["easy", "medium", "hard", "expert"]);
 
+/** Grammatical metadata an admin assigns to a concept in the Publishing module -- not derived automatically, entered by hand per word. */
+export const conceptGrammaticalGender = pgEnum("concept_grammatical_gender", ["male", "female", "neutral"]);
+export const conceptPartOfSpeech = pgEnum("concept_part_of_speech", [
+  "noun",
+  "pronoun",
+  "adjective",
+  "adverb",
+  "verb",
+  "helping_verb",
+  "adposition",
+  "conjunction",
+]);
+export const conceptGrammaticalNumber = pgEnum("concept_grammatical_number", ["singular", "plural", "dual"]);
+
 /** The language a sentence's prompt text is written in -- what a contributor reads before recording their translation. Despite the column's historical name (english_text), it holds text in whichever of these this row is. */
 export const sentenceSourceLanguage = pgEnum("sentence_source_language", ["english", "urdu", "persian"]);
 
@@ -344,6 +358,12 @@ export const concepts = pgTable(
     // when a volunteer is allowed to see a delete button at all) has
     // something to filter on.
     createdBy: uuid("created_by").references(() => users.id),
+    // Grammatical metadata assigned by hand in the Publishing admin module,
+    // post-processing -- not populated at creation time, nullable until an
+    // admin sets it.
+    grammaticalGender: conceptGrammaticalGender("grammatical_gender"),
+    partOfSpeech: conceptPartOfSpeech("part_of_speech"),
+    grammaticalNumber: conceptGrammaticalNumber("grammatical_number"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),

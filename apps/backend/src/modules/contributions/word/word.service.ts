@@ -50,11 +50,19 @@ export async function getRecordedSynonyms(userId: string, conceptId: string): Pr
 }
 
 export async function submitWordRecording(userId: string, data: SubmitWordRecordingInput): Promise<SubmitWordRecordingResult> {
-  const { synonymIndex, durationMs } = data;
+  const { synonymIndex } = data;
 
   if (![1, 2, 3].includes(synonymIndex)) {
     throw new HttpError(400, "INVALID_SYNONYM_INDEX", "synonymIndex must be 1, 2 or 3");
   }
+
+  // The authoritative duration is whatever's on the audio file row -- by the
+  // time this runs, silence trimming (the confirm route / storeAudioBuffer)
+  // has already updated it to the final, post-trim value. data.durationMs
+  // (the client's own report, from before any trim) is only a fallback for
+  // the unexpected case where the row's durationMs is somehow still null.
+  const [audioFile] = await db.select({ durationMs: audioFiles.durationMs }).from(audioFiles).where(eq(audioFiles.id, data.audioFileId)).limit(1);
+  const durationMs = audioFile?.durationMs ?? data.durationMs;
 
   // Second duration enforcement layer (first is Zod at the route; the DB
   // CHECK constraint ck_word_recording_max_duration is the third and last).
@@ -241,14 +249,17 @@ async function overrideWordRecording(
   existing: { id: string; audioFileId: string; contributionId: string },
   data: SubmitWordRecordingInput,
 ): Promise<SubmitWordRecordingResult> {
-  const [[levelRow], [streakRow]] = await Promise.all([
+  const [[levelRow], [streakRow], [newAudioFile]] = await Promise.all([
     db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1),
     db.select({ currentStreak: streaks.currentStreak, longestStreak: streaks.longestStreak, lastActivityDate: streaks.lastActivityDate })
       .from(streaks)
       .where(eq(streaks.userId, userId))
       .limit(1),
+    // Same authoritative-duration reasoning as submitWordRecording's fresh-insert path.
+    db.select({ durationMs: audioFiles.durationMs }).from(audioFiles).where(eq(audioFiles.id, data.audioFileId)).limit(1),
   ]);
   const userLevel = levelRow?.level ?? null;
+  const durationMs = newAudioFile?.durationMs ?? data.durationMs;
   // This retake path never calls updateStreakOnContribution (see the
   // no-double-credit comment above), so unlike the fresh-submit path below,
   // the row read here isn't guaranteed to already reflect today -- run it
@@ -274,7 +285,7 @@ async function overrideWordRecording(
         nativeWord: data.nativeWord ?? null,
         romanization: data.romanization ?? null,
         ipa: data.ipa ?? null,
-        durationMs: data.durationMs,
+        durationMs,
         updatedAt: new Date(),
       })
       .where(eq(wordRecordings.id, existing.id));

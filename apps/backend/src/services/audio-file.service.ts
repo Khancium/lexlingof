@@ -2,8 +2,15 @@ import { randomUUID, createHash } from "node:crypto";
 
 import { db } from "../db/index.js";
 import { audioFiles, audioFormat, contributionModule } from "../db/schema.js";
+import { trimSilence } from "./audio-trim.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { storageService } from "./storage.service.js";
+
+// Silence trimming only applies to the two modules the dictionary/language-
+// learning feed actually surfaces to the public site -- a scene narration or
+// a free-form transcription upload may have intentional pauses that aren't
+// ours to remove.
+const SILENCE_TRIM_MODULES: ReadonlySet<ContributionModuleType> = new Set(["WORD", "TRANSLATION"]);
 
 export const ALLOWED_MIME_TYPES = [
   "audio/wav",
@@ -88,8 +95,22 @@ export async function storeAudioBuffer(params: {
 
   const audioFileId = randomUUID();
   const storageKey = `audio/${params.module.toLowerCase()}/${params.userId}/${audioFileId}.${ext}`;
-  const checksumSha256 = createHash("sha256").update(params.buffer).digest("hex");
   const format = MIME_TYPE_TO_FORMAT[mimeType];
+
+  // Clip long leading/trailing silence before this ever reaches R2 -- the
+  // buffered flow already holds the bytes server-side, so this is the
+  // cheapest point to do it. durationMs stored below is always the final,
+  // post-trim measured value (never the client-reported one), same
+  // authoritative source submitWordRecording reads back later.
+  let finalBuffer = params.buffer;
+  let finalDurationMs = Math.round(params.durationMs);
+  if (SILENCE_TRIM_MODULES.has(params.module)) {
+    const trimResult = await trimSilence(params.buffer, format);
+    finalBuffer = trimResult.buffer;
+    finalDurationMs = trimResult.durationMs;
+  }
+
+  const checksumSha256 = createHash("sha256").update(finalBuffer).digest("hex");
 
   // The DB insert and the R2 upload don't depend on each other -- run them
   // concurrently instead of as two sequential round trips.
@@ -100,14 +121,14 @@ export async function storeAudioBuffer(params: {
       originalFilename: params.filename,
       mimeType,
       format,
-      fileSizeBytes: params.buffer.byteLength,
+      fileSizeBytes: finalBuffer.byteLength,
       checksumSha256,
       processingStatus: "uploaded",
-      durationMs: Math.round(params.durationMs),
+      durationMs: finalDurationMs,
       uploadedBy: params.userId,
       moduleType: params.module,
     }),
-    storageService.uploadAudioBuffer(storageKey, params.buffer, mimeType),
+    storageService.uploadAudioBuffer(storageKey, finalBuffer, mimeType),
   ]);
 
   return { audioFileId, storageKey };

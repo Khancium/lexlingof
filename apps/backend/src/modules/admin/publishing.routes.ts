@@ -2,7 +2,14 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
 import { requirePermission, verifyToken } from "../../middleware/auth.js";
-import { contributionStatus, educationLevelEnum, genderEnum } from "../../db/schema.js";
+import {
+  contributionStatus,
+  conceptGrammaticalGender,
+  conceptGrammaticalNumber,
+  conceptPartOfSpeech,
+  educationLevelEnum,
+  genderEnum,
+} from "../../db/schema.js";
 import {
   getConceptRecordings,
   getSentenceTranslations,
@@ -10,6 +17,9 @@ import {
   listSentencesForPublishing,
   publishTranslation,
   publishWordRecording,
+  setConceptGrammar,
+  unpublishAllRecordingsForConcept,
+  unpublishAllTranslationsForSentence,
   unpublishTranslation,
   unpublishWordRecording,
 } from "./publishing.service.js";
@@ -55,6 +65,13 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 const recordingIdParamSchema = z.object({ id: z.string().uuid(), recordingId: z.string().uuid() });
 const translationIdParamSchema = z.object({ id: z.string().uuid(), translationId: z.string().uuid() });
 
+// Each field nullable-and-optional: omit to leave as-is, send null to clear, send a value to set.
+const conceptGrammarSchema = z.object({
+  grammaticalGender: z.enum(conceptGrammaticalGender.enumValues).nullable().optional(),
+  partOfSpeech: z.enum(conceptPartOfSpeech.enumValues).nullable().optional(),
+  grammaticalNumber: z.enum(conceptGrammaticalNumber.enumValues).nullable().optional(),
+});
+
 /**
  * Admin curation for the public dictionary (words) and public
  * language-learning feed (sentences) -- picking which verified contributor
@@ -87,6 +104,20 @@ export default async function publishingRoutes(fastify: FastifyInstance) {
     reply.code(204).send();
   });
 
+  // Withdraws the whole concept from the public dictionary at once (every published recording for it).
+  fastify.delete("/admin/publishing/concepts/:id/recordings", async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    await unpublishAllRecordingsForConcept(id);
+    reply.code(204).send();
+  });
+
+  fastify.put("/admin/publishing/concepts/:id/grammar", async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    const grammar = conceptGrammarSchema.parse(request.body);
+    await setConceptGrammar(id, grammar);
+    reply.code(204).send();
+  });
+
   fastify.get("/admin/publishing/sentences", async (request) => {
     return listSentencesForPublishing(listQuerySchema.parse(request.query));
   });
@@ -105,6 +136,13 @@ export default async function publishingRoutes(fastify: FastifyInstance) {
   fastify.delete("/admin/publishing/sentences/:id/translations/:translationId", async (request, reply) => {
     const { translationId } = translationIdParamSchema.parse(request.params);
     await unpublishTranslation(translationId);
+    reply.code(204).send();
+  });
+
+  // Withdraws the whole sentence from the public language-learning feed at once (every published translation for it).
+  fastify.delete("/admin/publishing/sentences/:id/translations", async (request, reply) => {
+    const { id } = idParamSchema.parse(request.params);
+    await unpublishAllTranslationsForSentence(id);
     reply.code(204).send();
   });
 }

@@ -1134,7 +1134,32 @@ export type VolunteerActivity = { pendingChanges: PendingChange[]; auditLog: Aud
 /*                                  Publishing                                */
 /* -------------------------------------------------------------------------- */
 
-export type PublishingConceptItem = { id: string; labelEnglish: string; categoryName: string; eligibleCount: number; publishedCount: number };
+export const CONCEPT_GRAMMATICAL_GENDER_OPTIONS = ["male", "female", "neutral"] as const;
+export type ConceptGrammaticalGender = (typeof CONCEPT_GRAMMATICAL_GENDER_OPTIONS)[number];
+
+export const CONCEPT_PART_OF_SPEECH_OPTIONS = [
+  "noun",
+  "pronoun",
+  "adjective",
+  "adverb",
+  "verb",
+  "helping_verb",
+  "adposition",
+  "conjunction",
+] as const;
+export type ConceptPartOfSpeech = (typeof CONCEPT_PART_OF_SPEECH_OPTIONS)[number];
+
+export const CONCEPT_GRAMMATICAL_NUMBER_OPTIONS = ["singular", "plural", "dual"] as const;
+export type ConceptGrammaticalNumber = (typeof CONCEPT_GRAMMATICAL_NUMBER_OPTIONS)[number];
+
+/** Hand-entered per-concept grammar metadata, set in the Publishing module post-processing -- null means not set yet. */
+export type ConceptGrammar = {
+  grammaticalGender: ConceptGrammaticalGender | null;
+  partOfSpeech: ConceptPartOfSpeech | null;
+  grammaticalNumber: ConceptGrammaticalNumber | null;
+};
+
+export type PublishingConceptItem = { id: string; labelEnglish: string; categoryName: string; eligibleCount: number; publishedCount: number } & ConceptGrammar;
 export type PublishingSentenceItem = { id: string; englishText: string; categoryName: string | null; eligibleCount: number; publishedCount: number };
 export type PublishingListResponse<T> = { items: T[]; total: number; limit: number; offset: number };
 
@@ -1802,6 +1827,10 @@ export const api = {
       apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
     unpublishRecording: (conceptId: string, recordingId: string) =>
       apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
+    // Withdraws the whole concept from the public dictionary at once.
+    unpublishAllRecordings: (conceptId: string) => apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings`),
+    setConceptGrammar: (conceptId: string, grammar: Partial<ConceptGrammar>) =>
+      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/grammar`, grammar),
 
     getSentences: (params?: PublishingQueryParams) =>
       apiClient
@@ -1815,6 +1844,8 @@ export const api = {
       apiClient.put(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`),
     unpublishTranslation: (sentenceId: string, translationId: string) =>
       apiClient.delete(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`),
+    // Withdraws the whole sentence from the public language-learning feed at once.
+    unpublishAllTranslations: (sentenceId: string) => apiClient.delete(`/api/v1/admin/publishing/sentences/${sentenceId}/translations`),
   },
 
   superadmin: {

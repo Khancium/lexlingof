@@ -8,6 +8,7 @@ import { db } from "../../db/index.js";
 import { audioFiles, contributionModule } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { storageService } from "../../services/storage.service.js";
+import { trimSilence } from "../../services/audio-trim.service.js";
 import {
   ALLOWED_MIME_TYPES,
   DEFAULT_MAX_FILE_SIZE_BYTES,
@@ -15,6 +16,10 @@ import {
   WORD_MAX_FILE_SIZE_BYTES,
 } from "../../services/audio-file.service.js";
 import { HttpError } from "../../utils/http-error.js";
+
+// Mirrors SILENCE_TRIM_MODULES in audio-file.service.ts -- only these two
+// modules get their recordings' leading/trailing silence trimmed.
+const SILENCE_TRIM_MODULES = new Set(["WORD", "TRANSLATION"]);
 
 // Kept in sync with PLAY_URL_EXPIRY_SECONDS in storage.service.ts, which
 // signs the URL but only returns the string itself.
@@ -109,12 +114,33 @@ export default async function audioRoutes(fastify: FastifyInstance) {
       });
     }
 
+    // Clip long leading/trailing silence from what the client just PUT
+    // directly to R2 (this is the one path where the backend never otherwise
+    // sees the bytes) and overwrite the stored object with the trimmed
+    // result. durationMs persisted below is always the final, post-trim
+    // measured value -- never trusted from the client -- for every module
+    // this applies to; everything else keeps the client-reported value
+    // as-is since it was never processed.
+    let finalDurationMs = body.durationMs;
+    if (SILENCE_TRIM_MODULES.has(audioFile.moduleType)) {
+      try {
+        const original = await storageService.getAudioObjectBuffer(audioFile.storageKey);
+        const trimResult = await trimSilence(original, audioFile.format);
+        if (trimResult.trimmed) {
+          await storageService.uploadAudioBuffer(audioFile.storageKey, trimResult.buffer, audioFile.mimeType);
+          finalDurationMs = trimResult.durationMs;
+        }
+      } catch (err) {
+        console.error(`[audio] silence trim failed for ${id}, keeping original upload:`, err);
+      }
+    }
+
     await db
       .update(audioFiles)
-      .set({ processingStatus: "uploaded", durationMs: body.durationMs, updatedAt: new Date() })
+      .set({ processingStatus: "uploaded", durationMs: finalDurationMs, updatedAt: new Date() })
       .where(eq(audioFiles.id, id));
 
-    return { audioFileId: id, storageKey: audioFile.storageKey, durationMs: body.durationMs, processingStatus: "uploaded" };
+    return { audioFileId: id, storageKey: audioFile.storageKey, durationMs: finalDurationMs, processingStatus: "uploaded" };
   });
 
   fastify.get("/:id/play-url", { preHandler: verifyToken }, async (request) => {

@@ -33,6 +33,7 @@ export type PublicRecording = {
   city: string | null;
   tribe: string | null;
   village: string | null;
+  gender: string | null;
 };
 
 export type PublicRelatedWord = { id: string; word: string };
@@ -50,13 +51,25 @@ const CONTRIBUTOR_SELECT = {
   city: contributorDemographics.city,
   tribeName: tribes.name,
   villageName: villages.name,
+  gender: contributorDemographics.gender,
   showLocation: contributorProfiles.showLocation,
 } as const;
 
-/** Same opt-in gate as the admin curation service -- only disclose city/tribe/village when the contributor explicitly turned on contributorProfiles.showLocation. */
-function privacyFields(row: { city: string | null; tribeName: string | null; villageName: string | null; showLocation: boolean | null }) {
+/** Same opt-in gate as the admin curation service -- only disclose city/tribe/village/gender when the contributor explicitly turned on contributorProfiles.showLocation. */
+function privacyFields(row: {
+  city: string | null;
+  tribeName: string | null;
+  villageName: string | null;
+  gender: string | null;
+  showLocation: boolean | null;
+}) {
   const shared = row.showLocation === true;
-  return { city: shared ? row.city : null, tribe: shared ? row.tribeName : null, village: shared ? row.villageName : null };
+  return {
+    city: shared ? row.city : null,
+    tribe: shared ? row.tribeName : null,
+    village: shared ? row.villageName : null,
+    gender: shared ? row.gender : null,
+  };
 }
 
 /**
@@ -78,6 +91,10 @@ export type PublicDictionaryEntry = {
   word: string;
   category: string;
   imageUrl: string | null;
+  // Hand-entered in the Publishing admin module, post-processing -- null until an admin sets it.
+  grammaticalGender: (typeof concepts.grammaticalGender.enumValues)[number] | null;
+  partOfSpeech: (typeof concepts.partOfSpeech.enumValues)[number] | null;
+  grammaticalNumber: (typeof concepts.grammaticalNumber.enumValues)[number] | null;
   recordings: PublicRecording[];
   relatedWords: PublicRelatedWord[];
 };
@@ -100,6 +117,9 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
         categoryId: concepts.categoryId,
         category: categories.nameEnglish,
         imageUrl: conceptMedia.publicUrl,
+        grammaticalGender: concepts.grammaticalGender,
+        partOfSpeech: concepts.partOfSpeech,
+        grammaticalNumber: concepts.grammaticalNumber,
       })
       .from(concepts)
       .innerJoin(categories, eq(categories.id, concepts.categoryId))
@@ -123,6 +143,9 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
       word: r.word,
       category: r.category,
       imageUrl: r.imageUrl,
+      grammaticalGender: r.grammaticalGender,
+      partOfSpeech: r.partOfSpeech,
+      grammaticalNumber: r.grammaticalNumber,
       recordings: recordingsByConcept.get(r.id) ?? [],
       relatedWords: relatedByConcept.get(r.id) ?? [],
     })),
@@ -191,7 +214,7 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFi
         nativeText: r.nativeText,
         romanization: r.romanization,
         ipa: r.ipa,
-        audioUrl: await storageService.generateAudioPlayUrl(r.audioStorageKey),
+        audioUrl: await storageService.generatePublicAudioPlayUrl(r.audioStorageKey),
         language: r.language,
         dialect: r.dialect,
         ...privacyFields(r),
@@ -369,7 +392,7 @@ async function getPublishedTranslationsBySentences(
         nativeText: r.nativeText,
         romanization: r.romanization,
         ipa: r.ipa,
-        audioUrl: r.audioStorageKey ? await storageService.generateAudioPlayUrl(r.audioStorageKey) : "",
+        audioUrl: r.audioStorageKey ? await storageService.generatePublicAudioPlayUrl(r.audioStorageKey) : "",
         language: r.language,
         dialect: r.dialect,
         ...privacyFields(r),

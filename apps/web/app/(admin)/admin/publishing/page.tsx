@@ -3,7 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   api,
+  CONCEPT_GRAMMATICAL_GENDER_OPTIONS,
+  CONCEPT_GRAMMATICAL_NUMBER_OPTIONS,
+  CONCEPT_PART_OF_SPEECH_OPTIONS,
   type AdminUserOption,
+  type ConceptGrammar,
   type ContributionStatusValue,
   type EducationLevel,
   type GenderOption,
@@ -88,6 +92,67 @@ function StatusBadge({ status }: { status: ContributionStatusValue }) {
   );
 }
 
+function prettify(value: string) {
+  return value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
+}
+
+const grammarSelectClass = "rounded-lg bg-surface-card px-2 py-1 text-xs text-ink ring-1 ring-border";
+
+/** The three hand-entered grammar dropdowns (gender/part of speech/number) shown on each word's card -- words only, set directly from the list without expanding the card. */
+function ConceptGrammarFields({
+  concept,
+  saving,
+  onChange,
+}: {
+  concept: ConceptGrammar;
+  saving: boolean;
+  onChange: (field: keyof ConceptGrammar, value: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-2" onClick={(e) => e.stopPropagation()}>
+      <select
+        value={concept.grammaticalGender ?? ""}
+        disabled={saving}
+        onChange={(e) => onChange("grammaticalGender", e.target.value)}
+        className={grammarSelectClass}
+      >
+        <option value="">Gender</option>
+        {CONCEPT_GRAMMATICAL_GENDER_OPTIONS.map((v) => (
+          <option key={v} value={v}>
+            {prettify(v)}
+          </option>
+        ))}
+      </select>
+      <select
+        value={concept.partOfSpeech ?? ""}
+        disabled={saving}
+        onChange={(e) => onChange("partOfSpeech", e.target.value)}
+        className={grammarSelectClass}
+      >
+        <option value="">Grammar</option>
+        {CONCEPT_PART_OF_SPEECH_OPTIONS.map((v) => (
+          <option key={v} value={v}>
+            {prettify(v)}
+          </option>
+        ))}
+      </select>
+      <select
+        value={concept.grammaticalNumber ?? ""}
+        disabled={saving}
+        onChange={(e) => onChange("grammaticalNumber", e.target.value)}
+        className={grammarSelectClass}
+      >
+        <option value="">Number</option>
+        {CONCEPT_GRAMMATICAL_NUMBER_OPTIONS.map((v) => (
+          <option key={v} value={v}>
+            {prettify(v)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /** One contributor's recording -- audio player, metadata badges, and the publish/unpublish toggle. Shared by the words and sentences tabs. */
 function RecordingRow({
   recording,
@@ -151,6 +216,8 @@ export default function AdminPublishingPage() {
   const [recordings, setRecordings] = useState<PublishableRecording[]>([]);
   const [recordingsLoading, setRecordingsLoading] = useState(false);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [unpublishingId, setUnpublishingId] = useState<string | null>(null);
+  const [grammarSavingId, setGrammarSavingId] = useState<string | null>(null);
 
   // Filter dropdown data sources -- same shape as the Contributions page.
   const [users, setUsers] = useState<AdminUserOption[]>([]);
@@ -284,6 +351,31 @@ export default function AdminPublishingPage() {
       load();
     } finally {
       setTogglingId(null);
+    }
+  }
+
+  async function handleUnpublishAll(id: string) {
+    const noun = tab === "words" ? "word" : "sentence";
+    if (!window.confirm(`Withdraw every published recording for this ${noun} from the public site?`)) return;
+    setUnpublishingId(id);
+    try {
+      if (tab === "words") await api.publishing.unpublishAllRecordings(id);
+      else await api.publishing.unpublishAllTranslations(id);
+      if (expandedId === id) setRecordings((prev) => prev.map((r) => ({ ...r, isPublished: false, publicationId: null })));
+      load();
+    } finally {
+      setUnpublishingId(null);
+    }
+  }
+
+  async function handleGrammarChange(conceptId: string, field: keyof ConceptGrammar, value: string) {
+    const nextValue = value === "" ? null : (value as ConceptGrammar[typeof field]);
+    setConceptItems((prev) => prev.map((c) => (c.id === conceptId ? { ...c, [field]: nextValue } : c)));
+    setGrammarSavingId(conceptId);
+    try {
+      await api.publishing.setConceptGrammar(conceptId, { [field]: nextValue });
+    } finally {
+      setGrammarSavingId(null);
     }
   }
 
@@ -430,6 +522,19 @@ export default function AdminPublishingPage() {
                     <p className="text-xs text-ink-muted">{category ?? "Uncategorized"}</p>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
+                    {item.publishedCount > 0 ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleUnpublishAll(id);
+                        }}
+                        disabled={unpublishingId === id}
+                        className="rounded-full bg-red-600/10 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-600/20 disabled:opacity-50"
+                      >
+                        {unpublishingId === id ? "..." : "Unpublish all"}
+                      </button>
+                    ) : null}
                     <span className="rounded-full bg-brand-light px-2.5 py-1 text-xs font-semibold text-brand-dark">
                       {item.publishedCount} published
                     </span>
@@ -439,6 +544,16 @@ export default function AdminPublishingPage() {
                     <span className={`text-ink-muted transition-transform ${isExpanded ? "rotate-180" : ""}`}>▾</span>
                   </div>
                 </button>
+
+                {tab === "words" ? (
+                  <div className="mt-3">
+                    <ConceptGrammarFields
+                      concept={item as PublishingConceptItem}
+                      saving={grammarSavingId === id}
+                      onChange={(field, value) => handleGrammarChange(id, field, value)}
+                    />
+                  </div>
+                ) : null}
 
                 {isExpanded ? (
                   <div className="mt-4 space-y-2 border-t border-border pt-4">

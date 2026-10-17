@@ -164,6 +164,9 @@ export async function listConceptsForPublishing(params: PublishingFilters) {
         id: concepts.id,
         labelEnglish: concepts.labelEnglish,
         categoryName: categories.nameEnglish,
+        grammaticalGender: concepts.grammaticalGender,
+        partOfSpeech: concepts.partOfSpeech,
+        grammaticalNumber: concepts.grammaticalNumber,
       })
       .from(concepts)
       .innerJoin(categories, eq(categories.id, concepts.categoryId))
@@ -200,6 +203,9 @@ export async function listConceptsForPublishing(params: PublishingFilters) {
       id: r.id,
       labelEnglish: r.labelEnglish,
       categoryName: r.categoryName,
+      grammaticalGender: r.grammaticalGender,
+      partOfSpeech: r.partOfSpeech,
+      grammaticalNumber: r.grammaticalNumber,
       eligibleCount: eligibleByConcept.get(r.id) ?? 0,
       publishedCount: publishedByConcept.get(r.id) ?? 0,
     })),
@@ -273,6 +279,28 @@ export async function publishWordRecording(conceptId: string, wordRecordingId: s
 
 export async function unpublishWordRecording(wordRecordingId: string): Promise<void> {
   await db.delete(publishedWordRecordings).where(eq(publishedWordRecordings.wordRecordingId, wordRecordingId));
+}
+
+/** Withdraws every currently-published recording for a concept at once -- the whole word disappears from the public API immediately, not just one recording. */
+export async function unpublishAllRecordingsForConcept(conceptId: string): Promise<void> {
+  await db.delete(publishedWordRecordings).where(eq(publishedWordRecordings.conceptId, conceptId));
+}
+
+export type ConceptGrammar = {
+  grammaticalGender: (typeof concepts.grammaticalGender.enumValues)[number] | null;
+  partOfSpeech: (typeof concepts.partOfSpeech.enumValues)[number] | null;
+  grammaticalNumber: (typeof concepts.grammaticalNumber.enumValues)[number] | null;
+};
+
+/** Hand-entered grammatical metadata for a concept, set in the Publishing module post-processing -- null fields mean "not set yet". Passing null for a field clears it. */
+export async function setConceptGrammar(conceptId: string, grammar: Partial<ConceptGrammar>): Promise<void> {
+  const [concept] = await db.select({ id: concepts.id }).from(concepts).where(eq(concepts.id, conceptId)).limit(1);
+  if (!concept) throw new HttpError(404, "NOT_FOUND", "Concept not found");
+
+  await db
+    .update(concepts)
+    .set({ ...grammar, updatedAt: new Date() })
+    .where(eq(concepts.id, conceptId));
 }
 
 /* --------------------------------- Sentences / translations --------------------------- */
@@ -400,4 +428,9 @@ export async function publishTranslation(sentenceId: string, translationId: stri
 
 export async function unpublishTranslation(translationId: string): Promise<void> {
   await db.delete(publishedTranslations).where(eq(publishedTranslations.translationId, translationId));
+}
+
+/** Withdraws every currently-published translation for a sentence at once -- the whole sentence disappears from the public API immediately, not just one translation. */
+export async function unpublishAllTranslationsForSentence(sentenceId: string): Promise<void> {
+  await db.delete(publishedTranslations).where(eq(publishedTranslations.sentenceId, sentenceId));
 }

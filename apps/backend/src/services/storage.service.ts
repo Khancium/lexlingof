@@ -49,6 +49,14 @@ const WORD_UPLOAD_EXPIRY_SECONDS = 900;
 const DEFAULT_UPLOAD_EXPIRY_SECONDS = 7200;
 const PLAY_URL_EXPIRY_SECONDS = 3600;
 const EXPORT_URL_EXPIRY_SECONDS = 86400;
+// Shorter window specifically for the public dictionary/language-learning
+// feed -- those links are the one case where the URL itself leaves our
+// control entirely (rendered into a public, unauthenticated WordPress page),
+// so a scraped list of them goes stale fast. Admin-facing playback
+// (publishing curation, contribution review) stays on the longer window
+// above since that's an internal, authenticated workflow, not the leak
+// surface this shorter one is defending.
+const PUBLIC_PLAY_URL_EXPIRY_SECONDS = 600;
 
 /**
  * Handles all file storage for Lexlingo. Audio files live in Cloudflare R2;
@@ -101,6 +109,16 @@ class StorageService {
     return getSignedUrl(r2, command, { expiresIn: PLAY_URL_EXPIRY_SECONDS });
   }
 
+  /** Same object as generateAudioPlayUrl, but on the shorter public-facing expiry window -- see PUBLIC_PLAY_URL_EXPIRY_SECONDS. Used only by the public dictionary/language-learning API. */
+  async generatePublicAudioPlayUrl(storageKey: string): Promise<string> {
+    const command = new GetObjectCommand({
+      Bucket: AUDIO_BUCKET,
+      Key: storageKey,
+    });
+
+    return getSignedUrl(r2, command, { expiresIn: PUBLIC_PLAY_URL_EXPIRY_SECONDS });
+  }
+
   /** Same object as generateAudioPlayUrl, but forces a browser download (via Content-Disposition) instead of inline playback -- used by the admin contributions download button. */
   async generateAudioDownloadUrl(storageKey: string, filename: string): Promise<string> {
     const command = new GetObjectCommand({
@@ -122,6 +140,16 @@ class StorageService {
     const command = new GetObjectCommand({ Bucket: AUDIO_BUCKET, Key: storageKey });
     const response = await r2.send(command);
     return response.Body as Readable;
+  }
+
+  /** Same object as getAudioObjectStream, but collected into a Buffer -- used by server-side audio post-processing (silence trimming) which needs the whole file at once. */
+  async getAudioObjectBuffer(storageKey: string): Promise<Buffer> {
+    const stream = await this.getAudioObjectStream(storageKey);
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
   }
 
   async deleteAudioFile(storageKey: string): Promise<void> {
@@ -253,9 +281,43 @@ class StorageService {
     return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
   }
 
-  /** Store a concept image the admin already cropped client-side -- see uploadPrecroppedImage. */
+  // Concept images support free-form cropping (any rectangle, any ratio --
+  // see ImageCropper's aspectRatio=null mode), so unlike uploadPrecroppedImage
+  // this must NOT force the result to a fixed 16:9: the incoming buffer
+  // already has whatever aspect ratio the admin chose, and `fit: "fill"`
+  // would stretch it back toward 16:9, defeating the point. This only caps
+  // the longest edge (never upscales) and keeps the admin's own ratio.
+  private static readonly CONCEPT_IMAGE_MAX_DIMENSION = 1600;
+
+  private async uploadFreeformCroppedImage(
+    fileBuffer: Buffer,
+    filename: string,
+    maxDimension: number,
+  ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
+    const resized = await sharp(fileBuffer)
+      .rotate()
+      .resize({ width: maxDimension, height: maxDimension, fit: "inside", withoutEnlargement: true })
+      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
+      .toBuffer();
+
+    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
+
+    const { data, error } = await supabase.storage
+      .from(IMAGE_BUCKET)
+      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
+
+    if (error) {
+      throw error;
+    }
+
+    const publicUrl = this.getImagePublicUrl(data.path);
+
+    return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
+  }
+
+  /** Store a concept image the admin already free-form cropped client-side -- see uploadFreeformCroppedImage. */
   async uploadPrecroppedConceptImage(fileBuffer: Buffer, filename: string) {
-    return this.uploadPrecroppedImage(fileBuffer, filename, StorageService.CONCEPT_IMAGE_SIZE);
+    return this.uploadFreeformCroppedImage(fileBuffer, filename, StorageService.CONCEPT_IMAGE_MAX_DIMENSION);
   }
 
   /** Store a scene image the admin already cropped client-side -- see uploadPrecroppedImage. */

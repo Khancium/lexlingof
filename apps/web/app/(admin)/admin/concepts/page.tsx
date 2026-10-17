@@ -881,7 +881,7 @@ export default function AdminConceptsPage() {
                     <td colSpan={8} className="px-4 py-4">
                       <AdminMediaManager
                         itemId={concept.id}
-                        aspectRatio={16 / 9}
+                        aspectRatio={null}
                         outputWidth={1600}
                         outputHeight={900}
                         getMedia={api.admin.getConceptMedia}
