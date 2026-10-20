@@ -1801,6 +1801,9 @@ export const api = {
         .post<BulkUploadResult>("/api/v1/admin/sentences/bulk", form, { params: { sourceLanguage } })
         .then((r) => r.data);
     },
+    /** One sentence per line -- lighter-weight sibling of the CSV/JSON upload above, no file required. Every line shares a single sourceLanguage. */
+    bulkCreateSentencesText: (texts: string[], sourceLanguage: SentenceSourceLanguage = "english") =>
+      apiClient.post<BulkUploadResult>("/api/v1/admin/sentences/bulk-text", { texts, sourceLanguage }).then((r) => r.data),
 
     /* ----------------------------- Volunteers ----------------------------- */
     /** Promotes a contributor to volunteer (enabled: true) or demotes a volunteer back to contributor (enabled: false). */

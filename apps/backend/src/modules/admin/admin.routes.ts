@@ -36,6 +36,7 @@ import {
   sceneImageKeywords,
   sceneMedia,
   sentences,
+  sentenceSourceLanguage,
   subTribes,
   suggestions,
   transcriptions,
@@ -1043,6 +1044,11 @@ const createSceneSchema = z.object({
 // slug for every line defeats the point of a fast paste-a-list box.
 const bulkSceneTextSchema = z.object({
   titles: z.array(z.string().trim().min(1)).min(1).max(500),
+});
+
+const bulkSentenceTextSchema = z.object({
+  texts: z.array(z.string().trim().min(1)).min(1).max(500),
+  sourceLanguage: z.enum(sentenceSourceLanguage.enumValues).default("english"),
 });
 
 const updateSceneSchema = z
@@ -3522,16 +3528,15 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.code(201).send(outcome.result);
   });
 
-  // Bulk create from a CSV or JSON file. Expected row fields: englishText or
-  // text (required -- accepts either column name, since a non-English batch
-  // realistically won't be titled "englishText"), category (optional, slug
-  // or English name). Every row in one upload shares a single sourceLanguage
-  // (?sourceLanguage=urdu|persian|english on the URL, default english) --
-  // real-world imports are one file per language, not a language-per-row
-  // column, matching how this dataset actually shows up.
-  fastify.post("/admin/sentences/bulk", { preHandler: requirePermission("sentences.manage") }, async (request) => {
-    const { sourceLanguage } = z.object({ sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english") }).parse(request.query);
-    const rows = await readBulkRows(request);
+  // Shared by the CSV/JSON file endpoint and the paste-text endpoint below --
+  // both resolve down to the same { englishText, category? }[] + a single
+  // sourceLanguage for the whole batch, so the category lookup and
+  // duplicate-text check only need to exist once.
+  async function buildSentenceInserts(
+    rows: { englishText: string; category?: string }[],
+    sourceLanguage: (typeof sentenceSourceLanguage.enumValues)[number],
+    rowNumOffset: number,
+  ): Promise<{ toInsert: { rowNum: number; value: typeof sentences.$inferInsert }[]; errors: { row: number; message: string }[] }> {
     const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
     const categoryByKey = new Map(
       allCategories.flatMap((c) => [
@@ -3540,7 +3545,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       ]),
     );
 
-    const result: BulkResult = { created: 0, errors: [] };
+    const errors: { row: number; message: string }[] = [];
     const toInsert: { rowNum: number; value: typeof sentences.$inferInsert }[] = [];
 
     // Bounded to this batch's own candidate texts (via the lower(english_text)
@@ -3548,7 +3553,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     // sentences table -- with 6000+ rows and cross-region latency, that would
     // be exactly the "never pull a large row set into Node" mistake this
     // codebase has already been burned by once (see ARCHITECTURE.md §2.7).
-    const candidateLower = [...new Set(rows.map((r) => (r.englishText ?? r.text ?? "").trim().toLowerCase()).filter(Boolean))];
+    const candidateLower = [...new Set(rows.map((r) => r.englishText.trim().toLowerCase()).filter(Boolean))];
     const existingLower = new Set(
       candidateLower.length
         ? (
@@ -3568,11 +3573,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]!;
-      const rowNum = i + 2;
-      const englishText = (row.englishText ?? row.text ?? "").trim();
+      const rowNum = i + rowNumOffset;
+      const englishText = row.englishText.trim();
 
       if (!englishText) {
-        result.errors.push({ row: rowNum, message: "englishText (or text) is required" });
+        errors.push({ row: rowNum, message: "Text is required" });
         continue;
       }
       let categoryId: string | null = null;
@@ -3580,14 +3585,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       if (categoryKey) {
         const category = categoryByKey.get(categoryKey);
         if (!category) {
-          result.errors.push({ row: rowNum, message: `Unknown category "${row.category}"` });
+          errors.push({ row: rowNum, message: `Unknown category "${row.category}"` });
           continue;
         }
         categoryId = category.id;
       }
 
       // Silently skip -- no error, no created count -- same convention as
-      // the concept duplicate check above.
+      // the concept duplicate check elsewhere in this file.
       const lower = englishText.toLowerCase();
       if (existingLower.has(lower)) {
         continue;
@@ -3597,6 +3602,42 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       toInsert.push({ rowNum, value: { englishText, categoryId, sourceLanguage } });
     }
 
+    return { toInsert, errors };
+  }
+
+  // Bulk create from a CSV or JSON file. Expected row fields: englishText or
+  // text (required -- accepts either column name, since a non-English batch
+  // realistically won't be titled "englishText"), category (optional, slug
+  // or English name). Every row in one upload shares a single sourceLanguage
+  // (?sourceLanguage=urdu|persian|english on the URL, default english) --
+  // real-world imports are one file per language, not a language-per-row
+  // column, matching how this dataset actually shows up.
+  fastify.post("/admin/sentences/bulk", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { sourceLanguage } = z.object({ sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english") }).parse(request.query);
+    const rows = await readBulkRows(request);
+    const { toInsert, errors } = await buildSentenceInserts(
+      rows.map((r) => ({ englishText: r.englishText ?? r.text ?? "", category: r.category })),
+      sourceLanguage,
+      2,
+    );
+    const result: BulkResult = { created: 0, errors };
+    await insertBulkInChunks(sentences, toInsert, result);
+    return result;
+  });
+
+  // Paste-text counterpart to the file upload above -- one sentence per
+  // textarea line, no file required, same convention as concepts'/scenes'
+  // own bulk-text endpoints. Every line in one paste shares a single
+  // sourceLanguage, picked once for the whole batch (matching the file
+  // endpoint's own one-language-per-upload convention).
+  fastify.post("/admin/sentences/bulk-text", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { texts, sourceLanguage } = bulkSentenceTextSchema.parse(request.body);
+    const { toInsert, errors } = await buildSentenceInserts(
+      texts.map((englishText) => ({ englishText })),
+      sourceLanguage,
+      1,
+    );
+    const result: BulkResult = { created: 0, errors };
     await insertBulkInChunks(sentences, toInsert, result);
     return result;
   });

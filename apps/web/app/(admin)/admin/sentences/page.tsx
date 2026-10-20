@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, type AdminSentence, type Category, type SentenceSourceLanguage } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
+import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
 import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
@@ -279,13 +280,22 @@ export default function AdminSentencesPage() {
               </select>
             </label>
             <span className="text-xs text-ink-muted">
-              Every row in the uploaded file is added as a sentence in this language. Column: <code>englishText</code> or{" "}
-              <code>text</code> (required), <code>category</code> (optional).
+              Applies to both bulk options below -- every sentence added by either one is created in this language.
             </span>
           </div>
           <AdminBulkUpload
             label="Bulk Upload Sentences"
             onUpload={(file) => api.admin.bulkUploadSentences(file, bulkSourceLanguage)}
+            onDone={() => load({ silent: true })}
+          />
+          <p className="text-xs text-ink-muted">
+            File columns: <code>englishText</code> or <code>text</code> (required), <code>category</code> (optional).
+          </p>
+
+          <AdminBulkTextCreate
+            label="Bulk Add Sentences by Text"
+            placeholder={"The sun rises in the east.\nShe is reading a book.\nWe will meet tomorrow."}
+            onSubmit={(texts) => api.admin.bulkCreateSentencesText(texts, bulkSourceLanguage)}
             onDone={() => load({ silent: true })}
           />
 
