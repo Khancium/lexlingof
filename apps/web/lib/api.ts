@@ -187,6 +187,8 @@ export type AuthUser = {
 
 export type AuthResponse = TokenPair & { user: AuthUser };
 
+export type TermsResponse = { version: string; content: string };
+
 export type NotificationItem = {
   id: string;
   channel: "in_app" | "email" | "push";
@@ -1235,9 +1237,12 @@ export const api = {
     // api.users.getMe() call would have neither an in-memory access token
     // nor a session to fall back on. The refresh token itself arrives as an
     // httpOnly cookie (set by the backend response, never in this JSON body).
-    register: async (email: string, password: string) => {
+    // termsVersion must be the exact version string from api.terms.get() --
+    // the backend re-validates it matches the current version server-side
+    // (see auth.service.ts) rather than trusting a client-only checkbox.
+    register: async (email: string, password: string, termsVersion: string) => {
       const data = await apiClient
-        .post<AuthResponse>("/api/v1/auth/register", { email, password })
+        .post<AuthResponse>("/api/v1/auth/register", { email, password, termsVersion })
         .then((r) => r.data);
       setAccessToken(data.accessToken);
       setSessionHint(true);
@@ -1280,6 +1285,10 @@ export const api = {
       apiClient.post<{ success: boolean; message: string }>("/api/v1/auth/forgot-password", { email }).then((r) => r.data),
     resetPassword: (token: string, newPassword: string) =>
       apiClient.post<{ success: boolean }>("/api/v1/auth/reset-password", { token, newPassword }).then((r) => r.data),
+  },
+
+  terms: {
+    get: () => apiClient.get<TermsResponse>("/api/v1/terms").then((r) => r.data),
   },
 
   users: {

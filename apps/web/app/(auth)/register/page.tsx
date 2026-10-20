@@ -1,13 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { getErrorMessage } from "@/lib/api";
+import { api, getErrorMessage } from "@/lib/api";
 
 const schema = z
   .object({
@@ -25,16 +25,32 @@ export default function RegisterPage() {
   const { register: registerUser } = useAuth();
   const router = useRouter();
   const [serverError, setServerError] = useState<string | null>(null);
+  const [termsVersion, setTermsVersion] = useState<string | null>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({ resolver: zodResolver(schema) });
 
+  // Fetched once up front so the exact version string is ready the moment
+  // the user checks the box -- the backend re-validates this matches the
+  // current version at submit time regardless (see auth.service.ts).
+  useEffect(() => {
+    api.terms
+      .get()
+      .then((t) => setTermsVersion(t.version))
+      .catch(() => setTermsVersion(null));
+  }, []);
+
   async function onSubmit(values: FormValues) {
+    if (!termsVersion) {
+      setServerError("Terms and Conditions could not be loaded -- please refresh and try again.");
+      return;
+    }
     setServerError(null);
     try {
-      await registerUser(values.email, values.password);
+      await registerUser(values.email, values.password, termsVersion);
       router.push("/onboarding");
     } catch (err) {
       setServerError(getErrorMessage(err, "Registration failed"));
@@ -80,11 +96,26 @@ export default function RegisterPage() {
             {errors.confirmPassword && <p className="mt-1 text-xs text-red-600">{errors.confirmPassword.message}</p>}
           </div>
 
+          <label className="flex items-start gap-2 text-sm text-ink-muted">
+            <input
+              type="checkbox"
+              checked={termsAccepted}
+              onChange={(e) => setTermsAccepted(e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 rounded border-border"
+            />
+            <span>
+              I have read and agree to the{" "}
+              <Link href="/terms" target="_blank" className="font-medium text-brand hover:underline">
+                Terms and Conditions
+              </Link>
+            </span>
+          </label>
+
           {serverError && <p className="text-sm text-red-600">{serverError}</p>}
 
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || !termsAccepted || !termsVersion}
             className="btn-duo w-full bg-brand py-3 font-semibold text-ink-inverted transition hover:bg-brand-dark disabled:opacity-50"
           >
             {isSubmitting ? "Creating account..." : "Register"}

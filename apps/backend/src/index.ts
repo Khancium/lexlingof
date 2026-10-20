@@ -28,6 +28,7 @@ import translationRoutes from "./modules/contributions/translation/translation.r
 import wordRoutes from "./modules/contributions/word/word.routes.js";
 import bufferRoutes from "./modules/contributions/buffer/buffer.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
+import termsRoutes from "./modules/terms/terms.routes.js";
 import { startSubmissionBufferWorker } from "./services/submission-buffer.service.js";
 import { HttpError } from "./utils/http-error.js";
 
@@ -138,6 +139,7 @@ await server.register(adminRoutes, { prefix: "/api/v1" });
 await server.register(publishingRoutes, { prefix: "/api/v1" });
 await server.register(publicContentRoutes, { prefix: "/api/v1" });
 await server.register(forumRoutes, { prefix: "/api/v1/forum" });
+await server.register(termsRoutes, { prefix: "/api/v1" });
 
 // Health checks. The versioned one is what was asked for; the bare one is
 // kept too since it's what infra (load balancers, Railway, etc.) commonly

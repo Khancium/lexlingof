@@ -136,14 +136,20 @@ apiClient.interceptors.response.use(
 
 export const api = {
   auth: {
-    register: (email: string, password: string) =>
-      apiClient.post('/api/v1/auth/register', { email, password }).then((r) => r.data),
+    // termsVersion must be the exact string from api.terms.get() -- the
+    // backend rejects registration if it doesn't match the current version.
+    register: (email: string, password: string, termsVersion: string) =>
+      apiClient.post('/api/v1/auth/register', { email, password, termsVersion }).then((r) => r.data),
     login: (email: string, password: string) =>
       apiClient.post('/api/v1/auth/login', { email, password }).then((r) => r.data),
     refreshToken: (refreshToken: string) =>
       apiClient.post('/api/v1/auth/refresh', { refreshToken }).then((r) => r.data),
     logout: (refreshToken: string) =>
       apiClient.post('/api/v1/auth/logout', { refreshToken }).then((r) => r.data),
+  },
+
+  terms: {
+    get: (): Promise<{ version: string; content: string }> => apiClient.get('/api/v1/terms').then((r) => r.data),
   },
 
   devices: {

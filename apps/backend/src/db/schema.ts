@@ -237,6 +237,30 @@ export const passwordResetTokens = pgTable(
   (t) => [index("ix_password_reset_tokens_user").on(t.userId)],
 );
 
+/**
+ * One row per user per terms-of-service version they've agreed to -- an
+ * append-only audit trail (never updated/deleted) of exactly what a
+ * contributor consented to and when, which is the whole point of recording
+ * it at all. A user has exactly one row per version (re-accepting the same
+ * version is a no-op, not a new row); a future terms update gets its own
+ * version string and its own acceptance requirement.
+ */
+export const termsAcceptances = pgTable(
+  "terms_acceptances",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex("uq_terms_acceptances_user_version").on(t.userId, t.version),
+    index("ix_terms_acceptances_user").on(t.userId),
+  ],
+);
+
 /** Push notification device registrations. */
 export const deviceTokens = pgTable(
   "device_tokens",

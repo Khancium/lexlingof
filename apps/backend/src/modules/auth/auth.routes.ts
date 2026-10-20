@@ -8,6 +8,10 @@ import { authService } from "./auth.service.js";
 const registerSchema = z.object({
   email: z.string().email().min(1),
   password: z.string().min(8),
+  // Fetched from GET /terms immediately before this call -- see auth.service.ts
+  // for why the server re-validates this against the current version rather
+  // than trusting the client's checkbox alone.
+  termsVersion: z.string().min(1),
 });
 
 const loginSchema = z.object({
@@ -72,7 +76,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
     // updates this. Default to the email's local part so there's always a
     // sane display name in the meantime.
     const displayName = body.email.split("@")[0]!;
-    const { refreshToken, ...result } = await authService.register(body.email, body.password, displayName);
+    const { refreshToken, ...result } = await authService.register(body.email, body.password, displayName, body.termsVersion);
     setRefreshCookie(reply, refreshToken);
     reply.code(201).send(result);
   });

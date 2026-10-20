@@ -5,7 +5,8 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 
 import { db } from "../../db/index.js";
-import { contributorProfiles, passwordResetTokens, refreshTokens, streaks, userStats, users } from "../../db/schema.js";
+import { contributorProfiles, passwordResetTokens, refreshTokens, streaks, termsAcceptances, userStats, users } from "../../db/schema.js";
+import { CURRENT_TERMS_VERSION } from "../../content/terms.js";
 import { writeAuditLog } from "../../services/audit-log.service.js";
 import { sendPasswordResetEmail } from "../../services/mailer.service.js";
 import { HttpError } from "../../utils/http-error.js";
@@ -27,6 +28,7 @@ class AuthService {
     email: string,
     password: string,
     displayName: string,
+    termsVersion: string,
   ): Promise<{ user: AuthUser } & TokenPair> {
     // Deliberately NOT scoped to isNull(deletedAt) -- a deleted account's row
     // keeps its original email (see users.routes.ts DELETE /me, which no
@@ -36,6 +38,17 @@ class AuthService {
 
     if (existing) {
       throw new HttpError(409, "EMAIL_TAKEN", "Account on this email already exists");
+    }
+
+    // The client fetches the current version from GET /terms and must send
+    // that exact string back -- this is the server-side enforcement that
+    // acceptance actually happened (never trust a client-only checkbox for
+    // something that matters this much), and it also catches the rare case
+    // where the terms were updated between page load and submit, rejecting
+    // a signup against a version that's no longer current rather than
+    // silently recording acceptance of stale terms.
+    if (termsVersion !== CURRENT_TERMS_VERSION) {
+      throw new HttpError(409, "TERMS_VERSION_MISMATCH", "The Terms and Conditions have been updated -- please review and accept the latest version.");
     }
 
     const passwordHash = await bcrypt.hash(password, PASSWORD_SALT_ROUNDS);
@@ -59,6 +72,7 @@ class AuthService {
       await tx.insert(contributorProfiles).values({ userId: created.id });
       await tx.insert(userStats).values({ userId: created.id });
       await tx.insert(streaks).values({ userId: created.id });
+      await tx.insert(termsAcceptances).values({ userId: created.id, version: termsVersion });
 
       return created;
     });
