@@ -1,5 +1,5 @@
 import axios, { type AxiosError, type InternalAxiosRequestConfig } from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const REFRESH_TOKEN_KEY = 'lexlingo_refresh_token';
 
@@ -64,6 +64,11 @@ export function getCurrentUserId(): string | null {
 export const apiClient = axios.create({
   baseURL: process.env.EXPO_PUBLIC_API_URL || 'http://10.0.2.2:3001',
   timeout: 30000,
+  // Tells the backend's auth routes to return the refresh token in the
+  // response body (and accept it from the body on /refresh and /logout)
+  // instead of relying solely on the httpOnly cookie the web app uses --
+  // see the matching comment in apps/backend/src/modules/auth/auth.routes.ts.
+  headers: { 'X-Client-Platform': 'mobile' },
 });
 
 apiClient.interceptors.request.use((config) => {
@@ -79,19 +84,22 @@ type RetryableConfig = InternalAxiosRequestConfig & { _retry?: boolean };
 let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
-  const storedRefreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+  const storedRefreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
   if (!storedRefreshToken) {
     return null;
   }
 
+  // Not apiClient -- a plain axios call still needs the platform header set
+  // explicitly, since that isn't inherited from apiClient's own defaults.
   const response = await axios.post(
     `${apiClient.defaults.baseURL}/api/v1/auth/refresh`,
     { refreshToken: storedRefreshToken },
+    { headers: { 'X-Client-Platform': 'mobile' } },
   );
   const { accessToken: newAccessToken, refreshToken: newRefreshToken } = response.data;
 
   setAccessToken(newAccessToken);
-  await AsyncStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
+  await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, newRefreshToken);
 
   return newAccessToken;
 }

@@ -1,8 +1,14 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import axios from 'axios';
 import { api, setAccessToken } from '../services/api.service';
 
+// SecureStore (Keychain on iOS, Keystore on Android) for the refresh token
+// specifically -- it's a long-lived (30-day) credential, so it gets real
+// encryption at rest instead of AsyncStorage's plain, unencrypted storage.
+// AsyncStorage stays for the device push token below, which isn't sensitive
+// the same way.
 const REFRESH_TOKEN_KEY = 'lexlingo_refresh_token';
 const DEVICE_TOKEN_KEY = 'lexlingo_device_token';
 
@@ -60,7 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const { accessToken, refreshToken } = await api.auth.login(email, password);
-      await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
       setAccessToken(accessToken);
 
       const user = await api.users.getMe();
@@ -75,7 +81,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const { accessToken, refreshToken } = await api.auth.register(email, password, termsVersion);
-      await AsyncStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken);
       setAccessToken(accessToken);
 
       const user = await api.users.getMe();
@@ -87,7 +93,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    const refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
     const deviceToken = await AsyncStorage.getItem(DEVICE_TOKEN_KEY);
 
     if (refreshToken) {
@@ -106,13 +112,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       }
     }
 
-    await AsyncStorage.multiRemove([REFRESH_TOKEN_KEY, DEVICE_TOKEN_KEY]);
+    await Promise.all([SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY), AsyncStorage.removeItem(DEVICE_TOKEN_KEY)]);
     setAccessToken(null);
     set({ user: null, isAuthenticated: false, justRegistered: false });
   },
 
   loadUser: async () => {
-    const refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+    const refreshToken = await SecureStore.getItemAsync(REFRESH_TOKEN_KEY);
     if (!refreshToken) {
       set({ isLoading: false });
       return;
@@ -120,13 +126,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       const { accessToken, refreshToken: newRefreshToken } = await api.auth.refreshToken(refreshToken);
-      await AsyncStorage.setItem(REFRESH_TOKEN_KEY, newRefreshToken);
+      await SecureStore.setItemAsync(REFRESH_TOKEN_KEY, newRefreshToken);
       setAccessToken(accessToken);
 
       const user = await api.users.getMe();
       set({ user, isAuthenticated: true, isLoading: false });
     } catch {
-      await AsyncStorage.removeItem(REFRESH_TOKEN_KEY);
+      await SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY);
       setAccessToken(null);
       set({ isAuthenticated: false, isLoading: false });
     }

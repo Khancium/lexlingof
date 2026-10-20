@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { verifyToken } from "../../middleware/auth.js";
@@ -18,6 +18,24 @@ const loginSchema = z.object({
   email: z.string().email().min(1),
   password: z.string().min(1),
 });
+
+// The mobile app (apps/mobile) sends this on every auth call. A native app
+// has no equivalent of a browser's cookie jar / same-origin policy -- its
+// networking layer doesn't reliably persist or resend an httpOnly cookie the
+// way a browser does -- and it also doesn't have the XSS-in-a-web-page
+// threat model that motivated moving the web app's refresh token out of the
+// response body in the first place (there's no arbitrary third-party script
+// ever running inside a native app's JS context the way there is on a web
+// page). So mobile gets the refresh token back in the response body, same as
+// before that migration, and can send it back in the body on /refresh and
+// /logout; the web app continues to rely solely on the httpOnly cookie and
+// never reads this field. This header is just a delivery-channel switch, not
+// an authorization boundary -- a caller still needs valid credentials (or an
+// already-issued refresh token) to get anything back either way.
+const MOBILE_CLIENT_HEADER = "x-client-platform";
+function isMobileClient(request: FastifyRequest): boolean {
+  return request.headers[MOBILE_CLIENT_HEADER] === "mobile";
+}
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
@@ -78,28 +96,33 @@ export default async function authRoutes(fastify: FastifyInstance) {
     const displayName = body.email.split("@")[0]!;
     const { refreshToken, ...result } = await authService.register(body.email, body.password, displayName, body.termsVersion);
     setRefreshCookie(reply, refreshToken);
-    reply.code(201).send(result);
+    reply.code(201).send(isMobileClient(request) ? { ...result, refreshToken } : result);
   });
 
   fastify.post("/login", authAttemptLimit, async (request, reply) => {
     const body = loginSchema.parse(request.body);
     const { refreshToken, ...result } = await authService.login(body.email, body.password);
     setRefreshCookie(reply, refreshToken);
-    reply.code(200).send(result);
+    reply.code(200).send(isMobileClient(request) ? { ...result, refreshToken } : result);
   });
 
+  const refreshSchema = z.object({ refreshToken: z.string().min(1).optional() });
+
   fastify.post("/refresh", async (request, reply) => {
-    const token = request.cookies[REFRESH_COOKIE_NAME];
+    // Cookie first (the web app's only path); the body is mobile's.
+    const token = request.cookies[REFRESH_COOKIE_NAME] ?? refreshSchema.parse(request.body ?? {}).refreshToken;
     if (!token) {
       throw new HttpError(401, "INVALID_REFRESH_TOKEN");
     }
     const { refreshToken, ...result } = await authService.refreshTokens(token);
     setRefreshCookie(reply, refreshToken);
-    reply.code(200).send(result);
+    reply.code(200).send(isMobileClient(request) ? { ...result, refreshToken } : result);
   });
 
+  const logoutSchema = z.object({ refreshToken: z.string().min(1).optional() });
+
   fastify.post("/logout", { preHandler: verifyToken }, async (request, reply) => {
-    const token = request.cookies[REFRESH_COOKIE_NAME];
+    const token = request.cookies[REFRESH_COOKIE_NAME] ?? logoutSchema.parse(request.body ?? {}).refreshToken;
     if (token) {
       await authService.logout(token);
     }
