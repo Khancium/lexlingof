@@ -1606,6 +1606,19 @@ export const api = {
         .then((r) => r.data),
     banUser: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/admin/users/${id}`).then((r) => r.data),
 
+    bulkRestrictUsers: (ids: string[], reason: string) =>
+      apiClient.post<{ updated: number }>("/api/v1/admin/users/bulk-restrict", { ids, reason }).then((r) => r.data),
+    bulkUnrestrictUsers: (ids: string[]) =>
+      apiClient.post<{ updated: number }>("/api/v1/admin/users/bulk-unrestrict", { ids }).then((r) => r.data),
+    bulkSetVolunteer: (ids: string[], enabled: boolean) =>
+      apiClient
+        .post<{ updated: number; skipped: { id: string; reason: string }[] }>("/api/v1/admin/users/bulk-volunteer", { ids, enabled })
+        .then((r) => r.data),
+    bulkBanUsers: (ids: string[]) =>
+      apiClient
+        .post<{ deleted: number; skipped: { id: string; reason: string }[] }>("/api/v1/admin/users/bulk-delete", { ids })
+        .then((r) => r.data),
+
     getAudioDownloadUrl: (audioFileId: string) =>
       apiClient.get<{ url: string }>(`/api/v1/admin/audio/${audioFileId}/download-url`).then((r) => r.data),
     bulkDownloadZip: (ids: string[]) =>

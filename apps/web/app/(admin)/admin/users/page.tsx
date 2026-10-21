@@ -154,6 +154,7 @@ export default function AdminUsersPage() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reportBusy, setReportBusy] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Cascading filter option sources.
   const [tribes, setTribes] = useState<NamedOption[]>([]);
@@ -348,6 +349,76 @@ export default function AdminUsersPage() {
       alert(getErrorMessage(err, "Failed to update volunteer status"));
     } finally {
       setBusyId(null);
+    }
+  }
+
+  async function handleBulkRestrict() {
+    const reason = window.prompt(`Restrict ${selected.size} selected user(s)? Enter a reason:`);
+    if (!reason || !reason.trim()) return;
+    setBulkBusy(true);
+    try {
+      await api.admin.bulkRestrictUsers(Array.from(selected), reason.trim());
+      setSelected(new Set());
+      load();
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to restrict users"));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkUnrestrict() {
+    if (!window.confirm(`Unrestrict ${selected.size} selected user(s)?`)) return;
+    setBulkBusy(true);
+    try {
+      await api.admin.bulkUnrestrictUsers(Array.from(selected));
+      setSelected(new Set());
+      load();
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to unrestrict users"));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkVolunteer(enabled: boolean) {
+    const verb = enabled ? "Grant volunteer status to" : "Revoke volunteer status from";
+    if (!window.confirm(`${verb} ${selected.size} selected user(s)?`)) return;
+    setBulkBusy(true);
+    try {
+      const res = await api.admin.bulkSetVolunteer(Array.from(selected), enabled);
+      setSelected(new Set());
+      load();
+      if (res.skipped.length > 0) {
+        alert(`${res.updated} updated. ${res.skipped.length} skipped (e.g. admins/super_admins can't be made volunteers).`);
+      }
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to update volunteer status"));
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkBan() {
+    if (
+      !window.confirm(
+        `Ban ${selected.size} selected user(s) by deleting their accounts? This scrubs their profiles and permanently blocks those emails from registering again. Past contributions stay in the corpus. This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const res = await api.admin.bulkBanUsers(Array.from(selected));
+      setSelected(new Set());
+      load();
+      if (res.skipped.length > 0) {
+        alert(`${res.deleted} banned. ${res.skipped.length} skipped (already deleted or not found).`);
+      }
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to ban users"));
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -620,6 +691,47 @@ export default function AdminUsersPage() {
             className="rounded-full bg-brand px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
             {reportBusy ? "Generating..." : "Consolidated PDF"}
+          </button>
+          <span className="h-4 w-px bg-brand/30" />
+          <button
+            type="button"
+            onClick={handleBulkRestrict}
+            disabled={bulkBusy}
+            className="rounded-full bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Restrict
+          </button>
+          <button
+            type="button"
+            onClick={handleBulkUnrestrict}
+            disabled={bulkBusy}
+            className="rounded-full bg-surface-card px-4 py-1.5 text-xs font-semibold text-ink ring-1 ring-border hover:bg-border disabled:opacity-50"
+          >
+            Unrestrict
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBulkVolunteer(true)}
+            disabled={bulkBusy}
+            className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Make Volunteer
+          </button>
+          <button
+            type="button"
+            onClick={() => handleBulkVolunteer(false)}
+            disabled={bulkBusy}
+            className="rounded-full bg-surface-card px-4 py-1.5 text-xs font-semibold text-ink ring-1 ring-border hover:bg-border disabled:opacity-50"
+          >
+            Revoke Volunteer
+          </button>
+          <button
+            type="button"
+            onClick={handleBulkBan}
+            disabled={bulkBusy}
+            className="rounded-full bg-red-600 px-4 py-1.5 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {bulkBusy ? "Working..." : "Ban (delete)"}
           </button>
           <button type="button" onClick={() => setSelected(new Set())} className="text-xs font-semibold text-brand hover:underline">
             Clear selection

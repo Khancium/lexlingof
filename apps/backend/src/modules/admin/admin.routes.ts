@@ -52,6 +52,7 @@ import { hasPermission, invalidateUserCache, requirePermission, verifyToken } fr
 import { buildAttribution, searchOpenverseImages } from "../../services/openverse.service.js";
 import { searchWikimediaImages } from "../../services/wikimedia.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
+import { invalidateLeaderboardCache } from "../gamification/gamification.routes.js";
 import { authService } from "../auth/auth.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
 import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/level.service.js";
@@ -922,6 +923,9 @@ const bulkReportSchema = z.object({
 const suspendUserSchema = z.object({ reason: z.string().min(1) });
 const cooloffUserSchema = z.object({ reason: z.string().min(1), days: z.coerce.number().int().min(1).max(365) });
 const restrictUserSchema = z.object({ reason: z.string().min(1) });
+const bulkUserIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) });
+const bulkRestrictUsersSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500), reason: z.string().min(1) });
+const bulkSetVolunteerSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(500), enabled: z.boolean() });
 
 const adminSetCredentialsSchema = z
   .object({
@@ -2294,6 +2298,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (user.deletedAt) throw new HttpError(409, "ALREADY_DELETED", "This account has already been deleted");
 
     await deleteUserAccount(id);
+    invalidateLeaderboardCache();
 
     await writeAuditLog({
       actorId: request.user!.id,
@@ -2306,6 +2311,100 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return { id, deleted: true };
+  });
+
+  fastify.post("/admin/users/bulk-restrict", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { ids, reason } = bulkRestrictUsersSchema.parse(request.body);
+
+    const rows = await db.select({ id: users.id, isRestricted: users.isRestricted }).from(users).where(inArray(users.id, ids));
+    if (rows.length === 0) return { updated: 0 };
+
+    await db
+      .update(users)
+      .set({ isRestricted: true, restrictedAt: new Date(), restrictedReason: reason, updatedAt: new Date() })
+      .where(inArray(users.id, rows.map((r) => r.id)));
+    for (const row of rows) invalidateUserCache(row.id);
+
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_user_restrict",
+        resourceType: "user",
+        resourceId: row.id,
+        beforeState: { isRestricted: row.isRestricted },
+        afterState: { isRestricted: true, reason },
+      })),
+    );
+
+    return { updated: rows.length };
+  });
+
+  fastify.post("/admin/users/bulk-unrestrict", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { ids } = bulkUserIdsSchema.parse(request.body);
+
+    const rows = await db.select({ id: users.id, isRestricted: users.isRestricted }).from(users).where(inArray(users.id, ids));
+    if (rows.length === 0) return { updated: 0 };
+
+    await db
+      .update(users)
+      .set({ isRestricted: false, restrictedAt: null, restrictedReason: null, updatedAt: new Date() })
+      .where(inArray(users.id, rows.map((r) => r.id)));
+    for (const row of rows) invalidateUserCache(row.id);
+
+    await writeAuditLogs(
+      rows.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: "admin_user_unrestrict",
+        resourceType: "user",
+        resourceId: row.id,
+        beforeState: { isRestricted: row.isRestricted },
+        afterState: { isRestricted: false },
+      })),
+    );
+
+    return { updated: rows.length };
+  });
+
+  // Each target gets the exact same deleteUserAccount() the single-item ban
+  // route and the self-service account-deletion flow both use -- several
+  // independent table writes per user, not one bulk UPDATE -- so this is
+  // batched with bounded concurrency rather than one big statement, same
+  // reasoning (and same concurrency cap) as runBulkPermanentDelete above.
+  fastify.post("/admin/users/bulk-delete", { preHandler: requirePermission("users.manage") }, async (request) => {
+    const { ids } = bulkUserIdsSchema.parse(request.body);
+
+    const rows = await db.select({ id: users.id, deletedAt: users.deletedAt }).from(users).where(inArray(users.id, ids));
+    const alreadyDeleted = rows.filter((r) => r.deletedAt).map((r) => r.id);
+    const toDelete = rows.filter((r) => !r.deletedAt).map((r) => r.id);
+    const notFound = ids.filter((id) => !rows.some((r) => r.id === id));
+
+    for (let i = 0; i < toDelete.length; i += PERMANENT_DELETE_CONCURRENCY) {
+      const batch = toDelete.slice(i, i + PERMANENT_DELETE_CONCURRENCY);
+      await Promise.all(batch.map((id) => deleteUserAccount(id)));
+    }
+
+    if (toDelete.length > 0) {
+      invalidateLeaderboardCache();
+      await writeAuditLogs(
+        toDelete.map((id) => ({
+          actorId: request.user!.id,
+          actorRole: request.user!.role,
+          action: "admin_user_ban_delete",
+          resourceType: "user",
+          resourceId: id,
+          beforeState: { deletedAt: null },
+          afterState: { deletedAt: new Date().toISOString() },
+        })),
+      );
+    }
+
+    const skipped = [
+      ...alreadyDeleted.map((id) => ({ id, reason: "Already deleted" })),
+      ...notFound.map((id) => ({ id, reason: "Not found" })),
+    ];
+    return { deleted: toDelete.length, skipped };
   });
 
   /* ------------------------------ Categories ------------------------------- */
@@ -4198,6 +4297,43 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     });
 
     return { id, role: newRole };
+  });
+
+  fastify.post("/admin/users/bulk-volunteer", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
+    const { ids, enabled } = bulkSetVolunteerSchema.parse(request.body);
+
+    const rows = await db.select({ id: users.id, role: users.role }).from(users).where(inArray(users.id, ids));
+    // Same constraint as the single-item route: only a contributor/volunteer
+    // can have this toggled -- an admin/super_admin (or anyone already
+    // deleted and thus role-irrelevant) in the selection is skipped, not an
+    // error for the whole batch.
+    const eligible = rows.filter((r) => r.role === "contributor" || r.role === "volunteer");
+    const skipped = rows
+      .filter((r) => r.role !== "contributor" && r.role !== "volunteer")
+      .map((r) => ({ id: r.id, reason: `Cannot change volunteer status for role "${r.role}"` }));
+    for (const id of ids) {
+      if (!rows.some((r) => r.id === id)) skipped.push({ id, reason: "Not found" });
+    }
+
+    if (eligible.length === 0) return { updated: 0, skipped };
+
+    const newRole = enabled ? "volunteer" : "contributor";
+    await db.update(users).set({ role: newRole, updatedAt: new Date() }).where(inArray(users.id, eligible.map((r) => r.id)));
+    for (const row of eligible) invalidateUserCache(row.id);
+
+    await writeAuditLogs(
+      eligible.map((row) => ({
+        actorId: request.user!.id,
+        actorRole: request.user!.role,
+        action: enabled ? "admin_grant_volunteer" : "admin_revoke_volunteer",
+        resourceType: "user",
+        resourceId: row.id,
+        beforeState: { role: row.role },
+        afterState: { role: newRole },
+      })),
+    );
+
+    return { updated: eligible.length, skipped };
   });
 
   // List of everyone currently holding the volunteer role, with a live

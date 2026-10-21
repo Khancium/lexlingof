@@ -56,6 +56,11 @@ const PERIOD_POINTS_COLUMN = {
 const LEADERBOARD_CACHE_TTL_MS = 2 * 60 * 1000;
 const leaderboardCache = new Map<string, { data: unknown; expiresAt: number }>();
 
+/** Called from admin.routes.ts whenever a user is banned/restored -- without this, a just-deleted user could still show up on the leaderboard for up to LEADERBOARD_CACHE_TTL_MS even though the underlying query already excludes them. */
+export function invalidateLeaderboardCache(): void {
+  leaderboardCache.clear();
+}
+
 /* -------------------------------------------------------------------------- */
 /*                                Corpus stats                                */
 /* -------------------------------------------------------------------------- */
