@@ -144,7 +144,9 @@ export default function ProfilePage() {
     setIsSavingBio(true);
     setBioError(null);
     try {
-      const updated = await api.users.updateMe({ biography: biography.trim() || undefined });
+      // An empty string (not undefined) so a user can clear their biography --
+      // undefined is dropped from the JSON body and the server would keep the old one.
+      const updated = await api.users.updateMe({ biography: biography.trim() });
       setUser(updated);
       setIsEditingBio(false);
     } catch (err) {
