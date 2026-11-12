@@ -331,7 +331,13 @@ function TranslatePageInner() {
         </button>
 
         {!languageId && !languageLoading ? (
-          <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
+          <p className="text-center text-red-600">
+            Your language isn&apos;t set yet.{" "}
+            <Link href="/onboarding" className="font-semibold underline">
+              Complete your profile
+            </Link>{" "}
+            before contributing.
+          </p>
         ) : null}
         {sentenceError ? <p className="text-center text-red-600">{sentenceError}</p> : null}
 
@@ -520,7 +526,13 @@ function TranslatePageInner() {
           </div>
 
           {!languageId && !languageLoading ? (
-            <p className="text-center text-red-600">Set your language in your profile before contributing.</p>
+            <p className="text-center text-red-600">
+              Your language isn&apos;t set yet.{" "}
+              <Link href="/onboarding" className="font-semibold underline">
+                Complete your profile
+              </Link>{" "}
+              before contributing.
+            </p>
           ) : null}
           {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
 
