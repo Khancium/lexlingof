@@ -973,9 +973,17 @@ and `AdminNav` shows them only Concepts, Scenes and Sentences.
   `createdBy`). ⚠️ **Still open — needs a product decision on what volunteers may do
   unreviewed:** PUT edits, bulk-edit, bulk and bulk-text creates (which also leave `createdBy`
   null), image delete/crop/bulk-url/autofill, and Undo. The comment in `seed.ts` overstates
-  the coverage. Approval itself is also not atomic: `markApproved`
-  has no `WHERE status = 'pending'`, so a double-click or two admins can double-apply (image
-  adds would duplicate), and `listPendingChanges` does `select *`, returning the base64 payloads.
+  the coverage. **Approval is now atomic (fixed 2026-11-12):** it used to be check → apply →
+  `markApproved` with no `WHERE status = 'pending'`, so a double-click or two admins could both
+  apply the same change (image adds would duplicate). `claimPendingChange()` now takes the row
+  with one `UPDATE … WHERE status = 'pending' RETURNING`, exactly one caller wins (tested: two
+  simultaneous approvals → one success, one 409 `ALREADY_REVIEWED`), a failed apply calls
+  `releasePendingChange()` so the row goes back to `pending`, and `markRejected` is conditional
+  too. A duplicate-key failure at approval time is now a clean 409 `DUPLICATE` (it was a raw
+  500 with the driver message), and `listPendingChanges` no longer ships the base64 file
+  payloads — any value over 2000 characters is replaced by a marker in SQL (the full payload is
+  still read by id when approving). Remaining edge: a crash in the instant between claiming and
+  applying would leave a change `approved` but never applied.
 - Web gaps: volunteers have no nav link into `/admin` (they must type `/admin/concepts`),
   and Undo buttons render for them even though that isn't their intended scope.
 
@@ -1019,8 +1027,9 @@ only those.
   checks the contribution's *review status* (deliberate — commit `7b519ad`); a **retake of a
   published recording** swaps the audio in place (`word_recordings.audio_file_id`), so the new,
   unreviewed audio goes live while the contribution is back to `pending` (a product decision:
-  auto-unpublish on retake?). Publishing actions are also not audit-logged (so not undoable),
-  and `ilike` search doesn't escape `%`/`_`.
+  auto-unpublish on retake?). Publishing actions are also not audit-logged (so not undoable).
+  (`ilike` search used to treat the user's `%` and `_` as wildcards — **fixed 2026-11-12** at all
+  14 search sites via `containsPattern()` in `utils/sql-like.ts`, §7.2.)
 
 ### 3.18 Discussion forum
 
@@ -1037,10 +1046,12 @@ notifications plus best-effort push.
 - **Moderation** is delete-only: the author or any holder of `users.manage` can soft-delete a
   post or comment. There is no report, hide, lock, edit, forum-ban or admin listing, and no
   forum-specific rate limit beyond the global 300/min/IP.
-- ⚠️ *Code-read:* `blockIfRestricted` isn't applied, so restricted users can still post;
-  deleting a post doesn't remove its image from storage (`image_storage_key` is stored but
-  never used); posts by banned users stay visible as "Deleted User"; toggling a reaction off
-  and on re-notifies the author each time; `votePoll` doesn't check the post is non-deleted.
+- **Fixed 2026-11-12:** `blockIfRestricted` now guards creating posts and comments (a
+  restricted user can still read, react and delete their own); deleting a post removes its image
+  from storage (best-effort) and clears `image_url`/`image_storage_key` — the key was stored but
+  never used, so deleted posts' pictures stayed publicly reachable; `votePoll` refuses a deleted
+  post. ⚠️ Still open: posts by banned users stay visible as "Deleted User"; toggling a reaction
+  off and on re-notifies the author each time.
   A GIF attachment existed briefly (`0034`) and was dropped (`0035`).
 
 ### 3.19 Terms & Conditions
@@ -1426,12 +1437,16 @@ before being fixed.
   client-supplied checksums and never checks R2; the presigned `PutObject` has no content-length
   limit; `durationMs` is client-reported for SCENE and TRANSCRIPTION in every flow, so the scene
   "long description" bonus can be claimed by lying); the Openverse/Wikimedia routes accept any
-  `image.url` host, and `bulk-url` can fan out up to 200 parallel 10 MB downloads (volunteers can
-  call it); `DELETE /devices/unregister` has no ownership filter on the token; the public
-  leaderboard exposes `userId`/`displayName`; buffer endpoints hold up to 110 MB per request in
-  memory with no per-user queue cap; terms say 18+ but signup allows 14. (RLS on 12 tables is
-  missing from the migration history but **already on in production** — not a live exposure,
-  §2.7.)
+  public `image.url` host (the redirect/private-address guard now protects them, but an arbitrary
+  public host can still be fetched); the public leaderboard exposes `userId`/`displayName`;
+  terms say 18+ but signup allows 14. (RLS on 12 tables is missing from the migration history
+  but **already on in production** — not a live exposure, §2.7.)
+- **Fixed 2026-11-12 (batch 4, §7.6):** `DELETE /devices/unregister` is now scoped to the
+  caller's own tokens (it matched on the token alone, so anyone holding another device's token
+  could switch that user's notifications off); the bulk image-by-URL routes run 5 downloads at a
+  time instead of up to 200 at once (and no longer echo raw error messages); the buffered-submit
+  endpoints refuse a user who already has 25 submissions `pending`/`processing`
+  (`429 TOO_MANY_PENDING`) — each queued row holds up to 110 MB of audio in the database.
 
 **Seed & ops**
 - **Seed — fixed 2026-11-12.** `npm run db:seed` failed on a freshly migrated database:
@@ -1443,18 +1458,28 @@ before being fixed.
   creates no `super_admin` (promotion is manual) and gives demo contributors no demographics
   (so reviewer scoping returns an empty queue); seeded level descriptions say "Minimum points"
   but levels are driven by contribution *count*.
-- Admin tuning issues: `PUT /superadmin/gamification/:key` accepts any number (no
-  threshold-order check) and existing users' levels aren't recomputed afterwards; categories
-  cache isn't invalidated on category *create* (§2.7); `/admin/training-data/images` and
-  `/categories` / `GET /concepts/next` pull whole tables into Node (against §2.7's own rule);
-  `/admin/analytics` counts soft-deleted contributions and banned users.
-- Input handling: the `z.coerce.boolean()` bug (the string `"false"` became `true` for `mine` /
-  `includeHidden`) is **fixed 2026-11-12** (`queryBoolean()` in `utils/query-params.ts`:
-  `"false"` → false, garbage → 400). Still open: `readBulkRows` has no `bom: true` so an
-  Excel-saved UTF-8 CSV mismatches its first header; a `null` element in a JSON array 500s;
-  `insertBulkInChunks` returns raw Drizzle query errors; permanent delete reports an FK
-  violation from `suggestions` as `HAS_CONTRIBUTIONS` with a count of 0; `GET
-  /sentences/random` writes `usage_count` on a GET; `/concepts` pagination has no `ORDER BY`.
+- **Admin tuning — fixed 2026-11-12** (`services/gamification-config.service.ts`):
+  `PUT /superadmin/gamification/:key` accepted any number. Points, level and module-limit values
+  must now be whole, non-negative numbers (a fractional or negative point value would have made
+  the next submission fail on the integer `points` column), and the level thresholds must stay
+  strictly increasing (silver < gold < platinum, silver > 0). Changing — or undoing a change to —
+  a `levels.*` threshold now **re-derives every user's stored level** in one statement
+  (`recomputeAllUserLevels()`); before, levels only moved when each user next submitted, and could
+  then change unpredictably. A new category now invalidates the 30-minute categories cache.
+  `/admin/analytics` no longer counts soft-deleted contributions or banned users.
+  ⚠️ Still open: `/admin/training-data/images` and `/categories` / `GET /concepts/next` pull whole
+  tables into Node (against §2.7's own rule).
+- **Input handling — fixed 2026-11-12:** the `z.coerce.boolean()` bug (the string `"false"` became
+  `true`) via `queryBoolean()` in `utils/query-params.ts`; a CSV saved from Excel as "UTF-8" now
+  parses (`bom: true` — the BOM used to be glued onto the first header so every row was rejected)
+  and a UTF-8 BOM no longer breaks JSON; a `null`/non-object element in a JSON array is a clear 400
+  instead of a 500; failed bulk-insert rows report a short reason ("Already exists (duplicate)")
+  instead of the whole failed SQL statement and its parameters; permanent delete detaches
+  `suggestions` that reference the concept/scene (it was reporting that FK as `HAS_CONTRIBUTIONS`
+  with a count of 0); every bulk-id array is capped at 1000 (an audit insert past ~9,300 rows
+  exceeded Postgres's parameter limit *after* the mutation had applied); the concepts list has a
+  stable `ORDER BY` (creation order). ⚠️ Still open: `GET /sentences/random` writes `usage_count`
+  on a GET.
 - Notifications: `GET /notifications` mutates `sent → delivered`; there is no unread count or
   mark-all-read; push honours only the global `pushNotificationsEnabled` preference.
   Streaks are computed in UTC, and parallel buffer rows for one user can race on the streak
@@ -1612,6 +1637,31 @@ destructive deletes; retake of a published recording; points-farming rules; Term
 account-deletion scope; feature flags (wire up or remove); mobile; whether admin status
 overrides should also pay the verified bonus / adjust counters; a staging database; an uptime
 monitor.
+
+### 7.6 Batch 4 — hardening and bug fixes (2026-11-12)
+
+Fixes listed where they live (§3.16 pending changes, §3.17, §3.18 forum, §7.2 "Security", "Admin
+tuning", "Input handling"). New files: `services/gamification-config.service.ts`,
+`utils/sql-like.ts`; `claimPendingChange`/`releasePendingChange`/`finishApproval`/
+`isUniqueViolation` in `services/pending-changes.service.ts`; `recomputeAllUserLevels()` in
+`services/level.service.ts`. No migration, no data change.
+
+**Verified against the live database** (40 checks, throwaway harness, one throwaway
+`pending_changes` row that was deleted): two **simultaneous** approvals → exactly one wins and
+the loser gets 409; a later approval and a reject-after-approve are refused; release restores
+`pending`; the list view omits a 6000-character file payload while the by-id read still returns
+all of it; real Postgres unique vs foreign-key errors are told apart; the config validator's
+accept/reject matrix and the three real `PUT /superadmin/gamification` rejections (nothing
+written); `recomputeAllUserLevels()` is a no-op on consistent data; LIKE escaping against real
+Postgres (`%`, `_`, backslash, normal terms); a UTF-8-BOM CSV parses; 1001-id bulk requests are
+refused and 1000 still accepted; `/admin/analytics` matches the live non-deleted pending count;
+a poll vote on a missing post is a 404.
+
+⚠️ **Not covered by a live test:** device-unregister ownership (no active device tokens exist to
+test with — verified by review/typecheck), the per-user buffer cap, the forum restricted-user
+guard and image cleanup (no restricted user / deletable post to probe without changing real
+data), the permanent-delete suggestion detach, and the JSON-array-element check inside the real
+upload route.
 
 ---
 
