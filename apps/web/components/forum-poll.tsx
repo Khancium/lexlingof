@@ -1,16 +1,24 @@
 "use client";
 
-import { api, type ForumPoll } from "@/lib/api";
+import { useState } from "react";
+import { api, getErrorMessage, type ForumPoll } from "@/lib/api";
 
 /** Poll results/voting UI -- a post "is a poll" purely by having a non-null `poll`. Voting swaps the caller's own option in place; clicking the active option retracts the vote. */
 export function ForumPollView({ postId, poll, onVoted }: { postId: string; poll: ForumPoll; onVoted: () => void }) {
+  const [error, setError] = useState<string | null>(null);
+
   async function handlePick(optionId: string) {
-    if (poll.myOptionId === optionId) {
-      await api.forum.removePollVote(postId);
-    } else {
-      await api.forum.votePoll(postId, optionId);
+    setError(null);
+    try {
+      if (poll.myOptionId === optionId) {
+        await api.forum.removePollVote(postId);
+      } else {
+        await api.forum.votePoll(postId, optionId);
+      }
+      onVoted();
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to record your vote"));
     }
-    onVoted();
   }
 
   return (
@@ -40,6 +48,7 @@ export function ForumPollView({ postId, poll, onVoted }: { postId: string; poll:
       <p className="text-xs text-ink-muted">
         {poll.totalVotes} vote{poll.totalVotes === 1 ? "" : "s"}
       </p>
+      {error ? <p className="text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }

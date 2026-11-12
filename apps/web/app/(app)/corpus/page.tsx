@@ -1,20 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type CorpusLanguageBreakdown, type CorpusStats } from "@/lib/api";
+import { api, getErrorMessage, type CorpusLanguageBreakdown, type CorpusStats } from "@/lib/api";
 
 export default function CorpusPage() {
   const [stats, setStats] = useState<CorpusStats | null>(null);
   const [languages, setLanguages] = useState<CorpusLanguageBreakdown[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.corpus.getStats(), api.corpus.getLanguages()]).then(([s, l]) => {
-      setStats(s);
-      setLanguages(l);
-      setLoading(false);
-    });
+    Promise.all([api.corpus.getStats(), api.corpus.getLanguages()])
+      .then(([s, l]) => {
+        setStats(s);
+        setLanguages(l);
+      })
+      .catch((err) => setError(getErrorMessage(err, "Failed to load corpus analytics")))
+      .finally(() => setLoading(false));
   }, []);
+
+  if (error) {
+    return <p className="text-red-600">{error}</p>;
+  }
 
   if (loading || !stats) {
     return <p className="text-ink-muted">Loading...</p>;

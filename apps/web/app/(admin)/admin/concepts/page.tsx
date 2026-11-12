@@ -342,6 +342,8 @@ export default function AdminConceptsPage() {
       setSelected(new Set());
       setBulkCategoryId("");
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to move concepts"));
     } finally {
       setIsBulkEditing(false);
     }
@@ -362,6 +364,8 @@ export default function AdminConceptsPage() {
       );
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Openverse auto-fill failed"));
     } finally {
       setIsBulkAutofilling(false);
     }
@@ -377,6 +381,8 @@ export default function AdminConceptsPage() {
       );
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Wikimedia auto-fill failed"));
     } finally {
       setIsBulkAutofilling(false);
     }
@@ -395,6 +401,8 @@ export default function AdminConceptsPage() {
       setBulkAutofillInfo(`Removed ${result.deleted} image(s).`);
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to remove images"));
     } finally {
       setIsBulkDeletingImages(false);
     }
@@ -409,6 +417,8 @@ export default function AdminConceptsPage() {
       await api.admin.bulkEditConcepts({ ids: [...selected], isActive: false });
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to hide concepts"));
     } finally {
       setIsBulkHiding(false);
     }
@@ -420,6 +430,8 @@ export default function AdminConceptsPage() {
       await api.admin.bulkEditConcepts({ ids: [...selected], isActive: true });
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to unhide concepts"));
     } finally {
       setIsBulkHiding(false);
     }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useAuthStore } from "@/lib/store";
-import { api, type StreakStatus, type UserStatsResponse } from "@/lib/api";
+import { api, getErrorMessage, type StreakStatus, type UserStatsResponse } from "@/lib/api";
 import { LEVEL_COLOR, NEXT_LEVEL, useLevelThresholds } from "@/lib/level";
 import { SuggestionBox } from "@/components/suggestion-box";
 
@@ -47,13 +47,17 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<UserStatsResponse["stats"]>(null);
   const [streak, setStreak] = useState(0);
   const [streakStatus, setStreakStatus] = useState<StreakStatus>("active");
+  const [statsError, setStatsError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.users.getStats().then((res) => {
-      setStats(res.stats);
-      setStreak(res.streak?.currentStreak ?? 0);
-      setStreakStatus(res.streak?.status ?? "active");
-    });
+    api.users
+      .getStats()
+      .then((res) => {
+        setStats(res.stats);
+        setStreak(res.streak?.currentStreak ?? 0);
+        setStreakStatus(res.streak?.status ?? "active");
+      })
+      .catch((err) => setStatsError(getErrorMessage(err, "Failed to load your stats")));
   }, []);
 
   const levelThresholds = useLevelThresholds();
@@ -66,6 +70,8 @@ export default function DashboardPage() {
   return (
     <div className="space-y-8">
       <h1 className="text-3xl font-bold text-ink">Welcome back, {user?.displayName}</h1>
+
+      {statsError ? <p className="text-sm text-red-600">{statsError}</p> : null}
 
       <div className={`card-duo rounded-2xl p-6 text-white shadow-sm ${LEVEL_COLOR[level]}`}>
         <div className="flex items-center justify-between">

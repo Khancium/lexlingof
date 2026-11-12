@@ -127,6 +127,8 @@ export default function AdminSentencesPage() {
       const result = await api.admin.deleteSentence(sentence.id);
       if ("pending" in result) alert(result.message);
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to delete sentence"));
     } finally {
       setDeletingId(null);
     }
@@ -171,6 +173,8 @@ export default function AdminSentencesPage() {
       setSelected(new Set());
       setBulkCategoryId("");
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to move sentences"));
     } finally {
       setIsBulkEditing(false);
     }
@@ -184,6 +188,8 @@ export default function AdminSentencesPage() {
     try {
       await api.admin.bulkEditSentences({ ids: [sentence.id], isActive: !sentence.isActive });
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to update sentence"));
     } finally {
       setTogglingActiveId(null);
     }
@@ -195,6 +201,8 @@ export default function AdminSentencesPage() {
       await api.admin.bulkEditSentences({ ids: [...selected], isActive: false });
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to hide sentences"));
     } finally {
       setIsBulkHiding(false);
     }
@@ -206,6 +214,8 @@ export default function AdminSentencesPage() {
       await api.admin.bulkEditSentences({ ids: [...selected], isActive: true });
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to unhide sentences"));
     } finally {
       setIsBulkHiding(false);
     }

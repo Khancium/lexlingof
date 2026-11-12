@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/store";
-import { api, type FeatureFlag } from "@/lib/api";
+import { api, getErrorMessage, type FeatureFlag } from "@/lib/api";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
 export default function FeatureFlagsPage() {
@@ -10,13 +10,15 @@ export default function FeatureFlagsPage() {
   const [flags, setFlags] = useState<FeatureFlag[]>([]);
   const [loading, setLoading] = useState(true);
   const [togglingKey, setTogglingKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
     if (user?.role !== "super_admin") return;
-    api.superadmin.getFeatureFlags().then((res) => {
-      setFlags(res);
-      setLoading(false);
-    });
+    api.superadmin
+      .getFeatureFlags()
+      .then(setFlags)
+      .catch((err) => setError(getErrorMessage(err, "Failed to load feature flags")))
+      .finally(() => setLoading(false));
   }, [user]);
 
   useEffect(() => {
@@ -29,9 +31,12 @@ export default function FeatureFlagsPage() {
 
   async function toggle(flag: FeatureFlag) {
     setTogglingKey(flag.flagKey);
+    setError(null);
     try {
       const updated = await api.superadmin.updateFeatureFlag(flag.flagKey, !flag.isEnabled);
       setFlags((prev) => prev.map((f) => (f.flagKey === flag.flagKey ? updated : f)));
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to update feature flag"));
     } finally {
       setTogglingKey(null);
     }
@@ -40,6 +45,8 @@ export default function FeatureFlagsPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-ink">Feature Flags</h1>
+
+      {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
