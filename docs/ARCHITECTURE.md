@@ -65,7 +65,7 @@ internal paths already self-namespace.
 | `reviews` | Peer review queue + decision submission (§2.4) |
 | `gamification` | Leaderboard, badges, corpus-wide stats, level thresholds |
 | `notifications` | In-app notification list/read, device token register/unregister, push sending |
-| `audio` | Legacy presigned-upload flow (`POST /audio/upload-url` → PUT to R2 → `POST /audio/:id/confirm`) plus `GET /audio/:id/play-url`. The web app only uses `play-url`; **mobile still uses the whole upload flow** (§8) |
+| `audio` | Legacy presigned-upload flow (`POST /audio/upload-url` → PUT to R2 → `POST /audio/:id/confirm`, which now verifies the object exists and its size) plus `GET /audio/:id/play-url`. The web app only uses `play-url`; **mobile still uses the whole upload flow** (§8) |
 | `forum` | Open discussion forum: posts, threaded comments, reactions, polls (§3.18) |
 | `terms` | `GET /terms` — current Terms & Conditions text + version (§3.19) |
 | `health` | `GET /api/v1/health` — DB-backed readiness check (503 when the pool can't answer); the bare `GET /health` liveness route lives in `index.ts` (§2.7) |
@@ -172,12 +172,15 @@ Additional behaviour worth knowing (added 2026-11-11, *code-read*):
   row `done`, silently losing everything the contributor typed. The retry now runs
   `completeTranscriptionExtras()`, which idempotently adds only what is missing (the
   transcription if none exists — `addTranscription` creates a new version and re-awards points
-  per call, so it is never called blindly — and any segment indexes not yet stored). The first
-  attempt also uses `allSettled`, so a retry never races writes still in flight.
+  per call, so it is never called blindly — and any segment indexes not yet stored). Since
+  batch 5 the first attempt applies the transcription and segments **one at a time**, stopping at
+  the first failure (it used to fire them all at once with `allSettled`): segment writes are now
+  serialized per upload, and parallel ones would each hold a pooled connection while they queued.
+  A sequential run also can't leave writes in flight for a retry to race.
 - **A legacy direct-submit path still exists** next to the buffer: `POST
   /contributions/word`, `/contributions/audio`, `/sentences/:id/translation`,
-  `/scenes/:id/contributions`, fed by the presigned `/audio/*` flow. Mobile uses it. It skips
-  `blockIfRestricted` and does not check that the supplied `audioFileId` belongs to the caller.
+  `/scenes/:id/contributions`, fed by the presigned `/audio/*` flow. Mobile uses it. Since
+  2026-11-12 (batch 2) it runs `blockIfRestricted` and `assertOwnsAudioFile()`.
 - Idempotency of the points ledger comes from `idempotency_key` values of the form
   `${contributionId}:REASON` inserted with `onConflictDoNothing`.
 
@@ -359,6 +362,37 @@ Key sub-features:
   is brand new and so can't conflict, add to `total_points` inline in their existing
   `user_stats` UPDATE. Existing drift is repaired by the one-off `db:recompute-stats` script
   (§7.3). Admin deletes still don't claw points back (a product decision, not a bug).
+- **Anti-farming rules (batch 5, 2026-11-12).** Before, three loops paid without limit:
+  - **Scenes — first description per user+scene only.** Every submission used to pay base + long
+    + daily/expert bonuses. Now only a user's first *non-rejected, non-withdrawn, non-deleted*
+    description of a scene earns submission points. A repeat is still accepted, reviewed and
+    **counted** (counters must keep equalling the number of contribution rows — delete-reversal
+    and `db:recompute-stats` rely on it, so a repeat still moves `total_contributions` and
+    therefore level) but pays 0 and returns `alreadyDescribed: true`. A rejected first attempt
+    doesn't block earning on a good second one. ⚠️ The `verified` bonus a reviewer triggers is
+    unchanged, so a repeat that gets approved still pays it.
+  - **Transcription versions pay only the delta.** `addTranscription` still creates a new version
+    each call, but pays only `worth(fields present) − already paid for earlier versions of that
+    upload` (summed from the ledger by idempotency-key prefix). Re-posting the same text pays 0;
+    adding the romanization to a version that had only the native text pays just the
+    romanization; blank/whitespace text counts as absent.
+  - **Segments are capped and must be transcribed to pay.** At most one segment per 500 ms of the
+    upload's audio (rounded up, minimum 1), never more than 300; a segment must end inside the
+    recording (stored duration + 1 s or 10 %, whichever is larger); re-posting a segment index is
+    409 `DUPLICATE_SEGMENT`; the 9th segment of a 4 s clip is 409 `SEGMENT_LIMIT_REACHED`. A
+    segment with **no text** is kept but earns 0 (so no existing submission fails). The buffer
+    route (`POST /contributions/buffer/audio-upload`) applies the count and range limits up front
+    (400 `TOO_MANY_SEGMENTS` / `SEGMENT_OUT_OF_RANGE`, and the zod array is `.max(300)`) so a
+    contributor gets the error at submit time instead of a background failure.
+  - These check-then-insert rules are serialized with an **in-process keyed lock**
+    (`utils/keyed-lock.ts`) rather than `SELECT … FOR UPDATE`, so queued requests wait for free
+    instead of each holding a pooled connection (the pool wedging is what took the API down
+    before). Single Railway instance assumed; across several instances the window for a race is one
+    transaction and the worst case is one extra segment/award.
+  - **Durations are server-measured where it matters.** The scene long-description bonus reads
+    the audio file's stored duration (as word.service already did), and `storeAudioBuffer` now
+    measures scene/transcription audio with ffprobe (`measureDurationMs`, never throws, 2-minute
+    timeout, falls back to the client's value). See §7.2 "Security" for the presigned flow.
 - **Point amounts** come from `gamification_config` (seeded defaults: word 10 + verified 10;
   translation 10 + audio 10 + romanization 5 + IPA 10, verified 10, max 35 on submit; scene
   20 + long-description 10 + daily 5 + expert 20, verified 10; audio upload 10, native text
@@ -497,9 +531,22 @@ Key sub-features:
   `blob:` and `*.r2.cloudflarestorage.com`, and `connect-src` limited to self plus the API
   origin (from `NEXT_PUBLIC_API_URL`). A past bug: the CSP blocked local `blob:` preview
   playback until `blob:` was added.
-- **Feature flags are inert.** `feature_flags` is seeded (10 flags) and editable at
-  `/admin/feature-flags`, but nothing in the backend or web app *reads* a flag to gate
-  behaviour — only the admin routes touch them. Toggling one has no effect today.
+- **Feature flags (wired 2026-11-12, batch 5).** `feature_flags` is seeded (10 flags) and
+  editable at `/admin/feature-flags`. Until batch 5 nothing read them, so toggling one did
+  nothing. `services/feature-flags.service.ts` now enforces seven: `module_1..4_enabled` (each
+  module's "give me a prompt" and submit endpoints, including the buffered `POST
+  /contributions/buffer/*` routes — but not the browse/list routes the admin pages share),
+  `community_review_enabled` (review queue + submit review), `leaderboard_enabled` (`GET
+  /leaderboard`) and `public_profiles_enabled` (`GET /users/:id`). A disabled feature answers
+  **403 `FEATURE_DISABLED`** with a readable message. `isFeatureEnabled()` caches all flags for
+  30 s (the superadmin toggle and its undo clear the cache at once); a flag with **no row**, or a
+  **failed read** of the table, counts as ON, so a database hiccup can never be what switches a
+  feature off. **Deliberately not enforced:** `push_notifications_enabled` (seeded OFF although
+  push works — honouring it would switch push off), `data_exports_enabled` (feature not built),
+  `offline_mode_enabled` (client-side), and `rollout_percent` (ignored: a flag is on or off for
+  everyone). All seven enforced flags were ON in production when this shipped, so nothing changed
+  until an admin flips one. ⚠️ The web UI doesn't know about the flags yet: a contributor on a
+  module that's off sees the 403 message rather than the module being hidden.
 - **Audit logging** (`services/audit-log.service.ts`): `writeAuditLog()` (single) and
   `writeAuditLogs()` (batch — one multi-row `INSERT` instead of N single-row ones for bulk
   admin actions) are called from auth, every contribution-submission service, permanent
@@ -552,6 +599,9 @@ previously log it at all (concept/scene single edits), and converting concept/sc
 sentence bulk-edit/bulk-delete from one shared audit row per batch to one row **per
 affected item** (mirroring the pattern already used for contribution bulk actions), since
 per-item undo needs each item's own prior state, not a batch-level summary.
+
+Undo is **admin-only** (a `volunteer` gets 403, batch 5): its per-resource permission check
+looked at the `.manage` codes volunteers hold, so one could otherwise revert any logged change.
 
 ### 3.3 Mobile-responsive notification popup
 
@@ -970,10 +1020,26 @@ and `AdminNav` shows them only Concepts, Scenes and Sentences.
   are now **admin-only** (`forbidVolunteers` in `middleware/auth.ts`): `bulk-delete`,
   `bulk-delete-permanent` and single `/permanent` for concepts, scenes and sentences (a volunteer
   could previously erase any item with no recordings, and its images, regardless of
-  `createdBy`). ⚠️ **Still open — needs a product decision on what volunteers may do
-  unreviewed:** PUT edits, bulk-edit, bulk and bulk-text creates (which also leave `createdBy`
-  null), image delete/crop/bulk-url/autofill, and Undo. The comment in `seed.ts` overstates
-  the coverage. **Approval is now atomic (fixed 2026-11-12):** it used to be check → apply →
+  `createdBy`).
+- **Fixed (batch 5, 2026-11-12) — what a volunteer may do unreviewed.** Rule chosen: *create and
+  delete go through the queue; everything else is limited to their own items or is admin-only.*
+  - **Admin-only** (`forbidVolunteers`): every bulk route (categories bulk-text; concepts,
+    scenes, sentences bulk / bulk-text / bulk-edit), bulk image URL import and bulk image
+    delete, and all four Openverse/Wikimedia **autofill** routes (which can touch every concept or
+    scene at once).
+  - **Own items only** (`assertVolunteerOwns` in `admin.routes.ts`, 403 otherwise, 404 if the
+    item doesn't exist): `PUT` of a concept or scene, deleting or re-cropping a concept's or
+    scene's image, and adding/removing a scene keyword, linking a concept into a scene's coverage
+    map, and annotating that coverage. "Own" = `created_by` equals the volunteer; admin-created and
+    pre-existing (`created_by` null) rows are therefore admin-only for volunteers.
+  - **Undo is admin-only** (403 for a volunteer). It checked the per-resource `.manage`
+    permission, which volunteers hold, so one could revert any logged change — including an
+    admin's.
+  - Single-item create/delete and image *add* still use the queue, unchanged. The `seed.ts`
+    comment that says the gate covers more than that is still wrong.
+  - Not changed: bulk and bulk-text *creates* by a volunteer used to leave `createdBy` null; they
+    are now simply refused, so that case no longer arises.
+- **Approval is now atomic (fixed 2026-11-12):** it used to be check → apply →
   `markApproved` with no `WHERE status = 'pending'`, so a double-click or two admins could both
   apply the same change (image adds would duplicate). `claimPendingChange()` now takes the row
   with one `UPDATE … WHERE status = 'pending' RETURNING`, exactly one caller wins (tested: two
@@ -985,7 +1051,8 @@ and `AdminNav` shows them only Concepts, Scenes and Sentences.
   still read by id when approving). Remaining edge: a crash in the instant between claiming and
   applying would leave a change `approved` but never applied.
 - Web gaps: volunteers have no nav link into `/admin` (they must type `/admin/concepts`),
-  and Undo buttons render for them even though that isn't their intended scope.
+  and Undo buttons (and the bulk/autofill buttons) still render for them although the backend
+  now refuses them with 403 — the web app should hide those controls for the `volunteer` role.
 
 ### 3.17 Publishing and the public API (Pashtowal)
 
@@ -1023,11 +1090,16 @@ only those.
   and still the contributor's `is_current` take (`LIVE_WORD_RECORDING` / `LIVE_TRANSLATION` in
   `public-content.service.ts`). Before, a recording that was later deleted or superseded stayed
   public until an admin unpublished it. (Production had 10 published recordings, none stale,
-  so the fix changed nothing visible today.) ⚠️ Still open: neither publishing nor the feed
-  checks the contribution's *review status* (deliberate — commit `7b519ad`); a **retake of a
-  published recording** swaps the audio in place (`word_recordings.audio_file_id`), so the new,
-  unreviewed audio goes live while the contribution is back to `pending` (a product decision:
-  auto-unpublish on retake?). Publishing actions are also not audit-logged (so not undoable).
+  so the fix changed nothing visible today.) Neither publishing nor the feed checks the
+  contribution's *review status* (deliberate — commit `7b519ad`), which is why a **retake of a
+  published recording** used to put the new, unreviewed audio live (the audio is swapped in
+  place and the contribution goes back to `pending`, but the `published_*` row stayed).
+  **Fixed 2026-11-12 (batch 5):** a retake now deletes the recording's (or translation's)
+  `published_*` row in the same transaction as the audio swap and writes an audit entry
+  (`published_recording_withdrawn_on_retake` / `published_translation_withdrawn_on_retake`); an
+  admin re-publishes after re-reviewing. Other published recordings of the same concept are
+  untouched, and a replayed retake doesn't log twice. Publishing actions themselves are still
+  not audit-logged (so not undoable).
   (`ilike` search used to treat the user's `%` and `_` as wildcards — **fixed 2026-11-12** at all
   14 search sites via `containsPattern()` in `utils/sql-like.ts`, §7.2.)
 
@@ -1093,13 +1165,14 @@ change or new index was needed.
   slots are taken). An earlier "takes" model was removed (commit `4d4e087`) — mobile still
   speaks the old shape (§8).
 - Recording length is capped at **10 s** (zod, a re-check against the post-trim duration, and
-  the DB `CHECK ck_word_recording_max_duration`; raised from 5 s in `0039`). Several stale
-  comments still say "3-second"/"5-second".
+  the DB `CHECK ck_word_recording_max_duration`; raised from 5 s in `0039`). The stale
+  "3-second"/"5-second" comments were corrected in batch 5.
 - **Retake**: re-submitting the same user+concept+slot replaces the audio in place, resets
   the contribution to `pending`, clears verified/rejected fields, bumps `version` and
   `submittedAt`, quarantines the old `audio_files` row and deletes the old R2 object. It
   awards **no** points and doesn't touch `user_stats`. An override that gets the same
-  `audioFileId` short-circuits.
+  `audioFileId` short-circuits. If the recording was **published**, the retake also withdraws
+  the publication (§3.17) — the new audio is unreviewed. Translations retake the same way.
 - **Grammar metadata is per recording** (`grammatical_gender`, `part_of_speech`,
   `grammatical_number` on `word_recordings`; added to `concepts` in `0037`, moved in `0038`
   because different speakers/dialects can differ). Shown in My Contributions and in the
@@ -1231,7 +1304,7 @@ restatement of every column.)
 | Review & moderation | `reviews`, `contribution_keywords`, `audit_logs`, `suggestions` |
 | Gamification | `user_stats`, `streaks`, `gamification_config`, `points_transactions`, `badges`, `user_badges`, `perks`, `leaderboard_snapshots` |
 | Comms & compliance | `notifications`, `consents`, `data_exports` |
-| Ops | `feature_flags` (inert, §2.7) |
+| Ops | `feature_flags` (seven of ten enforced since batch 5, §2.7) |
 | Forum (§3.18) | `forum_posts`, `forum_comments`, `forum_post_reactions`, `forum_comment_reactions`, `forum_poll_options`, `forum_poll_votes` |
 | Publishing (§3.17) | `published_word_recordings`, `published_translations` |
 | Volunteer workflow (§3.16) | `pending_changes` (+ `users.auto_approve_volunteer`, `created_by` on `concepts`/`scenes`/`sentences`) |
@@ -1395,15 +1468,20 @@ before being fixed.
   fields; re-applying a contribution delete (`undo:admin_contribution_delete`) now re-decrements
   stats; and **a ban can no longer be undone** (`NOT_REVERTIBLE` — banning scrubs the account's
   data for good, so the old undo resurrected an empty, unusable "zombie" account).
-- Points farming: scenes have no per-user uniqueness; every `POST /:id/transcription` creates a
-  new version and a new idempotency key (re-awarding points); segment arrays are unbounded.
-- Word/translation uniqueness ignores language (§3.21); retaking a published recording
-  publishes unreviewed audio (§3.17). (Buffered TRANSCRIPTION losing its transcription/segments
-  on a retry is **fixed 2026-11-12**, §2.3.)
-- Account deletion (`deleteUserAccount`, five parallel un-transacted writes) scrubs `users`,
-  demographics, profile, refresh tokens and device tokens only. Forum posts, suggestions,
-  notifications, `terms_acceptances` and reset tokens remain, and the schema's `ON DELETE
-  CASCADE`s never fire because users are only soft-deleted.
+- **Points farming — fixed 2026-11-12 (batch 5, §7.7):** scenes had no per-user uniqueness, every
+  `POST /:id/transcription` created a new version with a new idempotency key (re-awarding its
+  points), and segment arrays were unbounded. See §2.6 for the rules now in force. Still open: the
+  same audio file can be uploaded again and again as new contributions (no checksum de-duplication
+  per user), and the verified bonus is still paid on a repeat scene description that a reviewer
+  approves.
+- Word/translation uniqueness ignores language (§3.21). (Retaking a published recording
+  publishing unreviewed audio is **fixed**, §3.17; buffered TRANSCRIPTION losing its
+  transcription/segments on a retry is **fixed 2026-11-12**, §2.3.)
+- Account deletion (`deleteUserAccount`, parallel un-transacted writes) scrubs `users`,
+  demographics, profile, refresh tokens, device tokens and — since batch 5 — password-reset
+  tokens and notifications. Forum posts, suggestions and `terms_acceptances` remain (deliberate:
+  forum/suggestion content is part of the community record; `terms_acceptances` is a compliance
+  record), and the schema's `ON DELETE CASCADE`s never fire because users are only soft-deleted.
 
 **Security**
 - **Fixed 2026-11-12 (batch 2, §7.4):** the volunteer permanent/bulk-delete bypass (partly —
@@ -1433,10 +1511,15 @@ before being fixed.
   - **Error handler** (`utils/error-handler.ts`): in production an unexpected 5xx returns a
     generic `{code: "INTERNAL_ERROR", message: "Something went wrong"}`; SQL text, hostnames and
     driver messages stay in the server log only.
-- **Still open:** the presigned flow trusts the client (`/audio/:id/confirm` compares two
-  client-supplied checksums and never checks R2; the presigned `PutObject` has no content-length
-  limit; `durationMs` is client-reported for SCENE and TRANSCRIPTION in every flow, so the scene
-  "long description" bonus can be claimed by lying); the Openverse/Wikimedia routes accept any
+- **Presigned flow — fixed 2026-11-12 (batch 5, §7.7):** `/audio/:id/confirm` now HEADs the
+  object (missing → 400 `UPLOAD_NOT_FOUND`; larger than the module cap or the reserved size →
+  object deleted, row `failed`, 400 `FILE_TOO_LARGE`), WORD's 10 s cap is checked against a
+  server-measured duration, the buffered flow measures scene/transcription audio too, and the
+  scene long-description bonus reads the stored duration. ⚠️ Still open: presigned uploads of
+  the *other* modules store the client's claimed duration (the mobile app is the only user of
+  that flow), and the presigned `PutObject` still carries no content-length condition (an
+  oversize object is now caught and deleted at confirm, but only if confirm is called).
+- **Still open:** the Openverse/Wikimedia routes accept any
   public `image.url` host (the redirect/private-address guard now protects them, but an arbitrary
   public host can still be fetched); the public leaderboard exposes `userId`/`displayName`;
   terms say 18+ but signup allows 14. (RLS on 12 tables is missing from the migration history
@@ -1511,7 +1594,7 @@ before being fixed.
   counts only top-level comments; `confirm`/`alert`/`prompt` are used at ~60 sites.
 
 **Dead code & config**
-- Never read: `feature_flags` (§2.7), `consents`, `data_exports`, `perks`,
+- Never read: three of the ten `feature_flags` (§2.7), `consents`, `data_exports`, `perks`,
   `leaderboard_snapshots`, `user_additional_permissions`; ~10 seeded permission codes (§2.5);
   `points.word.synonym_bonus`, `levels.bronze.min`, the `modules.*` config keys;
   `PermanentFailure` in `submission-buffer.service.ts`; `bullmq` / `ioredis`;
@@ -1611,6 +1694,11 @@ afterwards and the few audit rows the harness inserted were deleted.
   feature flags (wire them up, or delete them).
 - Whether to revive or park the mobile app (§8); a staging database; an uptime monitor.
 
+> **Update:** the volunteer rules, the retake rule, the points-farming rules, account-deletion
+> scope and the feature flags were later decided and implemented conservatively in batch 5
+> (§7.7), each with its reasoning, so they can be reversed. The Terms text, the mobile app, a
+> staging database and an uptime monitor are still undecided.
+
 ### 7.5 Batches 3 and the web fixes (2026-11-12)
 
 **Web (`apps/web`)** — shipped as its own PR, verified by `tsc --noEmit` (run by the author and
@@ -1662,6 +1750,70 @@ test with — verified by review/typecheck), the per-user buffer cap, the forum 
 guard and image cleanup (no restricted user / deletable post to probe without changing real
 data), the permanent-delete suggestion detach, and the JSON-array-element check inside the real
 upload route.
+
+### 7.7 Batch 5 — policy fixes (2026-11-12)
+
+The items earlier batches left for "a decision that isn't mine to make" were made here, on the
+owner's instruction to implement the rest, **choosing the conservative option each time and
+recording it so it can be changed.** Details sit where the behaviour lives: volunteer scope →
+§3.16 and §3.2; retake of a published recording → §3.17 and §3.21; points farming, durations →
+§2.6 and §2.3; feature flags → §2.7; presigned flow and account deletion → §7.2. New files:
+`services/feature-flags.service.ts`, `utils/keyed-lock.ts`; `measureDurationMs()` in
+`services/audio-trim.service.ts`; `headAudioObject()` in `services/storage.service.ts`. No
+migration, no data change.
+
+| Decision | Chosen | The alternative, if you disagree |
+| --- | --- | --- |
+| What a volunteer may do unreviewed | Create/delete via the queue; edits, image delete/crop, keywords and coverage only on **their own** items; **all bulk, autofill and Undo admin-only** | Let volunteers edit anything (remove the `assertVolunteerOwns` calls), or route edits through the queue (a larger change: new `update` action) |
+| Retaking a published recording | **Unpublish it**, audit-logged; an admin re-publishes after re-review | Leave it published but gate the public feed on review status (changes `7b519ad`) |
+| Repeat scene descriptions | Accepted, counted, **earn 0** | Reject them with a 409 (but the buffered flow would then fail after the 202) |
+| Re-transcribing | Pays only the **new** fields | Pay once per upload regardless |
+| Segments | 1 per 500 ms of audio, max 300, must contain text to pay | Raise/lower `SEGMENT_MIN_SPAN_MS` / `MAX_SEGMENTS_PER_UPLOAD` in `audio-upload.service.ts` |
+| Account deletion | Also delete reset tokens and notifications; **keep** forum posts, suggestions, `terms_acceptances` | Scrub forum content too (needs a product call on community history) |
+| Feature flags | **Wire** the seven that map to real features; leave `push_notifications_enabled`, `data_exports_enabled` alone | Delete the flags table and admin page |
+
+**Verified against the live database** (throwaway harnesses, deleted afterwards; every
+throwaway row, user, scene and R2 object was removed and its absence checked):
+- *Volunteer scope* — 65 checks through the real routes with in-process tokens for live
+  volunteer / admin / contributor users: another admin's concept/scene and a legacy
+  (`created_by` null) one → 403 for the volunteer, their own → 200, admin → 200; image
+  delete/crop and keyword/coverage/annotate routes likewise; all 14 bulk and 4 autofill routes →
+  403 for a volunteer (and 403 for a contributor, so `requirePermission` still applies), while an
+  admin is let through to validation; Undo → 403 for a volunteer, not blocked for an admin. (The
+  admin autofill routes were deliberately *not* called — an empty body there could trigger a real
+  autofill.)
+- *Retake* — 14 checks calling the real submit functions: publication withdrawn, sibling
+  recording left published, contribution back to `pending` and un-verified, one audit row,
+  replay is a no-op, an unpublished retake logs nothing; the same for translations.
+- *Points farming* — 34 checks with a throwaway **user** (so no real account's points, counters
+  or badges were touched): first-only scene award, three concurrent submissions → exactly one
+  earns, rejected-then-good earns, version deltas (10 / 0 / 5 / 20 / 0 / 0, ledger total = value of
+  all four fields once), 20 concurrent segments on an 8-segment clip → exactly 8 stored and paid,
+  the duplicate / limit / out-of-range errors, and the buffer route's up-front 400s.
+- *Presigned flow* — 14 checks against the real R2 bucket with throwaway keys: confirm without an
+  upload, an honest upload, an oversize upload (deleted, row `failed`), a 12 s WORD clip claiming
+  3 s rejected on the measured duration, a 3 s clip claiming 20 s stored as 3 s, scene audio
+  claiming 999 999 ms stored as ~4 s, and the scene bonus following the stored duration both ways.
+- *Feature flags* — the mechanism on a **throwaway flag** (OFF → 403, the TTL, cache
+  invalidation, missing row → ON) and every wired route still answering normally with the live,
+  all-ON flags. **No live flag was ever flipped.**
+- *Account deletion* — reset token, notifications and refresh token gone on a throwaway user; the
+  row still soft-deleted and scrubbed.
+
+⚠️ **Not covered by a live test:** the "flag OFF → 403" outcome on the *real* routes (only the
+shared mechanism was exercised, because testing it would have meant switching a live feature
+off — each route's gate is confirmed by reading the code); `completeTranscriptionExtras()` after
+its change to sequential (still needs a real in-flight buffered upload); the web UI's behaviour
+when it receives `FEATURE_DISABLED` or a volunteer's new 403s; and the mobile app, which was
+**not touched** (no dependencies installed to typecheck against, and whether to revive or park it
+is undecided).
+
+**Still open after batch 5:** the Terms text (18+ vs 14, placeholders, licence); a staging
+database; an uptime monitor on `/api/v1/health`; Railway deployments (batch 3 onward were not
+deploying when this was written — check the Deployments tab and compare `/api/v1/health`
+`version`); the web UI hiding controls the backend now refuses; the same-audio re-upload
+loophole and the repeat-scene verified bonus (§7.2); whether admin status overrides should pay
+the verified bonus / adjust counters; revive-or-park for mobile.
 
 ---
 
