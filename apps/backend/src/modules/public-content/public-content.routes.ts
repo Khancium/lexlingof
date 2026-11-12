@@ -1,3 +1,5 @@
+import { timingSafeEqual } from "node:crypto";
+
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 
@@ -14,15 +16,28 @@ import {
  * feed (the Pashtowal WordPress theme) -- not meant to gate a real human
  * visitor (they only ever see the WordPress page, never this API directly),
  * just to stop a third party from hitting this API wholesale and harvesting
- * the entire published catalog in one request. If unset, the API stays
- * fully open -- same "missing config degrades gracefully" pattern as every
- * other optional integration in this codebase (Firebase, Openverse), so a
- * fresh deploy without the key configured doesn't start 401ing WordPress.
+ * the entire published catalog in one request.
+ *
+ * In development an unset key leaves the API open so it's easy to try locally.
+ * In PRODUCTION an unset key now FAILS CLOSED (503) instead: an open public API
+ * is exactly what the key exists to prevent, and silently serving the whole
+ * catalog because someone forgot a variable on a redeploy is the wrong default.
+ * (Production has the key set, so nothing changes for the WordPress site.)
  */
-async function requirePublicApiKey(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+async function requirePublicApiKey(request: FastifyRequest, _reply: FastifyReply): Promise<void> {
   const expected = process.env.PUBLIC_API_KEY;
-  if (!expected) return;
-  if (request.headers["x-public-api-key"] !== expected) {
+  if (!expected) {
+    if (process.env.NODE_ENV === "production") {
+      throw new HttpError(503, "PUBLIC_API_NOT_CONFIGURED", "The public API isn't configured");
+    }
+    return;
+  }
+
+  const provided = request.headers["x-public-api-key"];
+  const a = Buffer.from(typeof provided === "string" ? provided : "");
+  const b = Buffer.from(expected);
+  // Constant-time comparison (a plain !== leaks, byte by byte, how much of a guess matched).
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
     throw new HttpError(401, "UNAUTHORIZED", "Missing or invalid API key");
   }
 }

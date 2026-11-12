@@ -4,7 +4,8 @@ import { z } from "zod";
 
 import { db } from "../../../db/index.js";
 import { categories, conceptMedia, concepts, wordRecordings } from "../../../db/schema.js";
-import { verifyToken } from "../../../middleware/auth.js";
+import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
+import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { getRecordedSynonyms, submitWordRecording } from "./word.service.js";
 
@@ -105,8 +106,11 @@ export default async function wordRoutes(fastify: FastifyInstance) {
     return getRecordedSynonyms(request.user!.id, conceptId);
   });
 
-  fastify.post("/contributions/word", { preHandler: verifyToken }, async (request, reply) => {
+  // The legacy direct-submit path (mobile still uses it). It used to skip
+  // blockIfRestricted and trust whatever audioFileId the client sent.
+  fastify.post("/contributions/word", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const body = submitSchema.parse(request.body);
+    await assertOwnsAudioFile(request.user!.id, body.audioFileId);
     const result = await submitWordRecording(request.user!.id, body);
     reply.code(201).send(result);
   });

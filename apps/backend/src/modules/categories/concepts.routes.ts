@@ -6,6 +6,7 @@ import { db } from "../../db/index.js";
 import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
 import { hasPermission, verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
+import { queryBoolean } from "../../utils/query-params.js";
 
 const listQuerySchema = z.object({
   categoryId: z.string().uuid().optional(),
@@ -20,11 +21,11 @@ const listQuerySchema = z.object({
   // Volunteer's "my own additions" filter -- true restricts the list to
   // concepts this caller themselves created (concepts.createdBy). Same
   // convention as the scene/sentence list routes.
-  mine: z.coerce.boolean().optional(),
+  mine: queryBoolean(),
   // Admin-only: include hidden (isActive false, not deleted) concepts too.
   // Silently ignored for anyone without concepts.manage -- see the check
   // below -- so a contributor can never pass this to see hidden items.
-  includeHidden: z.coerce.boolean().optional(),
+  includeHidden: queryBoolean(),
   // 1000 (not 200) so admin pages can fetch the full concept list in one
   // request for client-side matching (e.g. the bulk-add-images-by-URL and
   // scene-coverage pickers) without paginating just to build a lookup map.

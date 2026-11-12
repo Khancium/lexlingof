@@ -48,7 +48,7 @@ import {
   villages,
   wordRecordings,
 } from "../../db/schema.js";
-import { hasPermission, invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
+import { forbidVolunteers, hasPermission, invalidateUserCache, requirePermission, verifyToken } from "../../middleware/auth.js";
 import { buildAttribution, searchOpenverseImages } from "../../services/openverse.service.js";
 import { searchWikimediaImages } from "../../services/wikimedia.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
@@ -59,8 +59,11 @@ import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/
 import { invalidateCategoriesCache } from "../categories/categories.routes.js";
 import { gateVolunteerAction, getPendingChangeById, requirePendingRow, markApproved, markRejected, listPendingChanges, countPendingByVolunteer, setAutoApprove, isAutoApproved } from "../../services/pending-changes.service.js";
 import { storageService } from "../../services/storage.service.js";
+import { assertCanGrantAdminTo, assertCanModerateAll, assertCanModerateUser } from "../../services/moderation-guards.service.js";
 import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
+import { reviveAuditState } from "../../utils/audit-state.js";
 import { HttpError } from "../../utils/http-error.js";
+import { queryBoolean } from "../../utils/query-params.js";
 import { safeExtension } from "../../utils/filename.js";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
@@ -761,6 +764,22 @@ async function buildConceptInserts(
 /* -------------------------------------------------------------------------- */
 
 const idParamSchema = z.object({ id: z.string().uuid() });
+
+type ModerationActor = { id: string; role: (typeof userRole.enumValues)[number] };
+
+/** 404s on an unknown user, 403s if `actor` isn't allowed to moderate them (see moderation-guards.service.ts). */
+async function guardModerationTarget(actor: ModerationActor, targetId: string): Promise<void> {
+  const [target] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, targetId)).limit(1);
+  if (!target) throw new HttpError(404, "NOT_FOUND", "User not found");
+  assertCanModerateUser(actor, target);
+}
+
+/** Bulk form: refuses the whole request if any selected account is protected. Unknown ids are left for the caller's own not-found handling. */
+async function guardModerationTargets(actor: ModerationActor, targetIds: string[]): Promise<void> {
+  if (targetIds.length === 0) return;
+  const targets = await db.select({ id: users.id, role: users.role }).from(users).where(inArray(users.id, targetIds));
+  assertCanModerateAll(actor, targets);
+}
 const keyParamSchema = z.object({ key: z.string().min(1) });
 
 // Lets a single query param carry more than one value as a comma-separated
@@ -930,7 +949,7 @@ const bulkSetVolunteerSchema = z.object({ ids: z.array(z.string().uuid()).min(1)
 
 const adminSetCredentialsSchema = z
   .object({
-    email: z.string().trim().email().min(1).optional(),
+    email: z.string().trim().toLowerCase().email().min(1).optional(),
     password: z.string().min(8).optional(),
     displayName: z.string().trim().min(1).max(120).optional(),
   })
@@ -1097,7 +1116,7 @@ const sentencesQuerySchema = z.object({
   createdTo: z.string().datetime().optional(),
   // Volunteer's "my own additions" filter -- true restricts the list to
   // sentences this caller themselves created (sentences.createdBy).
-  mine: z.coerce.boolean().optional(),
+  mine: queryBoolean(),
   sourceLanguage: z.enum(["english", "urdu", "persian"]).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
@@ -2100,6 +2119,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/users/:id/restrict", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    await guardModerationTarget(request.user!, id);
     const body = restrictUserSchema.parse(request.body);
 
     const [user] = await db.select({ isRestricted: users.isRestricted }).from(users).where(eq(users.id, id)).limit(1);
@@ -2126,6 +2146,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/users/:id/unrestrict", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    await guardModerationTarget(request.user!, id);
 
     const [user] = await db.select({ isRestricted: users.isRestricted }).from(users).where(eq(users.id, id)).limit(1);
     if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
@@ -2155,6 +2176,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // the expiry, not schedule anything.
   fastify.post("/admin/users/:id/cooloff", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    await guardModerationTarget(request.user!, id);
     const body = cooloffUserSchema.parse(request.body);
     const until = new Date(Date.now() + body.days * 24 * 60 * 60 * 1000);
 
@@ -2182,6 +2204,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/users/:id/suspend", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    await guardModerationTarget(request.user!, id);
     const body = suspendUserSchema.parse(request.body);
 
     const [user] = await db.select({ isSuspended: users.isSuspended }).from(users).where(eq(users.id, id)).limit(1);
@@ -2211,6 +2234,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/users/:id/unsuspend", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    await guardModerationTarget(request.user!, id);
 
     const [user] = await db.select({ isSuspended: users.isSuspended }).from(users).where(eq(users.id, id)).limit(1);
     if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
@@ -2293,6 +2317,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // data survives, email stays permanently blocked from re-registration).
   fastify.delete("/admin/users/:id", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
+    await guardModerationTarget(request.user!, id);
 
     const [user] = await db.select({ email: users.email, deletedAt: users.deletedAt }).from(users).where(eq(users.id, id)).limit(1);
     if (!user) throw new HttpError(404, "NOT_FOUND", "User not found");
@@ -2316,6 +2341,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/users/bulk-restrict", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { ids, reason } = bulkRestrictUsersSchema.parse(request.body);
+    await guardModerationTargets(request.user!, ids);
 
     const rows = await db.select({ id: users.id, isRestricted: users.isRestricted }).from(users).where(inArray(users.id, ids));
     if (rows.length === 0) return { updated: 0 };
@@ -2343,6 +2369,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/users/bulk-unrestrict", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { ids } = bulkUserIdsSchema.parse(request.body);
+    await guardModerationTargets(request.user!, ids);
 
     const rows = await db.select({ id: users.id, isRestricted: users.isRestricted }).from(users).where(inArray(users.id, ids));
     if (rows.length === 0) return { updated: 0 };
@@ -2375,6 +2402,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // reasoning (and same concurrency cap) as runBulkPermanentDelete above.
   fastify.post("/admin/users/bulk-delete", { preHandler: requirePermission("users.manage") }, async (request) => {
     const { ids } = bulkUserIdsSchema.parse(request.body);
+    await guardModerationTargets(request.user!, ids);
 
     const rows = await db.select({ id: users.id, deletedAt: users.deletedAt }).from(users).where(inArray(users.id, ids));
     const alreadyDeleted = rows.filter((r) => r.deletedAt).map((r) => r.id);
@@ -2544,7 +2572,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return updated;
   });
 
-  fastify.post("/admin/concepts/bulk-delete", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/bulk-delete", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
     const rows = await db.select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt }).from(concepts).where(inArray(concepts.id, ids));
@@ -2620,12 +2648,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.send(outcome.result);
   });
 
-  fastify.delete("/admin/concepts/:id/permanent", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.delete("/admin/concepts/:id/permanent", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     return runPermanentDelete(request, "concept", id);
   });
 
-  fastify.post("/admin/concepts/bulk-delete-permanent", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/bulk-delete-permanent", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
     return runBulkPermanentDelete(request, "concept", ids);
   });
@@ -3111,7 +3139,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return updated;
   });
 
-  fastify.post("/admin/scenes/bulk-delete", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/bulk-delete", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
     const rows = await db.select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt }).from(scenes).where(inArray(scenes.id, ids));
@@ -3134,7 +3162,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { deleted: rows.length };
   });
 
-  fastify.post("/admin/scenes/bulk-delete-permanent", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/bulk-delete-permanent", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
     return runBulkPermanentDelete(request, "scene", ids);
   });
@@ -3186,7 +3214,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.send(outcome.result);
   });
 
-  fastify.delete("/admin/scenes/:id/permanent", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.delete("/admin/scenes/:id/permanent", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     return runPermanentDelete(request, "scene", id);
   });
@@ -3742,7 +3770,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return result;
   });
 
-  fastify.post("/admin/sentences/bulk-delete", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.post("/admin/sentences/bulk-delete", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
     const rows = await db.select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt }).from(sentences).where(inArray(sentences.id, ids));
@@ -3765,7 +3793,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { deleted: rows.length };
   });
 
-  fastify.post("/admin/sentences/bulk-delete-permanent", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.post("/admin/sentences/bulk-delete-permanent", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
     return runBulkPermanentDelete(request, "sentence", ids);
   });
@@ -3817,7 +3845,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     reply.send(outcome.result);
   });
 
-  fastify.delete("/admin/sentences/:id/permanent", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.delete("/admin/sentences/:id/permanent", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     return runPermanentDelete(request, "sentence", id);
   });
@@ -4080,13 +4108,32 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       throw new HttpError(400, "NOT_REVERTIBLE", "This change has no recorded prior state to restore");
     }
 
+    const before = log.beforeState as Record<string, unknown>;
+
+    // Undoing writes its own log row whose action is "undo:<original>" (and
+    // "undo:undo:<original>" for the next one, and so on). Permissions and
+    // revertibility have to be judged on the ORIGINAL action. They used to be
+    // matched against log.action exactly, so after a super_admin undid a
+    // "superadmin_grant_admin" the newest row was "undo:superadmin_grant_admin",
+    // which didn't match -- and any admin with users.manage could then "undo" it
+    // again, redoing the grant (a privilege escalation).
+    const originalAction = log.action.replace(/^(undo:)+/, "");
+
+    // Banning scrubs the account's password, name, avatar and demographics for
+    // good (deleteUserAccount); the log row only records deletedAt, so an undo
+    // would resurrect an empty, unusable account.
+    if (originalAction === "admin_user_ban_delete") {
+      throw new HttpError(400, "NOT_REVERTIBLE", "Banning an account permanently scrubs its personal data, so it can't be undone");
+    }
+
     // "user" maps to two different permissions depending on which action
-    // produced this specific log row (granting admin is super_admin-only;
-    // every other user action is users.manage) -- resolved only once the
-    // actual log row (and its action) is known.
+    // produced this specific log row. Granting admin is super_admin-only, and
+    // so is anything else that would change a user's role, however it was
+    // logged; every other user action is users.manage.
+    const changesRole = resourceType === "user" && "role" in before;
     const permission =
       resourceType === "user"
-        ? log.action === "superadmin_grant_admin"
+        ? originalAction === "superadmin_grant_admin" || changesRole
           ? "system.manage"
           : "users.manage"
         : UNDO_PERMISSION_BY_RESOURCE[resourceType];
@@ -4094,39 +4141,55 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       throw new HttpError(403, "FORBIDDEN", `required: ${permission ?? "unknown"}`);
     }
 
-    const before = log.beforeState as Record<string, unknown>;
+    // Undo must not become a way around the moderation rules: the same
+    // who-may-moderate-whom check applies to reverting a user action.
+    if (resourceType === "user") {
+      await guardModerationTarget(request.user!, identifier);
+    }
 
     switch (resourceType) {
       case "contribution":
-        await db.update(contributions).set({ ...before, updatedAt: new Date() } as Partial<typeof contributions.$inferInsert>).where(eq(contributions.id, identifier));
-        // Undoing a delete (before.deletedAt === null) must re-apply the
-        // same user_stats increment the delete reversed, or the restored
-        // contribution counts nowhere -- see adjustContributionStats.
-        if (log.action === "admin_contribution_delete" && before.deletedAt === null) {
-          const [restored] = await db
+        await db
+          .update(contributions)
+          .set({ ...reviveAuditState(contributions, before), updatedAt: new Date() } as Partial<typeof contributions.$inferInsert>)
+          .where(eq(contributions.id, identifier));
+        // Keep user_stats in step with whether the contribution is now live or
+        // deleted -- see adjustContributionStats. Undoing a delete (the saved
+        // deletedAt is null) restores it: +1. Undoing THAT -- i.e. re-applying
+        // the delete, logged as "undo:admin_contribution_delete", whose saved
+        // deletedAt is a timestamp -- removes it again: -1. The re-delete case
+        // used to be missed because the check matched the exact action string.
+        if (originalAction === "admin_contribution_delete" && "deletedAt" in before) {
+          const [row] = await db
             .select({ userId: contributions.userId, moduleType: contributions.moduleType, status: contributions.status })
             .from(contributions)
             .where(eq(contributions.id, identifier))
             .limit(1);
-          if (restored) {
-            await adjustContributionStats(restored.userId, restored.moduleType, restored.status, 1);
+          if (row) {
+            await adjustContributionStats(row.userId, row.moduleType, row.status, before.deletedAt === null ? 1 : -1);
           }
         }
         break;
       case "concept":
-        await db.update(concepts).set({ ...before, updatedAt: new Date() } as Partial<typeof concepts.$inferInsert>).where(eq(concepts.id, identifier));
+        await db.update(concepts).set({ ...reviveAuditState(concepts, before), updatedAt: new Date() } as Partial<typeof concepts.$inferInsert>).where(eq(concepts.id, identifier));
         invalidateCategoriesCache();
         break;
       case "scene":
-        await db.update(scenes).set({ ...before, updatedAt: new Date() } as Partial<typeof scenes.$inferInsert>).where(eq(scenes.id, identifier));
+        await db.update(scenes).set({ ...reviveAuditState(scenes, before), updatedAt: new Date() } as Partial<typeof scenes.$inferInsert>).where(eq(scenes.id, identifier));
         break;
       case "sentence":
-        await db.update(sentences).set({ ...before, updatedAt: new Date() } as Partial<typeof sentences.$inferInsert>).where(eq(sentences.id, identifier));
+        await db.update(sentences).set({ ...reviveAuditState(sentences, before), updatedAt: new Date() } as Partial<typeof sentences.$inferInsert>).where(eq(sentences.id, identifier));
         break;
-      case "user":
-        await db.update(users).set({ ...before, updatedAt: new Date() } as Partial<typeof users.$inferInsert>).where(eq(users.id, identifier));
+      case "user": {
+        const restore = reviveAuditState(users, before);
+        // Lifting a restriction/suspension must clear its leftover reason and
+        // timestamps too, not just flip the flag -- the log only saved the flag.
+        if (before.isRestricted === false) Object.assign(restore, { restrictedAt: null, restrictedReason: null });
+        if (before.isSuspended === false) Object.assign(restore, { suspendedAt: null, suspendedReason: null, suspendedUntil: null });
+        await db.update(users).set({ ...restore, updatedAt: new Date() } as Partial<typeof users.$inferInsert>).where(eq(users.id, identifier));
         invalidateUserCache(identifier);
         break;
+      }
       case "gamification_config":
         await db
           .update(gamificationConfig)
@@ -4632,10 +4695,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     const body = promoteAdminSchema.parse(request.body);
 
-    const [targetUser] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, body.userId)).limit(1);
-    if (!targetUser) {
-      throw new HttpError(404, "NOT_FOUND", "User not found");
-    }
+    const [targetUser] = await db
+      .select({ id: users.id, role: users.role, deletedAt: users.deletedAt })
+      .from(users)
+      .where(eq(users.id, body.userId))
+      .limit(1);
+    assertCanGrantAdminTo(targetUser);
 
     await db.update(users).set({ role: "admin", updatedAt: new Date() }).where(eq(users.id, body.userId));
     invalidateUserCache(body.userId);

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "../../db/index.js";
 import {
@@ -21,6 +21,15 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { storageService } from "../../services/storage.service.js";
+
+// Publishing is an admin allow-list keyed by recording id, so a published row
+// keeps pointing at its recording forever. Without these filters a recording
+// that was later deleted -- or superseded by a retake (the contributor's old
+// take is marked not-current) -- stayed on the public site until an admin
+// happened to unpublish it. Every public query below only counts a published
+// row while its source recording is still live.
+const LIVE_WORD_RECORDING = and(isNull(wordRecordings.deletedAt), eq(wordRecordings.isCurrent, true));
+const LIVE_TRANSLATION = and(isNull(translations.deletedAt), eq(translations.isCurrent, true));
 
 export type PublicRecording = {
   id: string;
@@ -153,7 +162,11 @@ export async function getPublicDictionary(params: { search?: string; categoryId?
 /** Concept ids with >=1 published recording -- narrowed to recordings matching the location filter, when one is given. */
 function conceptIdsWithPublishedRecording(locationFilter: LocationFilter) {
   if (!hasLocationFilter(locationFilter)) {
-    return db.selectDistinct({ conceptId: publishedWordRecordings.conceptId }).from(publishedWordRecordings);
+    return db
+      .selectDistinct({ conceptId: publishedWordRecordings.conceptId })
+      .from(publishedWordRecordings)
+      .innerJoin(wordRecordings, eq(wordRecordings.id, publishedWordRecordings.wordRecordingId))
+      .where(LIVE_WORD_RECORDING);
   }
   return db
     .selectDistinct({ conceptId: publishedWordRecordings.conceptId })
@@ -163,13 +176,13 @@ function conceptIdsWithPublishedRecording(locationFilter: LocationFilter) {
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .leftJoin(contributorProfiles, eq(contributorProfiles.userId, wordRecordings.userId))
-    .where(and(...locationConditions(locationFilter)));
+    .where(and(LIVE_WORD_RECORDING, ...locationConditions(locationFilter)));
 }
 
 async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFilter: LocationFilter): Promise<Map<string, PublicRecording[]>> {
   if (conceptIds.length === 0) return new Map();
 
-  const conditions = [inArray(publishedWordRecordings.conceptId, conceptIds), ...locationConditions(locationFilter)];
+  const conditions = [inArray(publishedWordRecordings.conceptId, conceptIds), LIVE_WORD_RECORDING, ...locationConditions(locationFilter)];
 
   const rows = await db
     .select({
@@ -243,7 +256,11 @@ async function relatedWordsByCategory(categoryByConceptId: Map<string, string>, 
   const categoryIds = [...new Set(categoryByConceptId.values())];
   if (categoryIds.length === 0) return new Map();
 
-  const publishedConceptIds = db.selectDistinct({ conceptId: publishedWordRecordings.conceptId }).from(publishedWordRecordings);
+  const publishedConceptIds = db
+    .selectDistinct({ conceptId: publishedWordRecordings.conceptId })
+    .from(publishedWordRecordings)
+    .innerJoin(wordRecordings, eq(wordRecordings.id, publishedWordRecordings.wordRecordingId))
+    .where(LIVE_WORD_RECORDING);
   const rows = await db
     .select({ id: concepts.id, word: concepts.labelEnglish, categoryId: concepts.categoryId })
     .from(concepts)
@@ -282,7 +299,7 @@ export async function getPublicDictionaryFilterOptions(): Promise<{ tribes: stri
     .leftJoin(contributorDemographics, eq(contributorDemographics.userId, wordRecordings.userId))
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
-    .where(eq(contributorProfiles.showLocation, true));
+    .where(and(eq(contributorProfiles.showLocation, true), LIVE_WORD_RECORDING));
   return collectLocationOptions(rows);
 }
 
@@ -339,7 +356,11 @@ export async function getPublicLanguageLearning(
 
 function sentenceIdsWithPublishedTranslation(locationFilter: LocationFilter) {
   if (!hasLocationFilter(locationFilter)) {
-    return db.selectDistinct({ sentenceId: publishedTranslations.sentenceId }).from(publishedTranslations);
+    return db
+      .selectDistinct({ sentenceId: publishedTranslations.sentenceId })
+      .from(publishedTranslations)
+      .innerJoin(translations, eq(translations.id, publishedTranslations.translationId))
+      .where(LIVE_TRANSLATION);
   }
   return db
     .selectDistinct({ sentenceId: publishedTranslations.sentenceId })
@@ -349,7 +370,7 @@ function sentenceIdsWithPublishedTranslation(locationFilter: LocationFilter) {
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .leftJoin(contributorProfiles, eq(contributorProfiles.userId, translations.userId))
-    .where(and(...locationConditions(locationFilter)));
+    .where(and(LIVE_TRANSLATION, ...locationConditions(locationFilter)));
 }
 
 async function getPublishedTranslationsBySentences(
@@ -358,7 +379,7 @@ async function getPublishedTranslationsBySentences(
 ): Promise<Map<string, PublicRecording[]>> {
   if (sentenceIds.length === 0) return new Map();
 
-  const conditions = [inArray(publishedTranslations.sentenceId, sentenceIds), ...locationConditions(locationFilter)];
+  const conditions = [inArray(publishedTranslations.sentenceId, sentenceIds), LIVE_TRANSLATION, ...locationConditions(locationFilter)];
 
   const rows = await db
     .select({
@@ -424,6 +445,6 @@ export async function getPublicLanguageLearningFilterOptions(): Promise<{ tribes
     .leftJoin(contributorDemographics, eq(contributorDemographics.userId, translations.userId))
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
-    .where(eq(contributorProfiles.showLocation, true));
+    .where(and(eq(contributorProfiles.showLocation, true), LIVE_TRANSLATION));
   return collectLocationOptions(rows);
 }

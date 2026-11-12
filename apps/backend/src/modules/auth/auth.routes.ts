@@ -5,8 +5,14 @@ import { verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 import { authService } from "./auth.service.js";
 
+// Emails are trimmed and lower-cased on the way in. The unique index and every
+// lookup compare the raw string, so "Foo@x.com" and "foo@x.com" used to be two
+// different accounts (and a banned address could re-register by changing its
+// capitalisation). Every existing address in the database is already lower-case.
+const emailSchema = z.string().trim().toLowerCase().email().min(1);
+
 const registerSchema = z.object({
-  email: z.string().email().min(1),
+  email: emailSchema,
   password: z.string().min(8),
   // Fetched from GET /terms immediately before this call -- see auth.service.ts
   // for why the server re-validates this against the current version rather
@@ -15,7 +21,7 @@ const registerSchema = z.object({
 });
 
 const loginSchema = z.object({
-  email: z.string().email().min(1),
+  email: emailSchema,
   password: z.string().min(1),
 });
 
@@ -43,7 +49,7 @@ const changePasswordSchema = z.object({
 });
 
 const forgotPasswordSchema = z.object({
-  email: z.string().email().min(1),
+  email: emailSchema,
 });
 
 const resetPasswordSchema = z.object({

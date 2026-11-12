@@ -198,6 +198,23 @@ export function requirePermission(permission: string) {
   };
 }
 
+/**
+ * Volunteers hold concepts/scenes/sentences.manage, but their create and delete
+ * actions are meant to go through the approval queue (gateVolunteerAction in
+ * pending-changes.service.ts), and that queue only wraps the single-item
+ * create/delete routes. The permanent-delete and bulk-delete routes bypass it
+ * entirely, so a volunteer could erase any concept, scene or sentence (and its
+ * images) with no review. Apply this to those routes so they stay admin-only.
+ */
+export async function forbidVolunteers(request: FastifyRequest, reply: FastifyReply): Promise<void> {
+  if (request.user?.role === "volunteer") {
+    reply.code(403).send({
+      code: "FORBIDDEN",
+      message: "Volunteers can't do this directly -- ask an admin, or delete your own items one at a time for approval.",
+    });
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /*                           requireReviewerEligibility                       */
 /* -------------------------------------------------------------------------- */
