@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 
 import { containsPattern } from "../../utils/sql-like.js";
 import { db } from "../../db/index.js";
@@ -14,6 +14,7 @@ import {
   languages,
   publishedTranslations,
   publishedWordRecordings,
+  sentenceCategories,
   sentences,
   translations,
   tribes,
@@ -318,7 +319,10 @@ function collectLocationOptions(rows: { tribe: string | null; city: string | nul
 
 export type PublicSentenceEntry = {
   id: string;
+  /** The English text -- kept under this name for existing consumers of the feed. */
   sentence: string;
+  /** The same sentence in all three languages it is written in. */
+  texts: { english: string; urdu: string; persian: string };
   category: string | null;
   translations: PublicRecording[];
 };
@@ -327,18 +331,28 @@ export async function getPublicLanguageLearning(
   params: { search?: string; categoryId?: string; limit: number; offset: number } & LocationFilter,
 ) {
   const conditions = [sql`${sentences.deletedAt} is null`, eq(sentences.isActive, true)];
-  if (params.search) conditions.push(ilike(sentences.englishText, containsPattern(params.search)));
-  if (params.categoryId) conditions.push(eq(sentences.categoryId, params.categoryId));
+  if (params.search) {
+    const pattern = containsPattern(params.search);
+    conditions.push(or(ilike(sentences.englishText, pattern), ilike(sentences.urduText, pattern), ilike(sentences.persianText, pattern))!);
+  }
+  // categoryId is now a SENTENCE category id (see GET /public/language-learning/filters for the list).
+  if (params.categoryId) conditions.push(eq(sentences.sentenceCategoryId, params.categoryId));
   conditions.push(inArray(sentences.id, sentenceIdsWithPublishedTranslation(params)));
   const whereClause = and(...conditions);
 
   const [rows, [totalRow]] = await Promise.all([
     db
-      .select({ id: sentences.id, sentence: sentences.englishText, category: categories.nameEnglish })
+      .select({
+        id: sentences.id,
+        sentence: sentences.englishText,
+        urdu: sentences.urduText,
+        persian: sentences.persianText,
+        category: sentenceCategories.nameEnglish,
+      })
       .from(sentences)
-      .leftJoin(categories, eq(categories.id, sentences.categoryId))
+      .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
       .where(whereClause)
-      .orderBy(asc(sentences.englishText))
+      .orderBy(asc(sentenceCategories.sortOrder), asc(sentences.sortOrder), asc(sentences.englishText))
       .limit(params.limit)
       .offset(params.offset),
     db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(whereClause),
@@ -348,7 +362,13 @@ export async function getPublicLanguageLearning(
   const translationsBySentence = await getPublishedTranslationsBySentences(sentenceIds, params);
 
   return {
-    items: rows.map((r) => ({ id: r.id, sentence: r.sentence, category: r.category, translations: translationsBySentence.get(r.id) ?? [] })),
+    items: rows.map((r) => ({
+      id: r.id,
+      sentence: r.sentence,
+      texts: { english: r.sentence, urdu: r.urdu ?? "", persian: r.persian ?? "" },
+      category: r.category,
+      translations: translationsBySentence.get(r.id) ?? [],
+    })),
     total: totalRow?.value ?? 0,
     limit: params.limit,
     offset: params.offset,
@@ -437,7 +457,22 @@ async function getPublishedTranslationsBySentences(
 }
 
 /** Same idea as getPublicDictionaryFilterOptions, scoped to published translations. */
-export async function getPublicLanguageLearningFilterOptions(): Promise<{ tribes: string[]; cities: string[]; villages: string[] }> {
+export async function getPublicLanguageLearningFilterOptions(): Promise<{
+  tribes: string[];
+  cities: string[];
+  villages: string[];
+  categories: { id: string; name: string }[];
+}> {
+  // The sentence categories that currently have something published -- what the `categoryId` list filter takes.
+  const categoryRows = await db
+    .selectDistinct({ id: sentenceCategories.id, name: sentenceCategories.nameEnglish, sortOrder: sentenceCategories.sortOrder })
+    .from(publishedTranslations)
+    .innerJoin(translations, eq(translations.id, publishedTranslations.translationId))
+    .innerJoin(sentences, eq(sentences.id, publishedTranslations.sentenceId))
+    .innerJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
+    .where(and(LIVE_TRANSLATION, isNull(sentences.deletedAt), eq(sentences.isActive, true), eq(sentenceCategories.isActive, true)));
+  const categoryOptions = categoryRows.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name)).map((c) => ({ id: c.id, name: c.name }));
+
   const rows = await db
     .selectDistinct({ tribe: tribes.name, city: contributorDemographics.city, village: villages.name })
     .from(publishedTranslations)
@@ -447,5 +482,5 @@ export async function getPublicLanguageLearningFilterOptions(): Promise<{ tribes
     .leftJoin(tribes, eq(tribes.id, contributorDemographics.tribeId))
     .leftJoin(villages, eq(villages.id, contributorDemographics.villageId))
     .where(and(eq(contributorProfiles.showLocation, true), LIVE_TRANSLATION));
-  return collectLocationOptions(rows);
+  return { ...collectLocationOptions(rows), categories: categoryOptions };
 }

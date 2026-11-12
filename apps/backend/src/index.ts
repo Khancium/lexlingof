@@ -20,6 +20,7 @@ import audioUploadRoutes from "./modules/contributions/audio/audio-upload.routes
 import sceneRoutes from "./modules/contributions/scene/scene.routes.js";
 import adminRoutes from "./modules/admin/admin.routes.js";
 import publishingRoutes from "./modules/admin/publishing.routes.js";
+import sentenceCategoriesRoutes from "./modules/admin/sentence-categories.routes.js";
 import publicContentRoutes from "./modules/public-content/public-content.routes.js";
 import gamificationRoutes from "./modules/gamification/gamification.routes.js";
 import reviewsRoutes from "./modules/reviews/reviews.routes.js";
@@ -108,6 +109,7 @@ await server.register(notificationsRoutes, { prefix: "/api/v1/notifications" });
 // internally (there is no separate superAdminRoutes module).
 await server.register(adminRoutes, { prefix: "/api/v1" });
 await server.register(publishingRoutes, { prefix: "/api/v1" });
+await server.register(sentenceCategoriesRoutes, { prefix: "/api/v1" });
 await server.register(publicContentRoutes, { prefix: "/api/v1" });
 await server.register(forumRoutes, { prefix: "/api/v1/forum" });
 await server.register(termsRoutes, { prefix: "/api/v1" });

@@ -15,7 +15,7 @@ import {
   permissions,
   rolePermissions,
   scenes,
-  sentences,
+  sentenceCategories,
   concepts,
   streaks,
   userStats,
@@ -274,45 +274,18 @@ const SCENES: {
 ];
 
 /**
- * English text grouped for readability. Only groups whose name matches a real
- * category slug (food, weather, emotions) are linked to that category;
- * the rest (daily-conversation, family, travel, questions, descriptions) have
- * no corresponding category in the taxonomy above, so `categoryId` is left
- * null for those rather than guessing a mapping.
+ * Categories for sentences (separate from the concept categories above). Contributors translate a
+ * category's sentences in order. NO demo sentences are seeded: a sentence needs its English, Urdu and
+ * Persian text, and the real corpus is imported through the admin Sentences page (CSV / paste).
  */
-const SENTENCE_GROUPS: { group: string; texts: string[] }[] = [
-  {
-    group: "daily-conversation",
-    texts: ["Where are you going?", "What is your name?", "How are you today?", "What time is it?", "Where do you live?"],
-  },
-  {
-    group: "family",
-    texts: ["This is my mother.", "My brother is a farmer.", "We have three children.", "My father works in the field."],
-  },
-  {
-    group: "food",
-    texts: ["I am hungry.", "The bread is fresh.", "We eat rice every day.", "The water is cold."],
-  },
-  {
-    group: "weather",
-    texts: ["It is raining today.", "The sun is very hot.", "There is snow on the mountain."],
-  },
-  {
-    group: "travel",
-    texts: ["The road is long.", "We arrived yesterday.", "The bridge is broken."],
-  },
-  {
-    group: "questions",
-    texts: ["What is this called?", "How do you say that?", "Where is the market?", "Who is that person?"],
-  },
-  {
-    group: "descriptions",
-    texts: ["The dog is big.", "The house is old.", "The mountain is very high.", "The river is fast."],
-  },
-  {
-    group: "emotions",
-    texts: ["I am very happy today.", "She is crying.", "We are tired from the journey."],
-  },
+const SENTENCE_CATEGORIES: { slug: string; name: string }[] = [
+  { slug: "greetings", name: "Greetings" },
+  { slug: "salutations", name: "Salutations" },
+  { slug: "introduction", name: "Introduction" },
+  { slug: "work", name: "Work" },
+  { slug: "agriculture", name: "Agriculture" },
+  { slug: "husbandry", name: "Husbandry" },
+  { slug: "household", name: "Household" },
 ];
 
 type BadgeSeed = {
@@ -488,14 +461,11 @@ async function main() {
     );
   });
 
-  await runSection("sentences", async (tx) => {
-    const rows = SENTENCE_GROUPS.flatMap(({ group, texts }) =>
-      texts.map((englishText) => ({
-        englishText,
-        categoryId: categoryIdBySlug.get(group) ?? null,
-      })),
-    );
-    await tx.insert(sentences).values(rows);
+  await runSection("sentence categories", async (tx) => {
+    await tx
+      .insert(sentenceCategories)
+      .values(SENTENCE_CATEGORIES.map((c, i) => ({ slug: c.slug, nameEnglish: c.name, sortOrder: i })))
+      .onConflictDoNothing();
   });
 
   await runSection("badges", async (tx) => {

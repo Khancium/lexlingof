@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 
 import { containsPattern } from "../../utils/sql-like.js";
@@ -16,6 +16,7 @@ import {
   languages,
   publishedTranslations,
   publishedWordRecordings,
+  sentenceCategories,
   sentences,
   translations,
   tribes,
@@ -329,8 +330,11 @@ export async function setRecordingsGrammar(conceptId: string, wordRecordingIds: 
 
 export async function listSentencesForPublishing(params: PublishingFilters) {
   const conditions = [sql`${sentences.deletedAt} is null`, inArray(sentences.id, sentenceIdsMatchingFilters(params))];
-  if (params.search) conditions.push(ilike(sentences.englishText, containsPattern(params.search)));
-  if (params.categoryId) conditions.push(eq(sentences.categoryId, params.categoryId));
+  if (params.search) {
+    const pattern = containsPattern(params.search);
+    conditions.push(or(ilike(sentences.englishText, pattern), ilike(sentences.urduText, pattern), ilike(sentences.persianText, pattern))!);
+  }
+  if (params.categoryId) conditions.push(eq(sentences.sentenceCategoryId, params.categoryId));
   const whereClause = and(...conditions);
 
   const [rows, [totalRow]] = await Promise.all([
@@ -338,12 +342,14 @@ export async function listSentencesForPublishing(params: PublishingFilters) {
       .select({
         id: sentences.id,
         englishText: sentences.englishText,
-        categoryName: categories.nameEnglish,
+        urduText: sentences.urduText,
+        persianText: sentences.persianText,
+        categoryName: sentenceCategories.nameEnglish,
       })
       .from(sentences)
-      .leftJoin(categories, eq(categories.id, sentences.categoryId))
+      .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
       .where(whereClause)
-      .orderBy(asc(sentences.englishText))
+      .orderBy(asc(sentenceCategories.sortOrder), asc(sentences.sortOrder), asc(sentences.englishText))
       .limit(params.limit)
       .offset(params.offset),
     db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(whereClause),
@@ -374,6 +380,8 @@ export async function listSentencesForPublishing(params: PublishingFilters) {
     items: rows.map((r) => ({
       id: r.id,
       englishText: r.englishText,
+      urduText: r.urduText ?? "",
+      persianText: r.persianText ?? "",
       categoryName: r.categoryName,
       eligibleCount: eligibleBySentence.get(r.id) ?? 0,
       publishedCount: publishedBySentence.get(r.id) ?? 0,

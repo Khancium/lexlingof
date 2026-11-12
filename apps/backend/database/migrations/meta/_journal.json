@@ -295,6 +295,20 @@
       "when": 1794469409374,
       "tag": "0041_enable_rls_remaining_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1794499550111,
+      "tag": "0042_sentence_categories_and_equivalents",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794500495726,
+      "tag": "0043_sentences_require_all_languages",
+      "breakpoints": true
     }
   ]
 }
