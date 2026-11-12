@@ -334,16 +334,17 @@ async function adjustContributionStats(userId: string, moduleType: Module, statu
     updates[MODULE_VERIFIED_KEY[moduleType]] = sql`greatest(${verifiedColumn} + ${delta}, 0)`;
   } else if (status === "pending" || status === "under_review") {
     updates.pendingContributions = sql`greatest(${userStats.pendingContributions} + ${delta}, 0)`;
+  } else if (status === "rejected") {
+    // reviews.service.ts's invalid decision now moves a contribution from
+    // pending to rejected, so reversing a delete/undo of a rejected
+    // contribution has to touch that counter too. (Before that fix the
+    // column sat at 0 for everyone, which is why this branch used to be
+    // deliberately absent. Rejections from before the fix were never counted,
+    // so deleting one just floors at 0 here, and undoing its delete adds a +1
+    // the original never had -- a one-off drift that
+    // database/scripts/recompute-user-stats.ts repairs.)
+    updates.rejectedContributions = sql`greatest(${userStats.rejectedContributions} + ${delta}, 0)`;
   }
-  // Deliberately no "rejected" branch: reviews.service.ts's invalid-decision
-  // path only ever decrements pendingContributions, it never increments
-  // userStats.rejectedContributions -- so that column sits at 0 for every
-  // user regardless of how many of their contributions were actually
-  // rejected (a separate, pre-existing bug, not introduced here). Adjusting
-  // an always-zero counter here isn't symmetric: delete's greatest(x-1,0)
-  // floors as a no-op (already 0), but undo's blind +1 would then move it to
-  // 1 -- a real value drifting further from the always-0 truth. Left alone
-  // until that root cause is fixed.
 
   await db.update(userStats).set(updates).where(eq(userStats.userId, userId));
 }

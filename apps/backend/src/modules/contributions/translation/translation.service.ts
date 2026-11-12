@@ -370,8 +370,10 @@ export async function submitTranslation(userId: string, sentenceId: string, data
     const levelExpr = await levelUpdateExpr(1);
 
     // 5, 6, 7: independent of each other -- issued together instead of as
-    // three sequential round trips. (Spec lists only two user_stats
-    // counters here; see the module-level note on totalPoints.)
+    // three sequential round trips. total_points is incremented inline here
+    // (the contribution id is brand new, so the ledger insert below can't hit
+    // its idempotency key) -- it was previously missing, so the leaderboard
+    // never saw translation points.
     const [, [updatedStats]] = await Promise.all([
       tx
         .insert(pointsTransactions)
@@ -390,6 +392,7 @@ export async function submitTranslation(userId: string, sentenceId: string, data
           totalContributions: sql`${userStats.totalContributions} + 1`,
           translationContributions: sql`${userStats.translationContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          totalPoints: sql`${userStats.totalPoints} + ${pointsAwarded}`,
           level: levelExpr,
           lastContributionAt: new Date(),
           lastContributionModule: "TRANSLATION",

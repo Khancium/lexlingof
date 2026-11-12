@@ -11,6 +11,7 @@
     "db:migrate": "drizzle-kit migrate --config drizzle.config.ts",
     "db:push": "drizzle-kit push --config drizzle.config.ts",
     "db:seed": "tsx database/seeds/seed.ts",
+    "db:recompute-stats": "tsx database/scripts/recompute-user-stats.ts",
     "db:studio": "drizzle-kit studio --config drizzle.config.ts"
   },
   "keywords": [],
