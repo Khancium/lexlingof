@@ -441,20 +441,21 @@ Key sub-features:
   practical rule this produced: never pull a large row set into Node to post-process; do
   aggregation/bucketing in one SQL statement and only return the small, already-summarized
   result. (This is exactly the fix applied to the sentence-grouping feature, §3.)
-- **Row Level Security**: enabled on the 45 tables that existed at
-  `0015_enable_rls_all_tables.sql` (plus `contribution_keywords` in `0017`) — **but not on the
-  12 tables created since** (the 6 forum tables — posts, comments, the two reaction tables,
-  poll options, poll votes — plus `password_reset_tokens`, `terms_acceptances`,
-  `pending_changes`, `suggestions`, `published_word_recordings`, `published_translations`;
-  46 of 58 tables have it) — and with
-  **no policies defined** — the backend's DB role owns the tables / bypasses RLS, so this is
-  currently inert protection against a future misconfigured low-privilege role, not an
-  active access-control layer. Whether the gap on the newer tables matters depends on whether
-  Supabase's Data API (PostgREST) is exposed for the `public` schema; if it is, those tables —
-  including `password_reset_tokens` (token hashes) — are reachable with the anon key.
-  **Fix written 2026-11-12:** `0041_enable_rls_remaining_tables.sql` enables RLS on all 12
-  (same no-policies posture as `0015`). It takes effect only once applied with `npm run
-  db:migrate` (§7.3).
+- **Row Level Security**: enabled on **every table in the live database (58 of 58, checked
+  directly 2026-11-12)**, with **no policies defined**. The backend connects as `postgres`, which
+  bypasses RLS, so this is currently inert protection against a future misconfigured
+  low-privilege role (or Supabase's Data API / anon key), not an active access-control layer.
+  ⚠️ **The migration files only cover 46 of those 58 tables.** `0015` enabled RLS on the 45 tables
+  that existed then (plus `contribution_keywords` in `0017`); the 12 created since — the 6 forum
+  tables (posts, comments, the two reaction tables, poll options, poll votes), plus
+  `password_reset_tokens`, `terms_acceptances`, `pending_changes`, `suggestions`,
+  `published_word_recordings` and `published_translations` — were never covered by a migration.
+  Production has RLS on them anyway: it was turned on outside the migration history (most likely
+  from the Supabase dashboard — the database has no auto-enable event trigger). **Correction:** an
+  earlier revision of this doc reported those 12 as a live exposure, inferred from the migration
+  files alone; the live check showed that was wrong. `0041_enable_rls_remaining_tables.sql`
+  closes the gap in the *history* so a database built from migrations (e.g. a future staging
+  database) matches production; against production it is a no-op.
 - **Pool health, `/api/v1/health` and the watchdog** (added 2026-11-12, after the Railway API's
   connection pool wedged — the process stayed up and `/health` stayed green while every
   database-backed endpoint hung until clients gave up at 30 s). Three layers:
@@ -1320,9 +1321,11 @@ Pointers to §2-§3 where an item is already described in detail. Everything her
 reading the code. These were additionally re-checked directly against the source before being
 written down: the `totalPoints` writers, the never-written weekly/monthly counters, the
 uncalled `evaluateAndAwardBadges()`, the review `invalid` path and its race, the volunteer
-gate's route coverage, RLS coverage (46 of 58 tables), the scope of `blockIfRestricted`,
-feature-flag usage, the seed/migration `0007` conflict, and the 16:9 image sizes. The rest
-rests on the audit agents' reading and should be reproduced before being fixed.
+gate's route coverage, the scope of `blockIfRestricted`, feature-flag usage, the
+seed/migration `0007` conflict, and the 16:9 image sizes. (RLS was checked against the *migration
+files* only and turned out wrong for the live database — see §2.7.) The rest rests on the audit
+agents' reading and should be reproduced — ideally against the live system, not just the code —
+before being fixed.
 
 **Data integrity & correctness**
 - **Fixed 2026-11-12 (batch 1 — see §7.3 for what still has to be deployed/run):** the
@@ -1370,7 +1373,7 @@ rests on the audit agents' reading and should be reproduced before being fixed.
 - SSRF by redirect: `fetchImageFromUrl` checks DNS once for the first host, then `fetch`es
   with the default `redirect: "follow"`; the Openverse/Wikimedia routes accept any `image.url`
   host. `bulk-url` can fan out up to 200 parallel 10 MB downloads, and volunteers can call it.
-- Missing RLS on 12 tables (fix written as migration `0041`, **not yet applied** — §2.7, §7.3); `/public/*` open when `PUBLIC_API_KEY` is unset (§3.17);
+- `/public/*` open when `PUBLIC_API_KEY` is unset (§3.17); (RLS on 12 tables is missing from the migration history but **already on in production** — not a live exposure, §2.7);
   `DELETE /devices/unregister` has no ownership filter on the token; case-sensitive emails
   (§3.20); public leaderboard exposes `userId`/`displayName`; buffer endpoints hold up to
   110 MB per request in memory with no per-user queue cap; terms say 18+ but signup allows 14.
@@ -1441,13 +1444,15 @@ What changed: `services/points.service.ts` (`awardPointsOnce`, `pointsInLastDays
 every award path; the review lock + per-decision counters in `reviews.service.ts`; the
 `rejected` branch in `adjustContributionStats`; ledger-backed weekly/monthly figures in the
 leaderboard, `/users/me`, `/users/me/stats` and the admin report; DB pool timeouts, the
-`/api/v1/health` readiness route and the watchdog (§2.7); migration `0041` (RLS); and the
+`/api/v1/health` readiness route and the watchdog (§2.7); migration `0041` (brings the
+migration history in line with production's RLS — a no-op there); and the
 `database/scripts/recompute-user-stats.ts` repair script.
 
 **Shipping order** (the order matters):
 1. **Commit and deploy the backend** (push to `main` → Railway).
-2. **`npm run db:migrate --workspace=apps/backend`** — applies `0041`: enables RLS on 12
-   tables. Idempotent and metadata-only.
+2. **`npm run db:migrate --workspace=apps/backend`** — applies only `0041` (verified against the
+   migrations table: 41 applied, `0041` the sole pending entry). Enabling RLS on tables that
+   already have it is a no-op; this just records the migration.
 3. **`npm run db:recompute-stats --workspace=apps/backend`** (a dry run that prints what would
    change), then again with `-- --apply`. Only **after** step 1 — run before it, the still-old
    code keeps under-counting and the totals drift again at once. A dry run on 2026-11-12 found
