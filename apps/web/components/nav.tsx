@@ -43,10 +43,15 @@ export default function Nav() {
   let links = canReview(user?.level) ? [...LINKS, { href: "/review", label: "Review" }] : LINKS;
   if (user?.role === "admin" || user?.role === "super_admin") {
     links = [...links, { href: "/admin/dashboard", label: "Admin" }];
+  } else if (user?.role === "volunteer") {
+    // Volunteers are admitted to /admin but only to Concepts / Scenes /
+    // Sentences (see admin-nav.tsx), so link straight to the first of those
+    // rather than /admin/dashboard, which they can't use.
+    links = [...links, { href: "/admin/concepts", label: "Admin" }];
   }
 
   function isActive(href: string) {
-    return href === "/admin/dashboard"
+    return href.startsWith("/admin/")
       ? pathname?.startsWith("/admin")
       : pathname === href || pathname?.startsWith(`${href}/`);
   }
@@ -75,30 +80,31 @@ export default function Nav() {
           ))}
         </div>
 
-        <div className="hidden items-center gap-3 md:flex">
+        {/* One right-hand group for both layouts, so the bell is mounted (and
+           polling) exactly once. Grouped together (not separate flex children
+           of the justify-between row) so the bell + hamburger pair sits flush
+           against the right edge on mobile -- as siblings of that row, the
+           bell would otherwise land near the horizontal center (evenly spaced
+           between the logo and the hamburger), which is what threw off the
+           notification panel's right-0 anchor and pushed it off the left edge
+           of the screen. The name + Sign Out are desktop-only; the hamburger
+           is mobile-only. */}
+        <div className="flex items-center gap-1 md:gap-3">
           {user ? <NotificationBell /> : null}
-          <span className="text-sm text-ink-muted">{user?.displayName}</span>
-          <button
-            onClick={() => setConfirmingLogout(true)}
-            className="rounded-full bg-surface-card px-3 py-2 text-sm font-medium text-ink hover:bg-border"
-          >
-            Sign Out
-          </button>
-        </div>
-
-        {/* Grouped together (not two separate flex children) so this pair
-           sits flush against the right edge on mobile -- as siblings of the
-           justify-between row above, the bell would otherwise land near the
-           horizontal center (evenly spaced between the logo and the
-           hamburger), which is what threw off the notification panel's
-           right-0 anchor and pushed it off the left edge of the screen. */}
-        <div className="flex items-center gap-1 md:hidden">
-          {user ? <NotificationBell /> : null}
+          <div className="hidden items-center gap-3 md:flex">
+            <span className="text-sm text-ink-muted">{user?.displayName}</span>
+            <button
+              onClick={() => setConfirmingLogout(true)}
+              className="rounded-full bg-surface-card px-3 py-2 text-sm font-medium text-ink hover:bg-border"
+            >
+              Sign Out
+            </button>
+          </div>
           <button
             onClick={() => setMobileOpen((prev) => !prev)}
             aria-label="Toggle menu"
             aria-expanded={mobileOpen}
-            className="rounded-lg p-2 text-xl leading-none text-ink hover:bg-surface-card"
+            className="rounded-lg p-2 text-xl leading-none text-ink hover:bg-surface-card md:hidden"
           >
             {mobileOpen ? "✕" : "☰"}
           </button>
