@@ -87,11 +87,12 @@ internal paths already self-namespace.
 - `requireReviewerEligibility()`: contributor role must be **SILVER or above** to hit the
   review-queue endpoints; admins/super_admins are exempt (they're moderators, not peers).
 - `blockIfRestricted`: lighter than a full suspension — blocks new submissions only, login
-  and browsing still work. ⚠️ **It is applied only to the four `POST /contributions/buffer/*`
-  routes.** The legacy direct-submit routes (`POST /contributions/word`,
-  `/contributions/audio`, `/sentences/:id/translation`, `/scenes/:id/contributions` — what
-  mobile uses) and the forum do not run it, so a restricted user can still submit through
-  those and still post/comment.
+  and browsing still work. It is applied to the four `POST /contributions/buffer/*` routes
+  **and, since 2026-11-12, to the four legacy direct-submit routes** (`POST
+  /contributions/word`, `/contributions/audio`, `/sentences/:id/translation`,
+  `/scenes/:id/contributions` — what mobile uses; they also now verify the audio file belongs
+  to the submitter, §7.2). ⚠️ It is still **not** applied to the forum, so a restricted user
+  can still post and comment.
 
 **Session & token model** (`modules/auth`):
 
@@ -952,12 +953,15 @@ and `AdminNav` shows them only Concepts, Scenes and Sentences.
   moves `pending` → `approved` | `rejected` once; `applyPendingChange` replays the payload
   through the same `apply*` functions the live routes use, re-running domain checks at
   approval time. If apply throws, the row stays `pending`. Bulk approve/reject cap: 200.
-- ⚠️ *Code-read:* the gate wraps **only** those routes. Volunteers hold the full `*.manage`
-  codes, so they can still call the *ungated* routes directly: PUT edits, bulk-edit,
-  bulk-delete, `bulk-delete-permanent` and single `/permanent` (any concept/scene/sentence
-  with no recordings, regardless of `createdBy`), bulk and bulk-text creates (which also
-  leave `createdBy` null), image delete/crop/bulk-url/autofill, and Undo. The comment in
-  `seed.ts` overstates the coverage. Approval itself is also not atomic: `markApproved`
+- **Partly fixed 2026-11-12.** The gate wraps **only** those routes, and volunteers hold the
+  full `*.manage` codes, so they could call the *ungated* routes directly. The destructive ones
+  are now **admin-only** (`forbidVolunteers` in `middleware/auth.ts`): `bulk-delete`,
+  `bulk-delete-permanent` and single `/permanent` for concepts, scenes and sentences (a volunteer
+  could previously erase any item with no recordings, and its images, regardless of
+  `createdBy`). ⚠️ **Still open — needs a product decision on what volunteers may do
+  unreviewed:** PUT edits, bulk-edit, bulk and bulk-text creates (which also leave `createdBy`
+  null), image delete/crop/bulk-url/autofill, and Undo. The comment in `seed.ts` overstates
+  the coverage. Approval itself is also not atomic: `markApproved`
   has no `WHERE status = 'pending'`, so a double-click or two admins can double-apply (image
   adds would duplicate), and `listPendingChanges` does `select *`, returning the base64 payloads.
 - Web gaps: volunteers have no nav link into `/admin` (they must type `/admin/concepts`),
@@ -986,18 +990,25 @@ only those.
   from the same category); language-learning by sentence. Each recording carries native text,
   romanization, IPA, language, dialect and (words only) grammar tags. Audio is a **10-minute
   presigned R2 URL**.
-- **Access control**: an optional `PUBLIC_API_KEY` env var checked against the
-  `x-public-api-key` header with a plain `!==`; **if unset the API is fully open**. The
-  separate Pashtowal WordPress theme is the intended consumer.
+- **Access control**: a `PUBLIC_API_KEY` env var checked against the `x-public-api-key`
+  header in constant time. **In production an unset key now fails closed** (503
+  `PUBLIC_API_NOT_CONFIGURED`, fixed 2026-11-12); in development an unset key leaves it open
+  for local use. (Production already has the key set, so nothing changed for the WordPress
+  site.) The separate Pashtowal WordPress theme is the intended consumer.
 - **Privacy**: a contributor's city, tribe, village and gender are included — and the location
   filters honour them — only when `contributor_profiles.show_location` is true
   (`privacyFields()` in `public-content.service.ts`).
-- ⚠️ *Code-read:* neither the publish step nor the public feed checks the contribution's
-  status, `isCurrent` or `deletedAt`. A recording that is later rejected, deleted or
-  superseded stays public until unpublished, and a **retake of a published recording** swaps
-  the audio in place (`word_recordings.audio_file_id`) so the new, unreviewed audio goes live
-  while the contribution is back to `pending`. Publishing actions are also not audit-logged
-  (so not undoable), and `ilike` search doesn't escape `%`/`_`.
+- **Stale rows — fixed 2026-11-12.** Every public query (lists, the filter dropdowns, related
+  words) now counts a published row only while its source recording is live: not soft-deleted,
+  and still the contributor's `is_current` take (`LIVE_WORD_RECORDING` / `LIVE_TRANSLATION` in
+  `public-content.service.ts`). Before, a recording that was later deleted or superseded stayed
+  public until an admin unpublished it. (Production had 10 published recordings, none stale,
+  so the fix changed nothing visible today.) ⚠️ Still open: neither publishing nor the feed
+  checks the contribution's *review status* (deliberate — commit `7b519ad`); a **retake of a
+  published recording** swaps the audio in place (`word_recordings.audio_file_id`), so the new,
+  unreviewed audio goes live while the contribution is back to `pending` (a product decision:
+  auto-unpublish on retake?). Publishing actions are also not audit-logged (so not undoable),
+  and `ilike` search doesn't escape `%`/`_`.
 
 ### 3.18 Discussion forum
 
@@ -1044,9 +1055,12 @@ email exists; SMTP failure swallowed) → emailed link `${FRONTEND_URL}/reset-pa
 → `POST /auth/reset-password` (token consumed atomically; all sessions revoked). Mail goes
 through `mailer.service.ts` (nodemailer, SMTP env vars, §6). In production an unset
 `SMTP_HOST` throws, and the caller swallows it, so a misconfigured mailer fails silently.
-Account emails are **case-sensitive**: `uq_users_email_active` is on raw `email`, so
-`Foo@x.com` and `foo@x.com` are different accounts and the "banned email can't re-register"
-guard only matches an exact string.
+Account emails were **case-sensitive** (`uq_users_email_active` is on raw `email`, so
+`Foo@x.com` and `foo@x.com` were different accounts, and a banned address could re-register by
+changing its capitalisation). **Fixed 2026-11-12:** register, login, forgot-password and the
+admin credentials route now trim and lower-case the address (`z.string().trim().toLowerCase()`).
+Every existing address was already lower-case with no collisions (checked live), so no data
+change or new index was needed.
 
 ### 3.21 Word recordings: synonyms, retakes, grammar metadata
 
@@ -1226,7 +1240,8 @@ As of 2026-11-11 there are **58 tables and 27 enums**. Other things worth knowin
   comments (the `pending_submissions` docblock, the "3-second limit") are stale.
 - Migrations `0018`–`0020` are hand-written with commented SQL, and `0018` has no
   `meta/*_snapshot.json`. `0007`, `0012`, `0019` and `0022` include data backfills.
-- Emails are case-sensitive in the unique index (§3.20); `contributor_demographics.age` is
+- The unique email index compares the raw string; the app lower-cases emails on input (§3.20).
+  `contributor_demographics.age` is
   server-computed from `date_of_birth`.
 
 ---
@@ -1337,12 +1352,15 @@ before being fixed.
   items are missing from the dashboard's "verified today" and a stale `rejectionReason` is kept.
   `DELETE /admin/contributions/:id` doesn't check `deletedAt`, so a second delete decrements
   `user_stats` again; concept/scene/sentence bulk-delete don't filter `deletedAt` either.
-- **Undo is fragile.** `beforeState` comes back from jsonb with timestamps as ISO *strings*, and
-  `...before` is passed straight to Drizzle's `.set()`, whose timestamp mapper calls
-  `.toISOString()` — so undoing a change where a timestamp (e.g. `verifiedAt`) was non-null
-  throws a 500. Undoing a ban restores `deletedAt = null` while `isActive` stays false and the
-  PII is already scrubbed (a zombie account); undoing restrict/cool-off leaves the reason/until
-  fields set; redoing a contribution delete doesn't re-decrement stats.
+- **Undo fragility — fixed 2026-11-12** (`utils/audit-state.ts` + the undo handler).
+  `beforeState` comes back from jsonb with timestamps as ISO *strings*, and `...before` was
+  passed straight to Drizzle's `.set()`, whose timestamp mapper calls `.toISOString()` — so
+  undoing any change with a non-null timestamp (e.g. `verifiedAt`) threw a 500. Saved state now
+  goes through `reviveAuditState()` (ISO string → `Date`; keys that aren't columns of the table
+  are dropped). Lifting a restriction/suspension by undo now also clears its reason/until
+  fields; re-applying a contribution delete (`undo:admin_contribution_delete`) now re-decrements
+  stats; and **a ban can no longer be undone** (`NOT_REVERTIBLE` — banning scrubs the account's
+  data for good, so the old undo resurrected an empty, unusable "zombie" account).
 - Points farming: scenes have no per-user uniqueness; every `POST /:id/transcription` creates a
   new version and a new idempotency key (re-awarding points); segment arrays are unbounded.
 - Word/translation uniqueness ignores language (§3.21); buffered TRANSCRIPTION can silently lose
@@ -1354,29 +1372,43 @@ before being fixed.
   CASCADE`s never fire because users are only soft-deleted.
 
 **Security**
-- Volunteers can bypass the approval queue through ungated routes (§3.16).
-- No target-role guard on restrict / suspend / cool-off / ban (single and bulk): an admin with
-  `users.manage` can lock out a `super_admin`. `POST /superadmin/admins` doesn't check the
-  target's role, so it can demote a `super_admin` to `admin`.
-- **Undo → privilege re-escalation.** Undo picks its permission by matching
-  `log.action === "superadmin_grant_admin"` exactly. After a super-admin undoes a grant, the
-  newest log is `undo:superadmin_grant_admin`, so any `users.manage` admin can POST undo again
-  and restore `role: "admin"`.
-- Legacy direct-submit routes skip `blockIfRestricted` and don't check `audioFileId`
-  ownership; reviewers can see other users' `audioFileId`s in queue detail, so a reviewer
-  could attach a victim's audio as their own word recording and then retake it — the override
-  path quarantines the old row and deletes the victim's R2 object.
-- The presigned flow trusts the client: `/audio/:id/confirm` compares two client-supplied
-  checksums and never checks R2; the presigned `PutObject` has no content-length limit;
-  `durationMs` is client-reported for SCENE and TRANSCRIPTION in every flow (the scene
-  "long description" bonus can be claimed by lying).
-- SSRF by redirect: `fetchImageFromUrl` checks DNS once for the first host, then `fetch`es
-  with the default `redirect: "follow"`; the Openverse/Wikimedia routes accept any `image.url`
-  host. `bulk-url` can fan out up to 200 parallel 10 MB downloads, and volunteers can call it.
-- `/public/*` open when `PUBLIC_API_KEY` is unset (§3.17); (RLS on 12 tables is missing from the migration history but **already on in production** — not a live exposure, §2.7);
-  `DELETE /devices/unregister` has no ownership filter on the token; case-sensitive emails
-  (§3.20); public leaderboard exposes `userId`/`displayName`; buffer endpoints hold up to
-  110 MB per request in memory with no per-user queue cap; terms say 18+ but signup allows 14.
+- **Fixed 2026-11-12 (batch 2, §7.4):** the volunteer permanent/bulk-delete bypass (partly —
+  §3.16); the missing moderation target rules; the undo → admin re-grant escalation; the
+  legacy-route restriction and audio-ownership gaps; SSRF by redirect; the public API's
+  fail-open key and stale rows (§3.17); raw 5xx errors reaching clients; case-sensitive emails.
+  Details:
+  - **Moderation target rules** (`services/moderation-guards.service.ts`). Nobody can restrict /
+    cool off / suspend / ban / lift any of those on their **own** account; only a super_admin can
+    moderate an admin or a super_admin (single and bulk — a bulk selection containing a protected
+    account is refused as a whole, not partly applied). `POST /superadmin/admins` refuses a
+    super_admin or deleted target instead of silently demoting them. Undoing a user action goes
+    through the same check. (Before, an admin with `users.manage` could lock out a super_admin.)
+  - **Undo → privilege re-escalation.** Undo matched `log.action === "superadmin_grant_admin"`
+    exactly; after a super_admin undid a grant the newest row was `undo:superadmin_grant_admin`,
+    so any `users.manage` admin could undo *that* and restore `role: "admin"`. Permissions are
+    now judged on the **original** action (all `undo:` prefixes stripped), and any log row that
+    changes a user's `role` needs `system.manage` however it was logged.
+  - **Legacy direct-submit routes** now run `blockIfRestricted` and `assertOwnsAudioFile()`
+    (`services/audio-file.service.ts`: the audio row's `uploaded_by` must be the submitter —
+    both upload flows already recorded it). This closes the path where a reviewer, who can see
+    every queued contribution's `audioFileId`, attached a victim's audio as their own recording
+    and retook it, which quarantines the old row and deletes the victim's R2 object.
+  - **SSRF by redirect:** `fetchImageFromUrl` follows redirects by hand (`redirect: "manual"`, up
+    to 5 hops) and re-runs the private-address check on **every** hop, so a public URL can no
+    longer 302 to `169.254.169.254` or an internal service.
+  - **Error handler** (`utils/error-handler.ts`): in production an unexpected 5xx returns a
+    generic `{code: "INTERNAL_ERROR", message: "Something went wrong"}`; SQL text, hostnames and
+    driver messages stay in the server log only.
+- **Still open:** the presigned flow trusts the client (`/audio/:id/confirm` compares two
+  client-supplied checksums and never checks R2; the presigned `PutObject` has no content-length
+  limit; `durationMs` is client-reported for SCENE and TRANSCRIPTION in every flow, so the scene
+  "long description" bonus can be claimed by lying); the Openverse/Wikimedia routes accept any
+  `image.url` host, and `bulk-url` can fan out up to 200 parallel 10 MB downloads (volunteers can
+  call it); `DELETE /devices/unregister` has no ownership filter on the token; the public
+  leaderboard exposes `userId`/`displayName`; buffer endpoints hold up to 110 MB per request in
+  memory with no per-user queue cap; terms say 18+ but signup allows 14. (RLS on 12 tables is
+  missing from the migration history but **already on in production** — not a live exposure,
+  §2.7.)
 
 **Seed & ops**
 - `npm run db:seed` fails on a freshly migrated database: migration `0007` already inserts
@@ -1392,8 +1424,9 @@ before being fixed.
   cache isn't invalidated on category *create* (§2.7); `/admin/training-data/images` and
   `/categories` / `GET /concepts/next` pull whole tables into Node (against §2.7's own rule);
   `/admin/analytics` counts soft-deleted contributions and banned users.
-- Input handling: `z.coerce.boolean()` turns the string `"false"` into `true` for `mine` /
-  `includeHidden` (concepts, scenes, admin sentences); `readBulkRows` has no `bom: true` so an
+- Input handling: the `z.coerce.boolean()` bug (the string `"false"` became `true` for `mine` /
+  `includeHidden`) is **fixed 2026-11-12** (`queryBoolean()` in `utils/query-params.ts`:
+  `"false"` → false, garbage → 400). Still open: `readBulkRows` has no `bom: true` so an
   Excel-saved UTF-8 CSV mismatches its first header; a `null` element in a JSON array 500s;
   `insertBulkInChunks` returns raw Drizzle query errors; permanent delete reports an FK
   violation from `suggestions` as `HAS_CONTRIBUTIONS` with a count of 0; `GET
@@ -1487,6 +1520,41 @@ lock and the helper were tested in isolation, not a full review by a second user
 watchdog's real `process.exit` path (only its decision logic was tested); and a weekly
 leaderboard with non-zero data (there was no activity in the last 7 days; the monthly board had
 real non-zero values and matched).
+
+### 7.4 Batch 2 — security hardening (2026-11-12)
+
+Shipped as one PR; the individual fixes are described where they live (§2.2, §3.16, §3.17,
+§3.20, §7.2 "Security" and "Data integrity"). New files: `services/moderation-guards.service.ts`,
+`utils/audit-state.ts`, `utils/error-handler.ts` (the handler moved out of `index.ts` so it can be
+tested), `utils/query-params.ts`, plus `forbidVolunteers` in `middleware/auth.ts` and
+`assertOwnsAudioFile()` in `services/audio-file.service.ts`. No migration, no data change.
+
+**Verified** with a throwaway harness against the real database and the real route code (roles
+taken from the live accounts — one super_admin, one admin, one volunteer, contributors), 50
+checks: the who-may-moderate-whom matrix; admin → restrict / suspend / ban / bulk-restrict /
+bulk-ban a super_admin and → restrict themselves all 403; volunteer → permanent and bulk delete
+403 while an admin's identical call isn't blocked; the undo escalation (`undo:…grant_admin`,
+nested `undo:undo:…`, any role-changing row → 403; a ban undo → `NOT_REVERTIBLE`; a normal undo
+still reaches the target check; a super_admin isn't blocked); timestamp revival builds a valid
+`UPDATE` where the old code threw; `"false"` → false; production 500s carry no SQL/host/stack;
+the public API key fails closed in production and the dictionary returns exactly the live
+published recordings (10 of 10); another user's audio file via the legacy route → 403; and, with
+`fetch` stubbed (no network), a public URL redirecting to `169.254.169.254` or loopback is
+rejected without the internal address ever being requested, a 6-hop chain stops, and a normal
+public → public redirect still works. Probes only ever targeted nonexistent ids or checked that
+nothing changed; the live super_admin / admin / volunteer accounts were verified unchanged
+afterwards and the few audit rows the harness inserted were deleted.
+
+**Deliberately NOT changed — each needs a decision that isn't mine to make:**
+- What volunteers may do *unreviewed* beyond destructive deletes (edits, bulk creates, image
+  delete/crop/bulk-url/autofill, Undo) — tightening these changes how volunteers work (§3.16).
+- Retaking a published recording puts the new, unreviewed audio live — auto-unpublish, or
+  re-review first? (§3.17)
+- Points-farming rules (scenes per-user uniqueness; whether re-transcribing re-awards).
+- The Terms of Service text (age, placeholders, licence) — needs legal review; re-acceptance flow.
+- Account-deletion scope (forum posts, suggestions, notifications), and what to do about
+  feature flags (wire them up, or delete them).
+- Whether to revive or park the mobile app (§8); a staging database; an uptime monitor.
 
 ---
 
