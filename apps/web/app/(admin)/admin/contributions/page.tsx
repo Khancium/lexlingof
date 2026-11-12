@@ -292,7 +292,7 @@ export default function AdminContributionsPage() {
       link.click();
       link.remove();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to get download link");
+      alert(getErrorMessage(err, "Failed to get download link"));
     } finally {
       setActioningId(null);
     }
@@ -320,7 +320,7 @@ export default function AdminContributionsPage() {
       setItems((prev) => prev.map((item) => (selected.has(item.contributionId) ? { ...item, status: newStatus } : item)));
       setSelected(new Set());
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Bulk action failed");
+      alert(getErrorMessage(err, "Bulk action failed"));
     } finally {
       setIsBulkActing(false);
     }
@@ -337,7 +337,7 @@ export default function AdminContributionsPage() {
       setTotal((prev) => prev - ids.length);
       setSelected(new Set());
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Bulk delete failed");
+      alert(getErrorMessage(err, "Bulk delete failed"));
     } finally {
       setIsBulkActing(false);
     }
@@ -368,7 +368,7 @@ export default function AdminContributionsPage() {
       link.remove();
       URL.revokeObjectURL(url);
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to download zip");
+      alert(getErrorMessage(err, "Failed to download zip"));
     } finally {
       setIsBulkActing(false);
     }
@@ -391,7 +391,7 @@ export default function AdminContributionsPage() {
       setPlayingId(item.contributionId);
       audioEl.play().catch((err) => {
         setPlayingId(null);
-        alert(err instanceof Error ? err.message : "Failed to play audio");
+        alert(getErrorMessage(err, "Failed to play audio"));
       });
       return;
     }
@@ -405,7 +405,7 @@ export default function AdminContributionsPage() {
       await audioEl.play();
     } catch (err) {
       setPlayingId(null);
-      alert(err instanceof Error ? err.message : "Failed to play audio");
+      alert(getErrorMessage(err, "Failed to play audio"));
     } finally {
       setLoadingAudioId(null);
     }
@@ -457,7 +457,7 @@ export default function AdminContributionsPage() {
       setKeywords((prev) => [...prev, created]);
       setNewKeyword("");
     } catch (err) {
-      setDetailError(err instanceof Error ? err.message : "Failed to add keyword");
+      setDetailError(getErrorMessage(err, "Failed to add keyword"));
     } finally {
       setIsAddingKeyword(false);
     }
@@ -470,7 +470,7 @@ export default function AdminContributionsPage() {
       await api.admin.deleteContributionKeyword(id, keywordId);
     } catch (err) {
       setKeywords(previous);
-      setDetailError(err instanceof Error ? err.message : "Failed to remove keyword");
+      setDetailError(getErrorMessage(err, "Failed to remove keyword"));
     }
   }
 

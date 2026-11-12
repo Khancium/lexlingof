@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BulkUploadResult } from "@/lib/api";
+import { getErrorMessage, type BulkUploadResult } from "@/lib/api";
 
 /**
  * Paste-a-list bulk creator: one name/title per line, submitted as a plain
@@ -44,7 +44,7 @@ export function AdminBulkTextCreate({
         onDone?.();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Bulk add failed");
+      setError(getErrorMessage(err, "Bulk add failed"));
     } finally {
       setIsSubmitting(false);
     }

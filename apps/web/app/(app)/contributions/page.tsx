@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { api, type ContributionListItem, type ModuleType, type PendingSubmissionItem } from "@/lib/api";
+import { api, getErrorMessage, type ContributionListItem, type ModuleType, type PendingSubmissionItem } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
 /** Where "Submit Again" should send the user to re-record this exact item, or null if there's no specific object to jump back to. */
@@ -219,7 +219,7 @@ function ContributionsPageInner() {
       setPlayingId(item.id);
       await audioEl.play();
     } catch (err) {
-      setPlayError({ id: item.id, message: err instanceof Error ? err.message : "Failed to load audio" });
+      setPlayError({ id: item.id, message: getErrorMessage(err, "Failed to load audio") });
     } finally {
       setLoadingId(null);
     }

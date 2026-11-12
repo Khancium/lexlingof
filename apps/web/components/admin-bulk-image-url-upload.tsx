@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BulkUploadResult } from "@/lib/api";
+import { getErrorMessage, type BulkUploadResult } from "@/lib/api";
 
 /**
  * Bulk-assigns images from third-party URLs. Since a URL fits on one line
@@ -70,7 +70,7 @@ export function AdminBulkImageUrlUpload<T extends { id: string }>({
         onDone?.();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Bulk add failed");
+      setError(getErrorMessage(err, "Bulk add failed"));
     } finally {
       setIsSubmitting(false);
     }

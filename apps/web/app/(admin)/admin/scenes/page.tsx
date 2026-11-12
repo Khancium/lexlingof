@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import {
   api,
+  getErrorMessage,
   type Category,
   type ConceptListItem,
   type OpenverseImageResult,
@@ -191,7 +192,7 @@ export default function AdminScenesPage() {
       setTotal(sceneRes.total);
       setCategories(cats);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load scenes");
+      setLoadError(getErrorMessage(err, "Failed to load scenes"));
     } finally {
       setLoading(false);
     }
@@ -294,7 +295,7 @@ export default function AdminScenesPage() {
       setNewConceptFilter("");
       await load({ silent: true });
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create scene");
+      setCreateError(getErrorMessage(err, "Failed to create scene"));
     } finally {
       setIsCreating(false);
     }
@@ -333,7 +334,7 @@ export default function AdminScenesPage() {
       const result = await api.admin.addSceneMediaOpenverse(sceneId, image);
       setUploadMessage({ id: sceneId, text: "pending" in result ? result.message : "Image added from Openverse" });
     } catch (err) {
-      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      setUploadMessage({ id: sceneId, text: getErrorMessage(err, "Failed to add image"), error: true });
       throw err;
     } finally {
       setUploadingId(null);
@@ -347,7 +348,7 @@ export default function AdminScenesPage() {
       const result = await api.admin.addSceneMediaWikimedia(sceneId, image);
       setUploadMessage({ id: sceneId, text: "pending" in result ? result.message : "Image added from Wikimedia Commons" });
     } catch (err) {
-      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      setUploadMessage({ id: sceneId, text: getErrorMessage(err, "Failed to add image"), error: true });
       throw err;
     } finally {
       setUploadingId(null);
@@ -410,7 +411,7 @@ export default function AdminScenesPage() {
         setKeywords(await api.admin.getSceneKeywords(sceneId));
       }
     } catch (err) {
-      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      setUploadMessage({ id: sceneId, text: getErrorMessage(err, "Failed to add image"), error: true });
     } finally {
       setUploadingId(null);
     }
@@ -463,7 +464,7 @@ export default function AdminScenesPage() {
         setKeywords(await api.admin.getSceneKeywords(sceneId));
       }
     } catch (err) {
-      setUploadMessage({ id: sceneId, text: err instanceof Error ? err.message : "Upload failed", error: true });
+      setUploadMessage({ id: sceneId, text: getErrorMessage(err, "Upload failed"), error: true });
     } finally {
       setUploadingId(null);
     }
@@ -602,7 +603,7 @@ export default function AdminScenesPage() {
     try {
       setKeywords(await api.admin.getSceneKeywords(sceneId));
     } catch (err) {
-      setKeywordError(err instanceof Error ? err.message : "Failed to load keywords");
+      setKeywordError(getErrorMessage(err, "Failed to load keywords"));
     } finally {
       setLoadingKeywords(false);
     }
@@ -617,7 +618,7 @@ export default function AdminScenesPage() {
       setKeywords((prev) => [...prev, created]);
       setNewKeyword("");
     } catch (err) {
-      setKeywordError(err instanceof Error ? err.message : "Failed to add keyword");
+      setKeywordError(getErrorMessage(err, "Failed to add keyword"));
     } finally {
       setIsAddingKeyword(false);
     }
@@ -631,7 +632,7 @@ export default function AdminScenesPage() {
       await api.admin.deleteSceneKeyword(keywordsSceneId, keywordId);
     } catch (err) {
       setKeywords(previous);
-      setKeywordError(err instanceof Error ? err.message : "Failed to remove keyword");
+      setKeywordError(getErrorMessage(err, "Failed to remove keyword"));
     }
   }
 

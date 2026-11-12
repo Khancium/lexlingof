@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import axios from "axios";
-import { api, clearSessionHint, ensureAccessToken, hasStoredRefreshToken, type UserProfile } from "./api";
+import { api, clearSessionHint, ensureAccessToken, getErrorMessage, hasStoredRefreshToken, type UserProfile } from "./api";
 
 type AuthState = {
   user: UserProfile | null;
@@ -56,7 +56,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       set({
         user: null,
         isLoading: false,
-        error: isUnauthorized ? null : err instanceof Error ? err.message : "Failed to load user",
+        error: isUnauthorized ? null : getErrorMessage(err, "Failed to load user"),
       });
     }
   },

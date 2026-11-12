@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { api, type AuditLog } from "@/lib/api";
+import { api, getErrorMessage, type AuditLog } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
 
 const DEFAULT_PAGE_SIZE = 50;
@@ -33,7 +33,7 @@ export default function AdminLogsPage() {
         setLogs(res.items);
         setTotal(res.total);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load logs"))
+      .catch((err) => setError(getErrorMessage(err, "Failed to load logs")))
       .finally(() => setLoading(false));
   }, [offset, limit, search, action, resourceType]);
 

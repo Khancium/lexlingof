@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/store";
-import { api, type GamificationConfigRow } from "@/lib/api";
+import { api, getErrorMessage, type GamificationConfigRow } from "@/lib/api";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 
 export default function GamificationConfigPage() {
@@ -54,7 +54,7 @@ export default function GamificationConfigPage() {
       setRows((prev) => prev.map((r) => (r.configKey === key ? updated : r)));
       setEditingKey(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to update config");
+      setError(getErrorMessage(err, "Failed to update config"));
     } finally {
       setIsSaving(false);
     }

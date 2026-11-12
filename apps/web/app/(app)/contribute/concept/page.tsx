@@ -149,7 +149,7 @@ function ConceptPageInner() {
       setRecordedSynonyms(recorded);
     } catch (err) {
       setConcept(null);
-      setConceptError(err instanceof Error ? err.message : "Failed to load object");
+      setConceptError(getErrorMessage(err, "Failed to load object"));
     } finally {
       setLoadingConcept(false);
     }

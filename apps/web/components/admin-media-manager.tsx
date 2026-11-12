@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import type { ConceptMedia, SceneMedia } from "@/lib/api";
+import { getErrorMessage, type ConceptMedia, type SceneMedia } from "@/lib/api";
 import { ImageCropper } from "@/components/image-cropper";
 
 type MediaItem = ConceptMedia | SceneMedia;
@@ -47,7 +47,7 @@ export function AdminMediaManager({
     setError(null);
     getMedia(itemId)
       .then(setItems)
-      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load images"))
+      .catch((err) => setError(getErrorMessage(err, "Failed to load images")))
       .finally(() => setLoading(false));
     // getMedia/deleteMedia/cropMedia are stable function references passed by the caller.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -64,7 +64,7 @@ export function AdminMediaManager({
       onChanged?.();
     } catch (err) {
       setItems(previous);
-      setError(err instanceof Error ? err.message : "Failed to remove image");
+      setError(getErrorMessage(err, "Failed to remove image"));
     } finally {
       setDeletingId(null);
     }
