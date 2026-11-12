@@ -8,6 +8,7 @@ import {
   contributions,
   gamificationConfig,
   pointsTransactions,
+  publishedTranslations,
   sentences,
   translations,
   userStats,
@@ -469,7 +470,15 @@ async function overrideTranslation(
     ? await db.select({ storageKey: audioFiles.storageKey }).from(audioFiles).where(eq(audioFiles.id, oldAudioFileId)).limit(1)
     : [null];
 
-  await db.transaction(async (tx) => {
+  const withdrawn = await db.transaction(async (tx) => {
+    // See overrideWordRecording: the public API serves a published translation by its row, not by
+    // its review status, so withdraw it in the same transaction as the audio swap and let an admin
+    // re-publish after re-reviewing.
+    const unpublished = await tx
+      .delete(publishedTranslations)
+      .where(eq(publishedTranslations.translationId, existing.id))
+      .returning({ sentenceId: publishedTranslations.sentenceId, publishedBy: publishedTranslations.publishedBy });
+
     await tx
       .update(translations)
       .set({
@@ -512,7 +521,21 @@ async function overrideTranslation(
         .set({ processingStatus: "quarantined", processingError: "Superseded by a newer recording for this translation" })
         .where(eq(audioFiles.id, oldAudioFileId));
     }
+
+    return unpublished;
   });
+
+  if (withdrawn.length > 0) {
+    await writeAuditLog({
+      actorId: userId,
+      actorRole: null,
+      action: "published_translation_withdrawn_on_retake",
+      resourceType: "translation",
+      resourceId: existing.id,
+      beforeState: { published: true, sentenceId: withdrawn[0]!.sentenceId, publishedBy: withdrawn[0]!.publishedBy },
+      afterState: { published: false, reason: "contributor re-recorded; needs re-review and re-publishing" },
+    });
+  }
 
   if (oldAudio) {
     // Best-effort, same reasoning as the identical override path in
