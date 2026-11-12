@@ -7,6 +7,7 @@ import { concepts, pendingSubmissions, scenes, sentences } from "../../../db/sch
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { enqueueSubmission } from "../../../services/submission-buffer.service.js";
+import { MAX_SEGMENTS_PER_UPLOAD, maxSegmentEndMs, maxSegmentsFor } from "../audio/audio-upload.service.js";
 
 const dateStringSchema = z
   .string()
@@ -73,6 +74,7 @@ const audioUploadMetaSchema = z.object({
         })
         .refine((s) => s.endMs > s.startMs, { message: "endMs must be greater than startMs" }),
     )
+    .max(MAX_SEGMENTS_PER_UPLOAD)
     .optional(),
 });
 
@@ -152,6 +154,23 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
   fastify.post("/audio-upload", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { meta, audio } = await readMultipartSubmission(request);
     const { durationMs, ...payload } = audioUploadMetaSchema.parse(meta);
+
+    // Refuse an unreasonable segment list now, with a message the contributor can act on -- the
+    // same limits addSegment enforces later would otherwise fail the submission in the background,
+    // after the audio was already accepted. See maxSegmentsFor in audio-upload.service.ts.
+    const segmentCount = payload.segments?.length ?? 0;
+    const segmentLimit = maxSegmentsFor(durationMs);
+    if (segmentCount > segmentLimit) {
+      throw new HttpError(
+        400,
+        "TOO_MANY_SEGMENTS",
+        `A recording of this length can have at most ${segmentLimit} time-coded segments (you added ${segmentCount}).`,
+      );
+    }
+    const latestEnd = maxSegmentEndMs(durationMs);
+    if (latestEnd !== null && payload.segments?.some((seg) => seg.endMs > latestEnd)) {
+      throw new HttpError(400, "SEGMENT_OUT_OF_RANGE", "A segment ends after the end of the recording -- check its end time.");
+    }
 
     const { id } = await enqueueSubmission({
       userId: request.user!.id,
