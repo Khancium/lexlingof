@@ -197,6 +197,8 @@ export default function AdminConceptsPage() {
     try {
       const result = await api.admin.uploadConceptMedia(conceptId, file);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image uploaded" });
+      // Refresh the row so its "Image" badge reflects the new image.
+      if (!("pending" in result)) await load({ silent: true });
     } catch (err) {
       setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Upload failed"), error: true });
     } finally {
@@ -210,6 +212,7 @@ export default function AdminConceptsPage() {
     try {
       const result = await api.admin.addConceptMediaOpenverse(conceptId, image);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added from Openverse" });
+      if (!("pending" in result)) await load({ silent: true });
     } catch (err) {
       setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Failed to add image"), error: true });
       throw err;
@@ -224,6 +227,7 @@ export default function AdminConceptsPage() {
     try {
       const result = await api.admin.addConceptMediaWikimedia(conceptId, image);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added from Wikimedia Commons" });
+      if (!("pending" in result)) await load({ silent: true });
     } catch (err) {
       setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Failed to add image"), error: true });
       throw err;
@@ -247,6 +251,7 @@ export default function AdminConceptsPage() {
       const result = await api.admin.addConceptMediaUrl(conceptId, imageUrl);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added" });
       setUrlEntryId(null);
+      if (!("pending" in result)) await load({ silent: true });
     } catch (err) {
       setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Failed to add image"), error: true });
     } finally {
