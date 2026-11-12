@@ -4,7 +4,8 @@ import { z } from "zod";
 
 import { db } from "../../../db/index.js";
 import { categories, sentences } from "../../../db/schema.js";
-import { verifyToken } from "../../../middleware/auth.js";
+import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
+import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { getRandomSentence, getSentenceGroupDetail, getSentenceGroups, searchSentences, submitTranslation } from "./translation.service.js";
 
@@ -101,9 +102,10 @@ export default async function translationRoutes(fastify: FastifyInstance) {
     };
   });
 
-  fastify.post("/sentences/:id/translation", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/sentences/:id/translation", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = submitTranslationSchema.parse(request.body);
+    if (body.audioFileId) await assertOwnsAudioFile(request.user!.id, body.audioFileId);
     const result = await submitTranslation(request.user!.id, id, body);
     reply.code(201).send(result);
   });

@@ -4,7 +4,8 @@ import { z } from "zod";
 
 import { db } from "../../../db/index.js";
 import { audioUploads, contributions, transcriptionSegments, transcriptions } from "../../../db/schema.js";
-import { verifyToken } from "../../../middleware/auth.js";
+import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
+import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { addSegment, addTranscription, submitAudioUpload } from "./audio-upload.service.js";
 
@@ -61,8 +62,9 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 const segmentParamSchema = z.object({ id: z.string().uuid(), segId: z.string().uuid() });
 
 export default async function audioUploadRoutes(fastify: FastifyInstance) {
-  fastify.post("/", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const body = submitSchema.parse(request.body);
+    await assertOwnsAudioFile(request.user!.id, body.audioFileId);
     const result = await submitAudioUpload(request.user!.id, body);
     reply.code(201).send(result);
   });

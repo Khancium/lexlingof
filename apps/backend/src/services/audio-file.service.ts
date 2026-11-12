@@ -1,5 +1,7 @@
 import { randomUUID, createHash } from "node:crypto";
 
+import { eq } from "drizzle-orm";
+
 import { db } from "../db/index.js";
 import { audioFiles, audioFormat, contributionModule } from "../db/schema.js";
 import { trimSilence } from "./audio-trim.service.js";
@@ -12,6 +14,28 @@ import { storageService } from "./storage.service.js";
 // a free-form transcription upload may have intentional pauses that aren't
 // ours to remove.
 const SILENCE_TRIM_MODULES: ReadonlySet<ContributionModuleType> = new Set(["WORD", "TRANSLATION"]);
+
+/**
+ * For the legacy direct-submit routes, which accept an `audioFileId` from the
+ * client: the audio row must have been uploaded by the person submitting it.
+ *
+ * Without this, anyone could attach someone else's audio to their own
+ * contribution -- and ids are not secret (the review queue shows reviewers the
+ * `audioFileId` of every contribution in it). Worse, retaking a recording
+ * quarantines the old audio row and deletes its R2 object, so a reviewer could
+ * attach a victim's audio as their own word recording, retake it, and destroy
+ * the victim's original file.
+ *
+ * Both upload flows record the uploader (`uploaded_by`): the presigned flow in
+ * audio.routes.ts and the buffered flow in storeAudioBuffer below. A missing
+ * row is left for the submit service's own not-found handling.
+ */
+export async function assertOwnsAudioFile(userId: string, audioFileId: string): Promise<void> {
+  const [row] = await db.select({ uploadedBy: audioFiles.uploadedBy }).from(audioFiles).where(eq(audioFiles.id, audioFileId)).limit(1);
+  if (row && row.uploadedBy !== userId) {
+    throw new HttpError(403, "FORBIDDEN", "That audio file wasn't uploaded by you");
+  }
+}
 
 export const ALLOWED_MIME_TYPES = [
   "audio/wav",

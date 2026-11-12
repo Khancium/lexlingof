@@ -1,7 +1,9 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 
-import { hasPermission, verifyToken } from "../../../middleware/auth.js";
+import { blockIfRestricted, hasPermission, verifyToken } from "../../../middleware/auth.js";
+import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
+import { queryBoolean } from "../../../utils/query-params.js";
 import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneContribution } from "./scene.service.js";
 
 const listQuerySchema = z.object({
@@ -17,10 +19,10 @@ const listQuerySchema = z.object({
   hasImage: z.enum(["yes", "no"]).optional(),
   // Volunteer's "my own additions" filter -- true restricts the list to
   // scenes this caller themselves created (scenes.createdBy).
-  mine: z.coerce.boolean().optional(),
+  mine: queryBoolean(),
   // Admin-only: include hidden (isActive false, not deleted) scenes too --
   // silently ignored for anyone without scenes.manage, same as concepts.
-  includeHidden: z.coerce.boolean().optional(),
+  includeHidden: queryBoolean(),
   // 1000 (not 200) so admin pages can fetch the full scene list in one
   // request for client-side matching (bulk-add-images-by-URL) without
   // paginating just to build a lookup map.
@@ -74,9 +76,10 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
     return getSceneById(id, canManage);
   });
 
-  fastify.post("/:id/contributions", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/:id/contributions", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = submitSchema.parse(request.body);
+    await assertOwnsAudioFile(request.user!.id, body.audioFileId);
     const result = await submitSceneContribution(request.user!.id, id, body);
     reply.code(201).send(result);
   });

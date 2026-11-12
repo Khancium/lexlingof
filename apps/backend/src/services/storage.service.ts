@@ -20,6 +20,7 @@ type ContributionModule = (typeof contributionModule.enumValues)[number];
 
 const MAX_FETCHED_IMAGE_BYTES = 10 * 1024 * 1024; // 10MB
 const FETCH_IMAGE_TIMEOUT_MS = 15_000;
+const MAX_IMAGE_REDIRECTS = 5;
 
 /**
  * SSRF guard for fetchImageFromUrl: rejects loopback/private/link-local/
@@ -412,25 +413,59 @@ class StorageService {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), FETCH_IMAGE_TIMEOUT_MS);
-    let response: Response;
+    let response: Response | undefined;
     try {
-      // Plenty of image hosts (Pixabay, Unsplash, etc.) 403 a request with no
-      // User-Agent / Accept header as bot traffic, even for a legitimate
-      // direct image link -- a browser-like header set here is enough to
-      // pass that check without actually needing a real browser.
-      response = await fetch(parsed, {
-        signal: controller.signal,
-        headers: {
-          "User-Agent": isWikimediaHost(parsed.hostname)
-            ? WIKIMEDIA_USER_AGENT
-            : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-          Accept: "image/*,*/*;q=0.8",
-        },
-      });
-    } catch {
+      // Redirects are followed BY HAND (redirect: "manual"), re-running the
+      // private-address check on every hop. The check above only vets the URL
+      // the admin typed; with the default redirect: "follow", a perfectly
+      // public URL could answer 302 -> http://169.254.169.254/... (cloud
+      // metadata) or an internal service, and fetch would follow it without the
+      // guard ever seeing the new host.
+      let current = parsed;
+      for (let hop = 0; hop <= MAX_IMAGE_REDIRECTS; hop++) {
+        // Plenty of image hosts (Pixabay, Unsplash, etc.) 403 a request with no
+        // User-Agent / Accept header as bot traffic, even for a legitimate
+        // direct image link -- a browser-like header set here is enough to
+        // pass that check without actually needing a real browser.
+        const res = await fetch(current, {
+          signal: controller.signal,
+          redirect: "manual",
+          headers: {
+            "User-Agent": isWikimediaHost(current.hostname)
+              ? WIKIMEDIA_USER_AGENT
+              : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            Accept: "image/*,*/*;q=0.8",
+          },
+        });
+
+        const location = res.headers.get("location");
+        if (res.status >= 300 && res.status < 400 && location) {
+          await res.body?.cancel().catch(() => {});
+          if (hop === MAX_IMAGE_REDIRECTS) {
+            throw new HttpError(400, "FETCH_FAILED", "That URL redirects too many times");
+          }
+          const next = new URL(location, current.href);
+          if (next.protocol !== "http:" && next.protocol !== "https:") {
+            throw new HttpError(400, "INVALID_URL", "That URL redirects somewhere that isn't an http(s) address");
+          }
+          await assertPublicHostname(next.hostname);
+          current = next;
+          continue;
+        }
+
+        response = res;
+        break;
+      }
+    } catch (err) {
+      // The guard's own rejections (private address, too many redirects, ...)
+      // carry a specific message worth showing; anything else is a network failure.
+      if (err instanceof HttpError) throw err;
       throw new HttpError(400, "FETCH_FAILED", "Could not reach that URL");
     } finally {
       clearTimeout(timeout);
+    }
+    if (!response) {
+      throw new HttpError(400, "FETCH_FAILED", "Could not reach that URL");
     }
 
     if (!response.ok) {

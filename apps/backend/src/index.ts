@@ -6,7 +6,6 @@ import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
 import rateLimit from "@fastify/rate-limit";
-import { ZodError } from "zod";
 
 import audioRoutes from "./modules/audio/audio.routes.js";
 import authRoutes from "./modules/auth/auth.routes.js";
@@ -32,7 +31,7 @@ import termsRoutes from "./modules/terms/terms.routes.js";
 import healthRoutes from "./modules/health/health.routes.js";
 import { startDbWatchdog } from "./services/db-watchdog.service.js";
 import { startSubmissionBufferWorker } from "./services/submission-buffer.service.js";
-import { HttpError } from "./utils/http-error.js";
+import { handleError } from "./utils/error-handler.js";
 
 // 2. Create the Fastify instance. trustProxy is required on Railway (and any
 // platform that sits behind a proxy/load balancer) -- without it, Fastify
@@ -78,37 +77,7 @@ server.addHook("onSend", async (request, reply, payload) => {
   return payload;
 });
 
-server.setErrorHandler((err, request, reply) => {
-  const isProduction = process.env.NODE_ENV === "production";
-  const timestamp = new Date().toISOString();
-  // NEVER expose error.stack in production.
-  const stack = !isProduction && err instanceof Error && err.stack ? { stack: err.stack } : {};
-
-  request.log.error({ err, reqId: request.id }, err instanceof Error ? err.message : "Unhandled error");
-
-  if (err instanceof HttpError) {
-    reply
-      .code(err.statusCode)
-      .send({ code: err.code, message: err.message, ...err.details, requestId: request.id, timestamp, ...stack });
-    return;
-  }
-
-  if (err instanceof ZodError) {
-    reply
-      .code(400)
-      .send({ code: "VALIDATION_ERROR", message: "Validation failed", issues: err.issues, requestId: request.id, timestamp, ...stack });
-    return;
-  }
-
-  // Any other error (Fastify's own body-parsing/payload errors included)
-  // uses its own statusCode when present, else 500.
-  const errObj = err && typeof err === "object" ? (err as Record<string, unknown>) : {};
-  const statusCode = typeof errObj.statusCode === "number" ? errObj.statusCode : 500;
-  const code = typeof errObj.code === "string" ? errObj.code : statusCode === 500 ? "INTERNAL_ERROR" : "BAD_REQUEST";
-  const message = err instanceof Error ? err.message : "Something went wrong";
-
-  reply.code(statusCode).send({ code, message, requestId: request.id, timestamp, ...stack });
-});
+server.setErrorHandler(handleError);
 
 // Route modules are namespaced under /api/v1. Most are mounted at the bare
 // /api/v1 root because their own internal paths already self-namespace
