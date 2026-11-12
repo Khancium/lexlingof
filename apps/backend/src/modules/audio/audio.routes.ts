@@ -8,7 +8,7 @@ import { db } from "../../db/index.js";
 import { audioFiles, audioUploads, contributionModule, contributions, sceneContributions, translations, userRole, wordRecordings } from "../../db/schema.js";
 import { hasPermission, isReviewerEligible, verifyToken } from "../../middleware/auth.js";
 import { storageService } from "../../services/storage.service.js";
-import { trimSilence } from "../../services/audio-trim.service.js";
+import { measureDurationMs, trimSilence } from "../../services/audio-trim.service.js";
 import {
   ALLOWED_MIME_TYPES,
   DEFAULT_MAX_FILE_SIZE_BYTES,
@@ -155,17 +155,51 @@ export default async function audioRoutes(fastify: FastifyInstance) {
       throw new HttpError(400, "CHECKSUM_MISMATCH", "The uploaded file's checksum does not match the reserved upload");
     }
 
-    // Module 1 (WORD) ONLY. NEVER apply this check to any other module.
-    if (audioFile.moduleType === "WORD" && body.durationMs > 10000) {
-      throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 10 seconds (10000ms)", {
-        maxAllowed: 10000,
-        received: body.durationMs,
+    // The reservation is only a promise: confirm used to mark the file "uploaded" without ever
+    // looking in the bucket, so a client could confirm a file it never uploaded (a contribution
+    // with no audio behind it), and the presigned PUT carries no size limit, so it could upload
+    // something far bigger than the size it reserved. Check what is actually stored.
+    const stored = await storageService.headAudioObject(audioFile.storageKey);
+    if (!stored) {
+      throw new HttpError(400, "UPLOAD_NOT_FOUND", "No uploaded file was found for this reservation -- finish uploading it, then confirm");
+    }
+    const maxAllowedBytes = audioFile.moduleType === "WORD" ? WORD_MAX_FILE_SIZE_BYTES : DEFAULT_MAX_FILE_SIZE_BYTES;
+    if (stored.sizeBytes > maxAllowedBytes || stored.sizeBytes > audioFile.fileSizeBytes) {
+      // Don't keep an object that is bigger than it was allowed to be.
+      await storageService.deleteAudioFile(audioFile.storageKey).catch((err) => {
+        console.error(`[audio] could not remove oversized upload ${id}:`, err);
       });
+      await db
+        .update(audioFiles)
+        .set({ processingStatus: "failed", processingError: "Uploaded file is larger than the reserved size", updatedAt: new Date() })
+        .where(eq(audioFiles.id, id));
+      throw new HttpError(400, "FILE_TOO_LARGE", "The uploaded file is larger than the size that was reserved for it", {
+        maxAllowed: Math.min(maxAllowedBytes, audioFile.fileSizeBytes),
+        received: stored.sizeBytes,
+      });
+    }
+
+    // Module 1 (WORD) ONLY. NEVER apply this check to any other module.
+    // The 10 s cap is checked against the server's own measurement of the stored file (a word clip
+    // is at most 500 KB, so reading it back is cheap); the client's number is only the fallback
+    // when the file can't be measured. Other modules keep the client's number here -- measuring a
+    // file of up to 100 MB isn't done on the request path -- and the buffered flow, which the web
+    // app uses, measures every module's audio itself (storeAudioBuffer).
+    let durationMs = body.durationMs;
+    if (audioFile.moduleType === "WORD") {
+      const measured = await measureDurationMs(await storageService.getAudioObjectBuffer(audioFile.storageKey), audioFile.format);
+      if (measured !== null) durationMs = measured;
+      if (durationMs > 10000) {
+        throw new HttpError(400, "DURATION_LIMIT_EXCEEDED", "Word recordings cannot exceed 10 seconds (10000ms)", {
+          maxAllowed: 10000,
+          received: durationMs,
+        });
+      }
     }
 
     await db
       .update(audioFiles)
-      .set({ processingStatus: "uploaded", durationMs: body.durationMs, updatedAt: new Date() })
+      .set({ processingStatus: "uploaded", durationMs, fileSizeBytes: stored.sizeBytes, updatedAt: new Date() })
       .where(eq(audioFiles.id, id));
 
     // Silence trimming is real I/O (download the whole file from R2, spawn
@@ -184,7 +218,7 @@ export default async function audioRoutes(fastify: FastifyInstance) {
       });
     }
 
-    return { audioFileId: id, storageKey: audioFile.storageKey, durationMs: body.durationMs, processingStatus: "uploaded" };
+    return { audioFileId: id, storageKey: audioFile.storageKey, durationMs, processingStatus: "uploaded" };
   });
 
   fastify.get("/:id/play-url", { preHandler: verifyToken }, async (request) => {

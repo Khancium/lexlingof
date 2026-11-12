@@ -43,6 +43,40 @@ const MIN_RESULT_DURATION_MS = 1200 + 200;
 export type TrimResult = { buffer: Buffer; durationMs: number; trimmed: boolean };
 
 /**
+ * The real length of an audio buffer, measured by ffprobe (decoding it if the container carries no
+ * duration). Used wherever a duration drives something -- the word 10 s cap, the scene
+ * long-description bonus, the per-recording segment limit -- so it is the server's measurement
+ * rather than the client's claim. Returns null when it can't be measured (unreadable audio, ffmpeg
+ * unavailable); callers fall back to the claimed value rather than refusing the upload. Never throws.
+ */
+export async function measureDurationMs(input: Buffer, format: string): Promise<number | null> {
+  const workDir = path.join(tmpdir(), `lexlingo-probe-${randomUUID()}`);
+  const inPath = path.join(workDir, `in.${format}`);
+  try {
+    await mkdir(workDir, { recursive: true });
+    await writeFile(inPath, input);
+    // Bounded: for a container with no stored duration the probe decodes the whole file, and this
+    // runs inside the submission worker -- one pathological file must not stall everything queued
+    // behind it. On a timeout the caller keeps the client's claimed duration.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ms = await Promise.race([
+      probeDurationMs(inPath),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${MEASURE_TIMEOUT_MS} ms`)), MEASURE_TIMEOUT_MS);
+      }),
+    ]).finally(() => clearTimeout(timer));
+    return Number.isFinite(ms) && ms > 0 ? ms : null;
+  } catch (err) {
+    console.error("[audio-trim] could not measure duration:", err);
+    return null;
+  } finally {
+    await rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+const MEASURE_TIMEOUT_MS = 120_000;
+
+/**
  * Detects and clips long silence at the very start and end of a recording
  * (ffmpeg's silenceremove filter), then pads exactly EDGE_PADDING_SECONDS of
  * true silence back onto each end (adelay prepends, apad appends) so the
