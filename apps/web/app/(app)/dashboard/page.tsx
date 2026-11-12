@@ -29,8 +29,8 @@ const QUICK_ACTIONS = [
     title: "Translate",
     icon: "🌐",
     color: "border-emerald-500",
-    description: "Read an English sentence and say it aloud in your language.",
-    detail: "Sentences come in groups of 50 so you can track progress. Up to 60 seconds each.",
+    description: "Read a sentence in English, Urdu or Persian and say it aloud in your language.",
+    detail: "Sentences are grouped by topic (greetings, work, agriculture...) and worked through in order, so you can track your progress. Up to 60 seconds each.",
   },
   {
     href: "/contribute/scene",

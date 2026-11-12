@@ -17,7 +17,7 @@ const MODULES = [
   {
     title: "Translate Sentences",
     color: "border-emerald-500",
-    description: "Translate and record English sentences in your language.",
+    description: "Translate and record sentences in your language, topic by topic.",
   },
   {
     title: "Describe Scenes",

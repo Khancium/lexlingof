@@ -456,20 +456,27 @@ export type AddSegmentInput = {
 };
 export type AddSegmentResponse = { segmentId: string; pointsAwarded: number };
 
-export type SentenceSourceLanguage = "english" | "urdu" | "persian";
+/** A sentence is ONE meaning written in all three languages -- a recording of it applies to whichever one it was read in. */
+export type SentenceLanguage = "english" | "urdu" | "persian";
 
-export type RandomSentence = {
+export type SentenceCategoryRef = { id: string; name: string; slug: string };
+
+export type SentenceItem = {
   id: string;
   englishText: string;
-  sourceLanguage: SentenceSourceLanguage;
-  category: { id: string; name: string; slug: string } | null;
-  hasTranslated?: boolean;
+  urduText: string;
+  persianText: string;
+  /** Position within its category -- sentences are worked through in this order. */
+  sortOrder: number;
+  category: SentenceCategoryRef | null;
+  hasTranslated: boolean;
 };
-export type SentencesResponse = { items: RandomSentence[]; limit: number; offset: number; total: number };
+export type SentencesResponse = { items: SentenceItem[]; limit: number; offset: number; total: number };
 
-export type SentenceGroup = { groupIndex: number; sentenceCount: number; translatedCount: number };
-export type SentenceGroupsResponse = { items: SentenceGroup[]; limit: number; offset: number; total: number };
-export type SentenceGroupDetail = { groupIndex: number; totalGroups: number; items: RandomSentence[] };
+/** A category tile on the Translate page: how many sentences it has and how many of them this user already translated. */
+export type SentenceCategoryTile = { id: string; slug: string; name: string; sortOrder: number; sentenceCount: number; translatedCount: number };
+export type SentenceCategoriesResponse = { items: SentenceCategoryTile[] };
+export type CategorySentencesResponse = { category: SentenceCategoryRef; items: SentenceItem[]; total: number; limit: number; offset: number };
 
 export type WordBufferMeta = {
   conceptId: string;
@@ -994,7 +1001,9 @@ export type AdminSceneConceptInput = { sceneId: string; conceptId: string; categ
 export type BulkEditScenesInput = { ids: string[]; difficulty?: SceneDifficulty; isActive?: boolean };
 export type SceneImageKeyword = { id: string; keyword: string };
 
-export type AdminSentenceInput = { englishText: string; categoryId?: string; sourceLanguage?: SentenceSourceLanguage };
+/** Every sentence is created with a category and all three languages. */
+export type AdminSentenceInput = { categoryId: string; englishText: string; urduText: string; persianText: string };
+export type AdminSentenceUpdate = Partial<AdminSentenceInput> & { sortOrder?: number; isActive?: boolean };
 export type BulkUploadResult = { created: number; errors: { row: number; message: string }[] };
 
 export type OpenverseImageResult = {
@@ -1063,15 +1072,31 @@ export type SceneMedia = {
 export type AdminSentence = {
   id: string;
   englishText: string;
-  sourceLanguage: SentenceSourceLanguage;
-  categoryId: string | null;
+  urduText: string;
+  persianText: string;
+  sortOrder: number;
   isActive: boolean;
-  usageCount: number;
-  createdAt: string;
   createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  category: { id: string; name: string | null; slug: string | null } | null;
 };
 export type BulkEditSentencesInput = { ids: string[]; categoryId?: string; isActive?: boolean };
 export type AdminSentencesResponse = { items: AdminSentence[]; limit: number; offset: number; total: number };
+
+export type AdminSentenceCategory = {
+  id: string;
+  slug: string;
+  nameEnglish: string;
+  sortOrder: number;
+  isActive: boolean;
+  createdAt: string;
+  sentenceCount: number;
+  activeSentenceCount: number;
+};
+/** One imported sentence: its category (by name or slug) and its text in all three languages. */
+export type SentenceImportItem = { category: string; english: string; urdu: string; persian: string };
+export type SentenceImportResult = BulkUploadResult & { categoriesCreated: number };
 
 export type GamificationConfigRow = {
   id: string;
@@ -1413,20 +1438,24 @@ export const api = {
       apiClient.post<AddTranscriptionResponse>(`/api/v1/contributions/audio/${id}/transcription`, data).then((r) => r.data),
     addSegment: (id: string, data: AddSegmentInput) =>
       apiClient.post<AddSegmentResponse>(`/api/v1/contributions/audio/${id}/segments`, data).then((r) => r.data),
+    /** Search across every category and all three languages. */
     searchSentences: (params?: {
       search?: string;
       filter?: "translated" | "untranslated";
-      sourceLanguage?: SentenceSourceLanguage;
+      categoryId?: string;
       limit?: number;
       offset?: number;
     }) => apiClient.get<SentencesResponse>("/api/v1/sentences", { params }).then((r) => r.data),
-    getSentenceById: (id: string) => apiClient.get<RandomSentence>(`/api/v1/sentences/${id}`).then((r) => r.data),
-    getRandomSentence: (languageId: string, sourceLanguage?: SentenceSourceLanguage) =>
-      apiClient.get<RandomSentence>("/api/v1/sentences/random", { params: { languageId, sourceLanguage } }).then((r) => r.data),
-    getSentenceGroups: (params?: { sourceLanguage?: SentenceSourceLanguage; limit?: number; offset?: number }) =>
-      apiClient.get<SentenceGroupsResponse>("/api/v1/sentence-groups", { params }).then((r) => r.data),
-    getSentenceGroup: (groupIndex: number, sourceLanguage?: SentenceSourceLanguage) =>
-      apiClient.get<SentenceGroupDetail>(`/api/v1/sentence-groups/${groupIndex}`, { params: { sourceLanguage } }).then((r) => r.data),
+    getSentenceById: (id: string) => apiClient.get<SentenceItem>(`/api/v1/sentences/${id}`).then((r) => r.data),
+    /** The category tiles (with my progress). Sentences are browsed by category, in order -- not at random. */
+    getSentenceCategories: () => apiClient.get<SentenceCategoriesResponse>("/api/v1/sentence-categories").then((r) => r.data),
+    getCategorySentences: (
+      categoryId: string,
+      params?: { search?: string; filter?: "translated" | "untranslated"; limit?: number; offset?: number },
+    ) => apiClient.get<CategorySentencesResponse>(`/api/v1/sentence-categories/${categoryId}/sentences`, { params }).then((r) => r.data),
+    /** The next sentence I haven't translated, in the category's order. Pass `after` to continue from a sentence. 404 NO_SENTENCES_AVAILABLE when there is none. */
+    getNextSentence: (categoryId: string, after?: string) =>
+      apiClient.get<SentenceItem>("/api/v1/sentences/next", { params: { categoryId, after } }).then((r) => r.data),
     submitTranslation: (sentenceId: string, data: SubmitTranslationInput) =>
       apiClient.post<SubmitTranslationResponse>(`/api/v1/sentences/${sentenceId}/translation`, data).then((r) => r.data),
   },
@@ -1792,16 +1821,27 @@ export const api = {
     deleteSceneKeyword: (sceneId: string, keywordId: string) =>
       apiClient.delete(`/api/v1/admin/scenes/${sceneId}/keywords/${keywordId}`).then((r) => r.data),
 
+    getSentenceCategories: () =>
+      apiClient.get<{ items: AdminSentenceCategory[] }>("/api/v1/admin/sentence-categories").then((r) => r.data.items),
+    createSentenceCategory: (data: { nameEnglish: string; sortOrder?: number }) =>
+      apiClient.post<AdminSentenceCategory>("/api/v1/admin/sentence-categories", data).then((r) => r.data),
+    updateSentenceCategory: (id: string, data: { nameEnglish?: string; sortOrder?: number; isActive?: boolean }) =>
+      apiClient.put<AdminSentenceCategory>(`/api/v1/admin/sentence-categories/${id}`, data).then((r) => r.data),
+    deleteSentenceCategory: (id: string) => apiClient.delete(`/api/v1/admin/sentence-categories/${id}`).then((r) => r.data),
+
     getSentences: (params?: {
       createdFrom?: string;
       createdTo?: string;
       mine?: boolean;
-      sourceLanguage?: SentenceSourceLanguage;
+      categoryId?: string;
+      search?: string;
       limit?: number;
       offset?: number;
     }) => apiClient.get<AdminSentencesResponse>("/api/v1/admin/sentences", { params }).then((r) => r.data),
     createSentence: (data: AdminSentenceInput) =>
       apiClient.post<AdminSentence | PendingResult>("/api/v1/admin/sentences", data).then((r) => r.data),
+    updateSentence: (id: string, data: AdminSentenceUpdate) =>
+      apiClient.put<AdminSentence>(`/api/v1/admin/sentences/${id}`, data).then((r) => r.data),
     deleteSentence: (id: string) =>
       apiClient.delete<{ id: string; deleted: boolean } | PendingResult>(`/api/v1/admin/sentences/${id}`).then((r) => r.data),
     bulkDeleteSentences: (ids: string[]) =>
@@ -1812,16 +1852,17 @@ export const api = {
       apiClient.post<BulkPermanentDeleteResult>("/api/v1/admin/sentences/bulk-delete-permanent", { ids }).then((r) => r.data),
     bulkEditSentences: (data: BulkEditSentencesInput) =>
       apiClient.post<{ updated: number }>("/api/v1/admin/sentences/bulk-edit", data).then((r) => r.data),
-    bulkUploadSentences: (file: File, sourceLanguage: SentenceSourceLanguage = "english") => {
+    /** CSV/JSON with one row per sentence: category, english, urdu, persian. A row missing any language is refused (with its row number). */
+    bulkUploadSentences: (file: File, createCategories = false) => {
       const form = new FormData();
       form.append("file", file);
       return apiClient
-        .post<BulkUploadResult>("/api/v1/admin/sentences/bulk", form, { params: { sourceLanguage } })
+        .post<SentenceImportResult>("/api/v1/admin/sentences/bulk", form, { params: { createCategories } })
         .then((r) => r.data);
     },
-    /** One sentence per line -- lighter-weight sibling of the CSV/JSON upload above, no file required. Every line shares a single sourceLanguage. */
-    bulkCreateSentencesText: (texts: string[], sourceLanguage: SentenceSourceLanguage = "english") =>
-      apiClient.post<BulkUploadResult>("/api/v1/admin/sentences/bulk-text", { texts, sourceLanguage }).then((r) => r.data),
+    /** The paste counterpart of the file import -- the page splits each pasted line into these four fields. */
+    bulkImportSentencesText: (items: SentenceImportItem[], createCategories = false) =>
+      apiClient.post<SentenceImportResult>("/api/v1/admin/sentences/bulk-text", { items, createCategories }).then((r) => r.data),
 
     /* ----------------------------- Volunteers ----------------------------- */
     /** Promotes a contributor to volunteer (enabled: true) or demotes a volunteer back to contributor (enabled: false). */

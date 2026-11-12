@@ -3,37 +3,43 @@
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { api, getErrorMessage, type RandomSentence, type SentenceGroup, type SentenceSourceLanguage } from "@/lib/api";
+import { api, getErrorMessage, type SentenceCategoryTile, type SentenceItem, type SentenceLanguage } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
-import { seededShuffle } from "@/lib/shuffle";
 import { Pagination } from "@/components/admin-pagination";
 import AudioRecorder from "@/components/audio-recorder";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Draft = { transcription: string; romanization: string; ipa: string; recording: Recording | null };
-type Step = "groups" | "group" | "record";
+type Step = "categories" | "category" | "record";
 type TranslatedFilter = "" | "translated" | "untranslated";
+type ActiveCategory = { id: string; name: string };
 
 // The backend enforces no duration cap for Module 3, but the spec calls for
 // a soft ceiling here ("no 3-second limit, can go up to 60 seconds").
 const MAX_DURATION_MS = 60000;
-const GROUPS_DEFAULT_PAGE_SIZE = 20;
+const LIST_PAGE_SIZE = 50;
+const PROMPT_LANGUAGE_KEY = "lexlingo.translate.promptLanguage";
 
 const emptyDraft: Draft = { transcription: "", romanization: "", ipa: "", recording: null };
 
-// Urdu and Persian are both right-to-left scripts -- rendered ltr (the
-// default), word order and punctuation come out backwards.
-function textDirection(lang: SentenceSourceLanguage): "rtl" | "ltr" {
+// A sentence is one meaning in three languages. The contributor picks which one to READ; the other two are
+// shown underneath so the meaning is never in doubt. A recording of the sentence applies to all of them.
+const LANGUAGES: { value: SentenceLanguage; label: string }[] = [
+  { value: "english", label: "English" },
+  { value: "urdu", label: "اردو" },
+  { value: "persian", label: "فارسی" },
+];
+const LANGUAGE_NAME: Record<SentenceLanguage, string> = { english: "English", urdu: "Urdu", persian: "Persian" };
+
+// Urdu and Persian are right-to-left scripts -- rendered ltr (the default), word order and punctuation come out backwards.
+function textDirection(lang: SentenceLanguage): "rtl" | "ltr" {
   return lang === "urdu" || lang === "persian" ? "rtl" : "ltr";
 }
 
-const SOURCE_LANGUAGE_OPTIONS: { value: SentenceSourceLanguage | ""; label: string }[] = [
-  { value: "", label: "All languages" },
-  { value: "english", label: "English" },
-  { value: "urdu", label: "Urdu" },
-  { value: "persian", label: "Persian" },
-];
+function textIn(sentence: SentenceItem, lang: SentenceLanguage): string {
+  return lang === "urdu" ? sentence.urduText : lang === "persian" ? sentence.persianText : sentence.englishText;
+}
 
 export default function TranslatePage() {
   return (
@@ -50,46 +56,56 @@ function TranslatePageInner() {
   const deepLinkSentenceId = searchParams.get("sentenceId");
 
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
-  const userId = useAuthStore((state) => state.user?.id);
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
-  const [step, setStep] = useState<Step>("groups");
+  const [step, setStep] = useState<Step>("categories");
 
-  // Which language a sentence's prompt text is written in -- lets a
-  // contributor who reads Urdu or Persian better than English work from
-  // prompts in that language instead. Empty string means no filter (every
-  // language mixed together, same as before this existed).
-  const [sourceLanguage, setSourceLanguage] = useState<SentenceSourceLanguage | "">("");
+  // Which of the three languages to read the sentences in. Remembered between visits.
+  const [promptLanguage, setPromptLanguage] = useState<SentenceLanguage>("english");
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(PROMPT_LANGUAGE_KEY);
+      if (saved === "english" || saved === "urdu" || saved === "persian") setPromptLanguage(saved);
+    } catch {
+      /* storage unavailable -- keep the default */
+    }
+  }, []);
+  function choosePromptLanguage(lang: SentenceLanguage) {
+    setPromptLanguage(lang);
+    try {
+      window.localStorage.setItem(PROMPT_LANGUAGE_KEY, lang);
+    } catch {
+      /* not worth failing over */
+    }
+  }
 
-  // Sentences are bucketed server-side into fixed groups of at most 50 --
-  // shown here as tiles, each with a progress bar for how many of that
-  // group's sentences this user has already translated.
-  const [groups, setGroups] = useState<SentenceGroup[]>([]);
-  const [groupsTotal, setGroupsTotal] = useState(0);
-  const [groupsOffset, setGroupsOffset] = useState(0);
-  const [groupsLimit, setGroupsLimit] = useState(GROUPS_DEFAULT_PAGE_SIZE);
-  const [loadingGroups, setLoadingGroups] = useState(true);
-  const [groupsError, setGroupsError] = useState<string | null>(null);
+  // The category tiles: how many sentences each has and how many of them this user already translated.
+  const [categories, setCategories] = useState<SentenceCategoryTile[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
-  // The currently open group's sentence list -- fetched once per group open,
-  // then shown in a per-user shuffled order (same seededShuffle pattern used
-  // for concept categories/scenes) plus a client-side search/filter over
-  // that already-fetched list of at most 50 items, no extra round trips.
-  const [activeGroupIndex, setActiveGroupIndex] = useState<number | null>(null);
-  const [groupItems, setGroupItems] = useState<RandomSentence[]>([]);
-  const [loadingGroup, setLoadingGroup] = useState(false);
-  const [groupError, setGroupError] = useState<string | null>(null);
-  const [groupSearch, setGroupSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState<TranslatedFilter>("");
+  // The open category's sentences, in the admin's order. Searched / filtered / paged by the server.
+  const [activeCategory, setActiveCategory] = useState<ActiveCategory | null>(null);
+  const [items, setItems] = useState<SentenceItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [limit, setLimit] = useState(LIST_PAGE_SIZE);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [filter, setFilter] = useState<TranslatedFilter>("");
+  const [loadingList, setLoadingList] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
 
   // History of sentences visited this session, so Previous/Next can move
   // back and forth without re-fetching or losing in-progress drafts.
-  const [history, setHistory] = useState<RandomSentence[]>([]);
+  const [history, setHistory] = useState<SentenceItem[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
 
   const [loadingSentence, setLoadingSentence] = useState(false);
   const [sentenceError, setSentenceError] = useState<string | null>(null);
+  // Shown on the record screen when "Next" finds nothing further in the category.
+  const [navMessage, setNavMessage] = useState<string | null>(null);
 
   const [detailsOpen, setDetailsOpen] = useState(false);
   // Tracks which recording (by object identity) was last successfully
@@ -107,91 +123,73 @@ function TranslatePageInner() {
     setDrafts((prev) => ({ ...prev, [sentence.id]: { ...(prev[sentence.id] ?? emptyDraft), ...patch } }));
   }
 
-  const loadGroups = useCallback(() => {
-    setLoadingGroups(true);
-    setGroupsError(null);
+  const loadCategories = useCallback(() => {
+    setLoadingCategories(true);
+    setCategoriesError(null);
     api.contributions
-      .getSentenceGroups({ limit: groupsLimit, offset: groupsOffset, sourceLanguage: sourceLanguage || undefined })
-      .then((res) => {
-        setGroups(res.items);
-        setGroupsTotal(res.total);
+      .getSentenceCategories()
+      .then((res) => setCategories(res.items))
+      .catch((err) => setCategoriesError(getErrorMessage(err, "Failed to load sentence categories")))
+      .finally(() => setLoadingCategories(false));
+  }, []);
+
+  useEffect(() => {
+    if (step !== "categories") return;
+    loadCategories();
+  }, [step, loadCategories]);
+
+  // Search runs on the server (it matches all three languages), so wait for a pause in typing.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useEffect(() => {
+    if (step !== "category" || !activeCategory) return;
+    let cancelled = false;
+    setLoadingList(true);
+    setListError(null);
+    api.contributions
+      .getCategorySentences(activeCategory.id, {
+        limit,
+        offset,
+        search: debouncedSearch || undefined,
+        filter: filter || undefined,
       })
-      .catch((err) => setGroupsError(getErrorMessage(err, "Failed to load sentence groups")))
-      .finally(() => setLoadingGroups(false));
-  }, [groupsLimit, groupsOffset, sourceLanguage]);
+      .then((res) => {
+        if (cancelled) return;
+        setItems(res.items);
+        setTotal(res.total);
+      })
+      .catch((err) => {
+        if (!cancelled) setListError(getErrorMessage(err, "Failed to load this category"));
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingList(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [step, activeCategory, limit, offset, debouncedSearch, filter]);
 
-  useEffect(() => {
-    if (step !== "groups") return;
-    loadGroups();
-  }, [step, loadGroups]);
-
-  function handleGroupsLimitChange(newLimit: number) {
-    setGroupsLimit(newLimit);
-    setGroupsOffset(0);
+  function openCategory(tile: { id: string; name: string }) {
+    setActiveCategory({ id: tile.id, name: tile.name });
+    setSearch("");
+    setDebouncedSearch("");
+    setFilter("");
+    setOffset(0);
+    setItems([]);
+    setTotal(0);
+    setSentenceError(null);
+    setStep("category");
   }
 
-  function openGroup(groupIndex: number) {
-    setActiveGroupIndex(groupIndex);
-    setGroupSearch("");
-    setGroupFilter("");
-    setGroupError(null);
-    setGroupItems([]);
-    setLoadingGroup(true);
-    setStep("group");
-    api.contributions
-      .getSentenceGroup(groupIndex, sourceLanguage || undefined)
-      .then((res) => setGroupItems(userId ? seededShuffle(res.items, userId) : res.items))
-      .catch((err) => setGroupError(getErrorMessage(err, "Failed to load this group")))
-      .finally(() => setLoadingGroup(false));
-  }
-
-  const fetchNewSentence = useCallback(
-    async (forLanguageId: string) => {
-      setLoadingSentence(true);
-      setSentenceError(null);
-      setDetailsOpen(false);
-      try {
-        const next = await api.contributions.getRandomSentence(forLanguageId, sourceLanguage || undefined);
-        setHistory((prev) => {
-          const updated = [...prev, next];
-          setHistoryIndex(updated.length - 1);
-          return updated;
-        });
-        setStep("record");
-      } catch (err) {
-        setSentenceError(getErrorMessage(err, "No sentences available"));
-      } finally {
-        setLoadingSentence(false);
-      }
-    },
-    [sourceLanguage],
-  );
-
-  // "Translate Randomly" scoped to the currently open group -- picks from
-  // its already-fetched (<=50 item) list client-side rather than a new
-  // backend call, preferring an untranslated one so it doesn't keep landing
-  // on sentences already done.
-  function translateRandomlyInGroup() {
-    if (groupItems.length === 0) return;
-    const untranslated = groupItems.filter((i) => !i.hasTranslated);
-    const pool = untranslated.length > 0 ? untranslated : groupItems;
-    openSentence(pool[Math.floor(Math.random() * pool.length)]);
-  }
-
-  useEffect(() => {
-    if (!deepLinkSentenceId) return;
-    setLoadingSentence(true);
-    api.contributions
-      .getSentenceById(deepLinkSentenceId)
-      .then((s) => openSentence(s))
-      .catch((err) => setSentenceError(getErrorMessage(err, "Failed to load sentence")))
-      .finally(() => setLoadingSentence(false));
-    // Only ever run once, for the initial deep link.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkSentenceId]);
-
-  function openSentence(result: RandomSentence) {
+  function openSentence(result: SentenceItem) {
     setSubmitError(null);
+    setNavMessage(null);
     setDetailsOpen(false);
     setHistory((prev) => {
       const updated = [...prev, result];
@@ -201,26 +199,65 @@ function TranslatePageInner() {
     setStep("record");
   }
 
+  // "Continue": the next sentence in this category I haven't translated yet, in the category's order.
+  async function continueInCategory() {
+    if (!activeCategory) return;
+    setLoadingSentence(true);
+    setSentenceError(null);
+    try {
+      openSentence(await api.contributions.getNextSentence(activeCategory.id));
+    } catch (err) {
+      setSentenceError(getErrorMessage(err, "No sentences available"));
+    } finally {
+      setLoadingSentence(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!deepLinkSentenceId) return;
+    setLoadingSentence(true);
+    api.contributions
+      .getSentenceById(deepLinkSentenceId)
+      .then((s) => {
+        // So "Back" and "Next" stay inside the sentence's own category.
+        if (s.category) setActiveCategory({ id: s.category.id, name: s.category.name });
+        openSentence(s);
+      })
+      .catch((err) => setSentenceError(getErrorMessage(err, "Failed to load sentence")))
+      .finally(() => setLoadingSentence(false));
+    // Only ever run once, for the initial deep link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSentenceId]);
+
   function backFromRecord() {
-    setStep(activeGroupIndex !== null ? "group" : "groups");
+    setStep(activeCategory ? "category" : "categories");
   }
 
   function goPrevious() {
     if (historyIndex <= 0) return;
     setSubmitError(null);
+    setNavMessage(null);
     setDetailsOpen(false);
     setHistoryIndex((i) => i - 1);
   }
 
-  function goNext() {
+  async function goNext() {
     setSubmitError(null);
+    setNavMessage(null);
     if (historyIndex < history.length - 1) {
       setDetailsOpen(false);
       setHistoryIndex((i) => i + 1);
-    } else if (activeGroupIndex !== null) {
-      translateRandomlyInGroup();
-    } else if (languageId) {
-      fetchNewSentence(languageId);
+      return;
+    }
+    if (!activeCategory || !sentence) return;
+    setLoadingSentence(true);
+    try {
+      // The next untranslated sentence AFTER this one, in the category's order.
+      openSentence(await api.contributions.getNextSentence(activeCategory.id, sentence.id));
+    } catch (err) {
+      setNavMessage(getErrorMessage(err, "No more sentences in this category"));
+    } finally {
+      setLoadingSentence(false);
     }
   }
 
@@ -251,28 +288,25 @@ function TranslatePageInner() {
         delete next[sentence.id];
         return next;
       });
-      // Reflect the submission locally so the group's progress bar and this
+      // Reflect the submission locally so the category's progress and this
       // sentence's "Translated" badge update immediately without a re-fetch.
-      setGroupItems((prev) => prev.map((i) => (i.id === sentence.id ? { ...i, hasTranslated: true } : i)));
-      setGroups((prev) =>
-        activeGroupIndex === null
-          ? prev
-          : prev.map((g) => (g.groupIndex === activeGroupIndex ? { ...g, translatedCount: Math.min(g.sentenceCount, g.translatedCount + 1) } : g)),
-      );
+      const wasTranslated = sentence.hasTranslated;
+      const markDone = (i: SentenceItem) => (i.id === sentence.id ? { ...i, hasTranslated: true } : i);
+      setItems((prev) => prev.map(markDone));
+      setHistory((prev) => prev.map(markDone));
+      if (!wasTranslated && activeCategory) {
+        setCategories((prev) =>
+          prev.map((c) => (c.id === activeCategory.id ? { ...c, translatedCount: Math.min(c.sentenceCount, c.translatedCount + 1) } : c)),
+        );
+      }
 
       // Keep the submitted sentence in history (rather than dropping it) so
-      // Previous can navigate back to it -- the backend now overrides an
-      // existing translation for the same sentence instead of creating a
-      // duplicate, so recording again there replaces this submission.
+      // Previous can navigate back to it -- the backend overrides an existing
+      // translation for the same sentence instead of creating a duplicate, so
+      // recording again there replaces this submission.
       // Auto-advance is a per-user preference (Settings) -- off means the
       // just-submitted sentence stays on screen until Next is clicked.
-      if (autoLoadNext) {
-        if (activeGroupIndex !== null) {
-          translateRandomlyInGroup();
-        } else if (languageId) {
-          fetchNewSentence(languageId);
-        }
-      }
+      if (autoLoadNext) await goNext();
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to submit translation"));
     } finally {
@@ -283,14 +317,39 @@ function TranslatePageInner() {
   const canSubmit =
     !!sentence && !!languageId && !!draft.recording && draft.recording !== lastSubmittedRecording && !isSubmitting;
 
-  const visibleGroupItems = groupItems.filter((item) => {
-    if (groupFilter === "translated" && !item.hasTranslated) return false;
-    if (groupFilter === "untranslated" && item.hasTranslated) return false;
-    if (groupSearch.trim() && !item.englishText.toLowerCase().includes(groupSearch.trim().toLowerCase())) return false;
-    return true;
-  });
+  const languagePicker = (
+    <div className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+      <span>Read sentences in</span>
+      <div className="flex overflow-hidden rounded-lg ring-1 ring-border">
+        {LANGUAGES.map((l) => (
+          <button
+            key={l.value}
+            type="button"
+            onClick={() => choosePromptLanguage(l.value)}
+            className={`px-3 py-1.5 text-sm font-medium transition ${
+              promptLanguage === l.value ? "bg-brand text-ink-inverted" : "bg-surface-card text-ink hover:bg-border"
+            }`}
+          >
+            {l.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
-  if (step === "groups") {
+  const noLanguageNotice =
+    !languageId && !languageLoading ? (
+      <p className="text-center text-red-600">
+        Your language isn&apos;t set yet.{" "}
+        <Link href="/onboarding" className="font-semibold underline">
+          Complete your profile
+        </Link>{" "}
+        before contributing.
+      </p>
+    ) : null;
+
+  /* ------------------------------- categories ------------------------------- */
+  if (step === "categories") {
     return (
       <div className="mx-auto max-w-4xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -304,63 +363,35 @@ function TranslatePageInner() {
           <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">Translate a Sentence</h1>
         </div>
 
-        <label className="flex items-center gap-2 text-sm text-ink-muted">
-          Translate sentences from
-          <select
-            value={sourceLanguage}
-            onChange={(e) => {
-              setSourceLanguage(e.target.value as SentenceSourceLanguage | "");
-              setGroupsOffset(0);
-            }}
-            className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
-          >
-            {SOURCE_LANGUAGE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <p className="text-sm text-ink-muted">
+          Pick a topic. Each one has its sentences in a fixed order -- read each sentence and say it aloud in your language.
+        </p>
 
-        <button
-          onClick={() => languageId && fetchNewSentence(languageId)}
-          disabled={!languageId || loadingSentence}
-          className="btn-duo w-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
-        >
-          🎲 Translate Randomly
-        </button>
-
-        {!languageId && !languageLoading ? (
-          <p className="text-center text-red-600">
-            Your language isn&apos;t set yet.{" "}
-            <Link href="/onboarding" className="font-semibold underline">
-              Complete your profile
-            </Link>{" "}
-            before contributing.
-          </p>
-        ) : null}
+        {languagePicker}
+        {noLanguageNotice}
         {sentenceError ? <p className="text-center text-red-600">{sentenceError}</p> : null}
 
-        {loadingGroups ? (
+        {loadingCategories ? (
           <p className="text-ink-muted">Loading...</p>
-        ) : groupsError ? (
-          <p className="text-red-600">{groupsError}</p>
-        ) : groups.length === 0 ? (
-          <p className="text-ink-muted">No sentence groups found.</p>
+        ) : categoriesError ? (
+          <p className="text-red-600">{categoriesError}</p>
+        ) : categories.length === 0 ? (
+          <p className="text-ink-muted">No sentences are available yet -- please check back soon.</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
-            {groups.map((g) => {
-              const pct = g.sentenceCount > 0 ? Math.min(100, Math.round((g.translatedCount / g.sentenceCount) * 100)) : 0;
+            {categories.map((c) => {
+              const pct = c.sentenceCount > 0 ? Math.min(100, Math.round((c.translatedCount / c.sentenceCount) * 100)) : 0;
+              const done = c.sentenceCount > 0 && c.translatedCount >= c.sentenceCount;
               return (
                 <button
-                  key={g.groupIndex}
-                  onClick={() => openGroup(g.groupIndex)}
+                  key={c.id}
+                  onClick={() => openCategory(c)}
                   className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-5 text-center shadow-sm transition hover:shadow-md"
                 >
-                  <span className="text-3xl">📚</span>
-                  <span className="font-semibold text-ink">Group {g.groupIndex + 1}</span>
+                  <span className="text-3xl">{done ? "✅" : "💬"}</span>
+                  <span className="font-semibold text-ink">{c.name}</span>
                   <span className="text-xs text-ink-muted">
-                    {g.translatedCount} / {g.sentenceCount} translated
+                    {c.translatedCount} / {c.sentenceCount} translated
                   </span>
                   <div className="progress-duo-track h-1.5 w-full">
                     <div className="progress-duo-fill bg-brand" style={{ width: `${pct}%` }} />
@@ -370,52 +401,49 @@ function TranslatePageInner() {
             })}
           </div>
         )}
-
-        <Pagination
-          offset={groupsOffset}
-          limit={groupsLimit}
-          total={groupsTotal}
-          onChange={setGroupsOffset}
-          onLimitChange={handleGroupsLimitChange}
-          showPageNumbers
-        />
       </div>
     );
   }
 
-  if (step === "group") {
+  /* ------------------------------- one category ------------------------------- */
+  if (step === "category") {
     return (
       <div className="mx-auto max-w-2xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <button
-            onClick={() => setStep("groups")}
+            onClick={() => setStep("categories")}
             className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
-            ← Back to groups
+            ← All topics
           </button>
-          <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">
-            Group {activeGroupIndex !== null ? activeGroupIndex + 1 : ""}
-          </h1>
+          <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">{activeCategory?.name}</h1>
         </div>
 
+        {languagePicker}
+
         <button
-          onClick={translateRandomlyInGroup}
-          disabled={loadingGroup || groupItems.length === 0}
+          onClick={continueInCategory}
+          disabled={loadingSentence || !languageId}
           className="btn-duo w-full bg-emerald-600 py-3 font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
         >
-          🎲 Translate Randomly (this group)
+          {loadingSentence ? "Loading..." : "▶ Continue with the next sentence"}
         </button>
+        {noLanguageNotice}
+        {sentenceError ? <p className="text-center text-red-600">{sentenceError}</p> : null}
 
         <div className="flex flex-wrap gap-3">
           <input
-            value={groupSearch}
-            onChange={(e) => setGroupSearch(e.target.value)}
-            placeholder="Search this group's sentences..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search this topic (any language)..."
             className="min-w-0 flex-1 rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
           />
           <select
-            value={groupFilter}
-            onChange={(e) => setGroupFilter(e.target.value as TranslatedFilter)}
+            value={filter}
+            onChange={(e) => {
+              setFilter(e.target.value as TranslatedFilter);
+              setOffset(0);
+            }}
             className="rounded-lg bg-surface-card px-4 py-3 text-sm text-ink ring-1 ring-border"
           >
             <option value="">All sentences</option>
@@ -424,37 +452,53 @@ function TranslatePageInner() {
           </select>
         </div>
 
-        {loadingGroup ? (
+        {loadingList ? (
           <p className="text-ink-muted">Loading...</p>
-        ) : groupError ? (
-          <p className="text-red-600">{groupError}</p>
-        ) : visibleGroupItems.length === 0 ? (
+        ) : listError ? (
+          <p className="text-red-600">{listError}</p>
+        ) : items.length === 0 ? (
           <p className="text-ink-muted">No sentences match.</p>
         ) : (
           <div className="space-y-2">
-            {visibleGroupItems.map((item) => (
+            {items.map((item, index) => (
+              // The row itself follows the reading direction: for Urdu/Persian the number sits on the right, the text
+              // starts at the right edge and the "Translated" badge ends up on the left. (`text-start`, not `text-left`,
+              // so right-to-left text isn't forced to the left edge.)
               <button
                 key={item.id}
                 onClick={() => openSentence(item)}
-                className={`card-duo flex w-full items-center justify-between gap-3 rounded-2xl p-4 text-left shadow-sm transition hover:shadow-md ${
+                dir={textDirection(promptLanguage)}
+                className={`card-duo flex w-full items-center justify-between gap-3 rounded-2xl p-4 text-start shadow-sm transition hover:shadow-md ${
                   item.hasTranslated ? "bg-brand-light/40" : "bg-surface"
                 }`}
               >
+                <span className="w-7 flex-shrink-0 text-xs font-semibold text-ink-muted">{offset + index + 1}</span>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-ink" dir={textDirection(item.sourceLanguage)}>
-                    {item.englishText}
-                  </p>
+                  <p className="truncate font-medium text-ink">{textIn(item, promptLanguage)}</p>
                 </div>
-                {item.hasTranslated ? (
-                  <span className="flex-shrink-0 text-xs font-semibold text-brand-dark">✓ Translated</span>
-                ) : null}
+                {item.hasTranslated ? <span className="flex-shrink-0 text-xs font-semibold text-brand-dark">✓ Translated</span> : null}
               </button>
             ))}
           </div>
         )}
+
+        <Pagination
+          offset={offset}
+          limit={limit}
+          total={total}
+          onChange={setOffset}
+          onLimitChange={(n) => {
+            setLimit(n);
+            setOffset(0);
+          }}
+          showPageNumbers
+        />
       </div>
     );
   }
+
+  /* ---------------------------------- record ---------------------------------- */
+  const otherLanguages = LANGUAGES.filter((l) => l.value !== promptLanguage);
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
@@ -462,20 +506,36 @@ function TranslatePageInner() {
         onClick={backFromRecord}
         className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
       >
-        ← Back to sentences
+        ← Back to {activeCategory ? activeCategory.name : "topics"}
       </button>
 
-      {loadingSentence ? (
+      {loadingSentence && !sentence ? (
         <p className="text-ink-muted">Loading...</p>
       ) : sentenceError || !sentence ? (
         <p className="text-red-600">{sentenceError ?? "No sentences available"}</p>
       ) : (
         <>
+          {languagePicker}
+
           <div className="card-duo rounded-2xl bg-surface p-5 shadow-sm">
-            <p className="text-xl font-bold text-ink" dir={textDirection(sentence.sourceLanguage)}>
-              {sentence.englishText}
+            {sentence.category ? <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-muted">{sentence.category.name}</p> : null}
+            <p className="text-xl font-bold text-ink" dir={textDirection(promptLanguage)}>
+              {textIn(sentence, promptLanguage)}
             </p>
-            <div className="mt-2 flex justify-end">
+            <div className="mt-3 space-y-1.5 border-t border-border pt-3">
+              {otherLanguages.map((l) => (
+                // A fixed label column, then the text in its own reading direction -- so the labels line up on the
+                // left whichever scripts are shown, and the text itself isn't tangled up with the label.
+                <div key={l.value} className="flex items-baseline gap-3 text-sm text-ink-muted">
+                  <span className="w-16 flex-shrink-0 text-[10px] font-semibold uppercase">{LANGUAGE_NAME[l.value]}</span>
+                  <span className="min-w-0 flex-1 text-start" dir={textDirection(l.value)}>
+                    {textIn(sentence, l.value)}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 flex items-center justify-between">
+              {sentence.hasTranslated ? <span className="text-xs font-semibold text-brand-dark">✓ You&apos;ve translated this -- recording again replaces it</span> : <span />}
               <Link href={`/forum?sentenceId=${sentence.id}`} className="text-xs font-semibold text-brand hover:underline">
                 💬 Share to Forum
               </Link>
@@ -525,16 +585,9 @@ function TranslatePageInner() {
             )}
           </div>
 
-          {!languageId && !languageLoading ? (
-            <p className="text-center text-red-600">
-              Your language isn&apos;t set yet.{" "}
-              <Link href="/onboarding" className="font-semibold underline">
-                Complete your profile
-              </Link>{" "}
-              before contributing.
-            </p>
-          ) : null}
+          {noLanguageNotice}
           {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+          {navMessage ? <p className="text-center text-ink-muted">{navMessage}</p> : null}
 
           <div className="flex gap-3">
             <button
@@ -546,7 +599,8 @@ function TranslatePageInner() {
             </button>
             <button
               onClick={goNext}
-              className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border"
+              disabled={loadingSentence}
+              className="btn-duo btn-duo-secondary flex-1 bg-surface-card py-3 font-semibold text-ink transition hover:bg-border disabled:opacity-50"
             >
               Next →
             </button>
