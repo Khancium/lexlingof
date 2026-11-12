@@ -6,6 +6,7 @@ import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { storageService } from "../../../services/storage.service.js";
 import { computeStreakDisplay, updateStreakOnContribution } from "../../../services/streak.service.js";
+import { awardBadgesInBackground } from "../../gamification/gamification.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
@@ -223,6 +224,8 @@ export async function submitWordRecording(userId: string, data: SubmitWordRecord
       console.error("[word] sendLevelUpNotification failed:", err);
     }
   }
+
+  awardBadgesInBackground(userId);
 
   await writeAuditLog({
     actorId: userId,

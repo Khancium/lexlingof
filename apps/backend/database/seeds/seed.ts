@@ -125,6 +125,10 @@ const PERMISSIONS: { code: string; description: string }[] = [
   { code: "admins.manage", description: "Grant or revoke admin and super-admin roles" },
   { code: "system.manage", description: "Configure system-wide settings and feature flags" },
   { code: "volunteers.manage", description: "Assign the volunteer role, review their pending changes, and toggle auto-approve" },
+  {
+    code: "publishing.manage",
+    description: "Curate which word recordings and sentence translations are published to the public dictionary / language-learning feed",
+  },
   { code: "exports.create", description: "Request a data export" },
   { code: "exports.manage", description: "Manage and fulfil data export requests" },
   { code: "analytics.read", description: "View analytics and reporting dashboards" },
@@ -179,6 +183,7 @@ const ADMIN_PERMISSION_CODES = [
   "analytics.read",
   "audit.read",
   "volunteers.manage",
+  "publishing.manage",
 ];
 
 /**
@@ -359,32 +364,43 @@ const DEMO_USERS: { displayName: string; email: string; role: "contributor" | "a
 /* -------------------------------------------------------------------------- */
 
 async function main() {
+  // The three sections below are insert-or-skip so the seed can be re-run, and so it
+  // works on a database that has already been through the migrations: migration 0007
+  // inserts the `points.audio.translation` config row itself, and the plain INSERT
+  // here used to violate uq_gamification_config_key_active on a freshly migrated
+  // database -- aborting this section after the feature flags had already committed.
   await runSection("feature flags", async (tx) => {
-    await tx.insert(featureFlags).values(FEATURE_FLAGS);
+    await tx.insert(featureFlags).values(FEATURE_FLAGS).onConflictDoNothing();
   });
 
   await runSection("gamification config", async (tx) => {
-    await tx.insert(gamificationConfig).values(
-      GAMIFICATION_CONFIG.map((c) => ({
-        configKey: c.configKey,
-        configValue: { value: c.value },
-        description: c.description,
-      })),
-    );
+    await tx
+      .insert(gamificationConfig)
+      .values(
+        GAMIFICATION_CONFIG.map((c) => ({
+          configKey: c.configKey,
+          configValue: { value: c.value },
+          description: c.description,
+        })),
+      )
+      .onConflictDoNothing();
   });
 
   await runSection("permissions", async (tx) => {
-    await tx.insert(permissions).values(
-      PERMISSIONS.map((p) => {
-        const [module, ...rest] = p.code.split(".");
-        return {
-          code: p.code,
-          description: p.description,
-          module,
-          action: rest.join(".") || "manage",
-        };
-      }),
-    );
+    await tx
+      .insert(permissions)
+      .values(
+        PERMISSIONS.map((p) => {
+          const [module, ...rest] = p.code.split(".");
+          return {
+            code: p.code,
+            description: p.description,
+            module,
+            action: rest.join(".") || "manage",
+          };
+        }),
+      )
+      .onConflictDoNothing({ target: permissions.code });
 
     const allPermissions = await tx.select({ id: permissions.id, code: permissions.code }).from(permissions);
     const idByCode = new Map(allPermissions.map((p) => [p.code, p.id]));
@@ -400,7 +416,7 @@ async function main() {
         }),
     );
 
-    await tx.insert(rolePermissions).values(roleRows);
+    await tx.insert(rolePermissions).values(roleRows).onConflictDoNothing();
   });
 
   const { pashtoId } = await runSection("languages", async (tx) => {

@@ -59,6 +59,7 @@ import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/
 import { invalidateCategoriesCache } from "../categories/categories.routes.js";
 import { gateVolunteerAction, getPendingChangeById, requirePendingRow, markApproved, markRejected, listPendingChanges, countPendingByVolunteer, setAutoApprove, isAutoApproved } from "../../services/pending-changes.service.js";
 import { storageService } from "../../services/storage.service.js";
+import { contributionStatusFields } from "../../services/contribution-status.service.js";
 import { assertCanGrantAdminTo, assertCanModerateAll, assertCanModerateUser } from "../../services/moderation-guards.service.js";
 import { buildUsersCsv, buildUsersPdf, fetchUserReportRows, userReportQuery } from "./user-report.service.js";
 import { reviveAuditState } from "../../utils/audit-state.js";
@@ -1624,15 +1625,35 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
 
     const [existing] = await db
-      .select({ id: contributions.id, userId: contributions.userId, moduleType: contributions.moduleType, status: contributions.status })
+      .select({
+        id: contributions.id,
+        userId: contributions.userId,
+        moduleType: contributions.moduleType,
+        status: contributions.status,
+        deletedAt: contributions.deletedAt,
+      })
       .from(contributions)
       .where(eq(contributions.id, id))
       .limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Contribution not found");
     }
+    // Deleting twice used to reverse the contributor's stats twice (and log a second
+    // delete over the first).
+    if (existing.deletedAt) {
+      throw new HttpError(409, "ALREADY_DELETED", "This contribution has already been deleted");
+    }
 
-    await db.update(contributions).set({ deletedAt: new Date(), updatedAt: new Date() }).where(eq(contributions.id, id));
+    // Conditional on "not deleted yet", so two simultaneous deletes can't both go on
+    // to reverse the stats: only the one that actually flips the row does.
+    const [deleted] = await db
+      .update(contributions)
+      .set({ deletedAt: new Date(), updatedAt: new Date() })
+      .where(and(eq(contributions.id, id), isNull(contributions.deletedAt)))
+      .returning({ id: contributions.id });
+    if (!deleted) {
+      throw new HttpError(409, "ALREADY_DELETED", "This contribution has already been deleted");
+    }
     await reverseContributionStatsOnDelete(existing.userId, existing.moduleType, existing.status);
 
     await writeAuditLog({
@@ -1669,11 +1690,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         rejectionReason: contributions.rejectionReason,
       })
       .from(contributions)
-      .where(inArray(contributions.id, ids));
+      // Deleted contributions are skipped, like the bulk delete above does.
+      .where(and(inArray(contributions.id, ids), isNull(contributions.deletedAt)));
     if (rows.length === 0) return { updated: 0 };
 
-    const updates: Record<string, unknown> = { status, updatedAt: new Date() };
-    if (status === "rejected") updates.rejectionReason = reason ?? null;
+    const updates = { ...contributionStatusFields(status, reason ?? null, request.user!.id), updatedAt: new Date() };
 
     await db.update(contributions).set(updates).where(inArray(contributions.id, rows.map((r) => r.id)));
 
@@ -1849,7 +1870,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     const body = updateContributionStatusSchema.parse(request.body);
 
-    const [contribution] = await db
+    const [row] = await db
       .select({
         status: contributions.status,
         verifiedAt: contributions.verifiedAt,
@@ -1857,18 +1878,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         rejectedAt: contributions.rejectedAt,
         rejectedBy: contributions.rejectedBy,
         rejectionReason: contributions.rejectionReason,
+        deletedAt: contributions.deletedAt,
       })
       .from(contributions)
       .where(eq(contributions.id, id))
       .limit(1);
-    if (!contribution) {
+    if (!row || row.deletedAt) {
       throw new HttpError(404, "NOT_FOUND", "Contribution not found");
     }
+    // The saved "before" state must not include deletedAt: undoing this status
+    // change later would otherwise write that old null back and silently restore a
+    // contribution that was deleted in the meantime.
+    const { deletedAt: _deletedAt, ...contribution } = row;
 
-    const updates: Record<string, unknown> = { status: body.status, updatedAt: new Date() };
-    if (body.status === "rejected") {
-      updates.rejectionReason = body.reason ?? null;
-    }
+    const updates = { ...contributionStatusFields(body.status, body.reason ?? null, request.user!.id), updatedAt: new Date() };
 
     await db.update(contributions).set(updates).where(eq(contributions.id, id));
 
@@ -2575,7 +2598,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/concepts/bulk-delete", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
-    const rows = await db.select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt }).from(concepts).where(inArray(concepts.id, ids));
+    // Already-deleted rows are skipped: re-deleting overwrote their original deleted_at
+    // and logged a before-state that made the audit trail (and undo) misleading.
+    const rows = await db
+      .select({ id: concepts.id, isActive: concepts.isActive, deletedAt: concepts.deletedAt })
+      .from(concepts)
+      .where(and(inArray(concepts.id, ids), isNull(concepts.deletedAt)));
     if (rows.length === 0) return { deleted: 0 };
 
     await db.update(concepts).set({ isActive: false, deletedAt: new Date() }).where(inArray(concepts.id, rows.map((r) => r.id)));
@@ -3142,7 +3170,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes/bulk-delete", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
-    const rows = await db.select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt }).from(scenes).where(inArray(scenes.id, ids));
+    // Already-deleted rows are skipped (see the concepts bulk-delete).
+    const rows = await db
+      .select({ id: scenes.id, isActive: scenes.isActive, deletedAt: scenes.deletedAt })
+      .from(scenes)
+      .where(and(inArray(scenes.id, ids), isNull(scenes.deletedAt)));
     if (rows.length === 0) return { deleted: 0 };
 
     await db.update(scenes).set({ isActive: false, deletedAt: new Date() }).where(inArray(scenes.id, rows.map((r) => r.id)));
@@ -3773,7 +3805,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/sentences/bulk-delete", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
-    const rows = await db.select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt }).from(sentences).where(inArray(sentences.id, ids));
+    // Already-deleted rows are skipped (see the concepts bulk-delete).
+    const rows = await db
+      .select({ id: sentences.id, isActive: sentences.isActive, deletedAt: sentences.deletedAt })
+      .from(sentences)
+      .where(and(inArray(sentences.id, ids), isNull(sentences.deletedAt)));
     if (rows.length === 0) return { deleted: 0 };
 
     await db.update(sentences).set({ isActive: false, deletedAt: new Date() }).where(inArray(sentences.id, rows.map((r) => r.id)));

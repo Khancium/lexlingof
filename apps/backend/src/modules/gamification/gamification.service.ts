@@ -29,8 +29,31 @@ export type AwardedBadge = {
   earnedAt: Date;
 };
 
-export async function evaluateAndAwardBadges(userId: string): Promise<AwardedBadge[]> {
-  const [stats] = await db.select().from(userStats).where(eq(userStats.userId, userId)).limit(1);
+/**
+ * Fire-and-forget wrapper for the places that should trigger badge evaluation: after a
+ * contribution is submitted and after a review. A badge problem (a DB hiccup, a push
+ * failure) must never slow down or fail the contribution/review that triggered it, so
+ * this is deliberately not awaited and only ever logs.
+ *
+ * evaluateAndAwardBadges had no callers at all, so no badge had ever been awarded.
+ * It is idempotent (already-earned badges are skipped and inserts are ON CONFLICT DO
+ * NOTHING), so calling it on every trigger is safe; a user's FIRST trigger after this
+ * shipped awards everything they already qualify for in one go.
+ */
+export function awardBadgesInBackground(userId: string): void {
+  evaluateAndAwardBadges(userId).catch((err) => console.error("[gamification] evaluateAndAwardBadges failed:", err));
+}
+
+type DbOrTx = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export async function evaluateAndAwardBadges(
+  userId: string,
+  // Overridable so it can be exercised inside a rolled-back transaction, with pushes
+  // off, without leaving rows behind or notifying a real device.
+  options: { executor?: DbOrTx; sendPush?: boolean } = {},
+): Promise<AwardedBadge[]> {
+  const ex = options.executor ?? db;
+  const [stats] = await ex.select().from(userStats).where(eq(userStats.userId, userId)).limit(1);
   if (!stats) {
     return [];
   }
@@ -38,9 +61,9 @@ export async function evaluateAndAwardBadges(userId: string): Promise<AwardedBad
   // Independent of each other -- fetched concurrently instead of as three
   // sequential round trips.
   const [[streak], activeBadges, earnedRows] = await Promise.all([
-    db.select({ currentStreak: streaks.currentStreak }).from(streaks).where(eq(streaks.userId, userId)).limit(1),
-    db.select().from(badges).where(eq(badges.isActive, true)),
-    db.select({ badgeId: userBadges.badgeId }).from(userBadges).where(eq(userBadges.userId, userId)),
+    ex.select({ currentStreak: streaks.currentStreak }).from(streaks).where(eq(streaks.userId, userId)).limit(1),
+    ex.select().from(badges).where(eq(badges.isActive, true)),
+    ex.select({ badgeId: userBadges.badgeId }).from(userBadges).where(eq(userBadges.userId, userId)),
   ]);
   const currentStreak = streak?.currentStreak ?? 0;
   const earnedBadgeIds = new Set(earnedRows.map((r) => r.badgeId));
@@ -100,7 +123,7 @@ export async function evaluateAndAwardBadges(userId: string): Promise<AwardedBad
     return [];
   }
 
-  const inserted = await db
+  const inserted = await ex
     .insert(userBadges)
     .values(qualifyingBadgeIds.map((badgeId) => ({ userId, badgeId })))
     .onConflictDoNothing()
@@ -118,7 +141,7 @@ export async function evaluateAndAwardBadges(userId: string): Promise<AwardedBad
   });
 
   if (awarded.length > 0) {
-    await db.insert(notifications).values(
+    await ex.insert(notifications).values(
       awarded.map((badge) => ({
         userId,
         channel: "push" as const,
@@ -130,11 +153,20 @@ export async function evaluateAndAwardBadges(userId: string): Promise<AwardedBad
     );
 
     // Best-effort push per badge; a delivery failure never blocks awarding.
-    for (const badge of awarded) {
-      try {
-        await sendBadgeEarnedNotification(userId, badge.name, badge.icon);
-      } catch (err) {
-        console.error("[gamification] sendBadgeEarnedNotification failed:", err);
+    if (options.sendPush ?? true) {
+      // A user's first evaluation can award a whole backlog at once (badges were never
+      // awarded before, so existing contributors already qualify for several) -- one
+      // summary push instead of a burst. The in-app rows above are still one per badge.
+      const pushes =
+        awarded.length > 3
+          ? [{ name: `${awarded.length} new badges unlocked`, icon: "🏆" }]
+          : awarded.map((b) => ({ name: b.name, icon: b.icon }));
+      for (const push of pushes) {
+        try {
+          await sendBadgeEarnedNotification(userId, push.name, push.icon);
+        } catch (err) {
+          console.error("[gamification] sendBadgeEarnedNotification failed:", err);
+        }
       }
     }
   }

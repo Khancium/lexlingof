@@ -26,6 +26,7 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { awardPointsOnce } from "../../services/points.service.js";
+import { awardBadgesInBackground } from "../gamification/gamification.service.js";
 import { sendContributionVerifiedNotification } from "../notifications/push.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -523,6 +524,11 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
       console.error("[reviews] sendContributionVerifiedNotification failed:", err);
     }
   }
+
+  // Badges that a review can unlock: the reviewer's review count, and -- on a valid
+  // decision -- the contributor's verified count. Fire-and-forget, never fails the review.
+  awardBadgesInBackground(reviewerId);
+  if (result.decision === "valid") awardBadgesInBackground(contribution.userId);
 
   return result;
 }
