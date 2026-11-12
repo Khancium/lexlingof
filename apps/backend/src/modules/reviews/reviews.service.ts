@@ -25,6 +25,7 @@ import {
   users,
   wordRecordings,
 } from "../../db/schema.js";
+import { awardPointsOnce } from "../../services/points.service.js";
 import { sendContributionVerifiedNotification } from "../notifications/push.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -317,7 +318,23 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
   }
 
   const result = await db.transaction(async (tx) => {
-    // 4. Status before the review.
+    // 3b. Re-check "still pending" INSIDE the transaction, holding a row lock
+    // until it commits. Check 3 above ran outside any transaction, so two
+    // reviewers submitting at the same moment both passed it, both applied a
+    // decision, and both bumped the contributor's counters (verified +2,
+    // pending -2). With the lock, the second one blocks here until the first
+    // commits, then re-evaluates the WHERE against the now-decided row, finds
+    // nothing, and gets the same 409 a late reviewer always got.
+    const [stillPending] = await tx
+      .select({ id: contributions.id })
+      .from(contributions)
+      .where(and(eq(contributions.id, contribution.id), eq(contributions.status, "pending")))
+      .for("update");
+    if (!stillPending) {
+      throw new HttpError(409, "CONTRIBUTION_NOT_PENDING", "This contribution has already been reviewed");
+    }
+
+    // 4. Status before the review (guaranteed "pending" by the lock above).
     const statusBefore = contribution.status;
 
     // 5. Apply the decision.
@@ -401,59 +418,76 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
       readConfigValue(tx, REVIEW_AWARD_CONFIG_KEY),
       data.decision === "valid" ? readConfigValue(tx, VERIFIED_BONUS_CONFIG_KEY[contribution.moduleType]) : Promise.resolve(0),
     ]);
-    await tx
-      .insert(pointsTransactions)
-      .values({
-        userId: reviewerId,
-        contributionId: contribution.id,
-        points: reviewAward,
-        reason: "REVIEW_COMPLETED",
-        moduleType: contribution.moduleType,
-        idempotencyKey: `${contribution.id}:REVIEWER_${reviewerId}`,
-      })
-      .onConflictDoNothing();
+    // awardPointsOnce keeps the ledger and user_stats.total_points in step --
+    // the reviewer's award used to reach the ledger only, never the total.
+    await awardPointsOnce(tx, {
+      userId: reviewerId,
+      contributionId: contribution.id,
+      points: reviewAward,
+      reason: "REVIEW_COMPLETED",
+      moduleType: contribution.moduleType,
+      idempotencyKey: `${contribution.id}:REVIEWER_${reviewerId}`,
+    });
 
     let contributorPointsAwarded = 0;
 
     if (data.decision === "valid") {
-      // 10a. Verified bonus for this module -- already fetched above.
-      contributorPointsAwarded = verifiedBonus;
+      // 10a/10b. Verified bonus for this module (config already fetched
+      // above), idempotent per contribution. `firstVerification` is false when
+      // this contribution was verified before and has since been retaken and
+      // is being re-verified: no new points, and -- below -- no second bump of
+      // the verified counters either.
+      const firstVerification = await awardPointsOnce(tx, {
+        userId: contribution.userId,
+        contributionId: contribution.id,
+        points: verifiedBonus,
+        reason: "CONTRIBUTION_VERIFIED",
+        moduleType: contribution.moduleType,
+        idempotencyKey: `${contribution.id}:VERIFIED`,
+      });
 
-      // 10b. Contributor points, idempotent per contribution.
-      await tx
-        .insert(pointsTransactions)
-        .values({
-          userId: contribution.userId,
-          contributionId: contribution.id,
-          points: verifiedBonus,
-          reason: "CONTRIBUTION_VERIFIED",
-          moduleType: contribution.moduleType,
-          idempotencyKey: `${contribution.id}:VERIFIED`,
-        })
-        .onConflictDoNothing();
+      if (firstVerification) {
+        contributorPointsAwarded = verifiedBonus;
 
-      // 10c. Contributor stats: verified/pending counters, per-module
-      // counter, and total_points. Level is NOT recalculated here -- it
-      // depends on total contribution count (set at submission time in
-      // each module's submit service), not verified count, so verifying a
-      // contribution doesn't move it.
-      const moduleCounterUpdate =
-        contribution.moduleType === "WORD"
-          ? { verifiedWords: sql`${userStats.verifiedWords} + 1` }
-          : contribution.moduleType === "TRANSCRIPTION"
-            ? { verifiedAudios: sql`${userStats.verifiedAudios} + 1` }
-            : contribution.moduleType === "TRANSLATION"
-              ? { verifiedTranslations: sql`${userStats.verifiedTranslations} + 1` }
-              : { verifiedScenes: sql`${userStats.verifiedScenes} + 1` };
+        // 10c. Contributor stats: verified/pending counters and the
+        // per-module counter (total_points was handled by awardPointsOnce).
+        // Level is NOT recalculated here -- it depends on total contribution
+        // count (set at submission time in each module's submit service), not
+        // verified count, so verifying a contribution doesn't move it.
+        // pending is floored at 0: counters drifted before this fix (every
+        // rejection left `pending` too high, and a retake doesn't re-add to
+        // it), so a blind -1 could otherwise go negative.
+        const moduleCounterUpdate =
+          contribution.moduleType === "WORD"
+            ? { verifiedWords: sql`${userStats.verifiedWords} + 1` }
+            : contribution.moduleType === "TRANSCRIPTION"
+              ? { verifiedAudios: sql`${userStats.verifiedAudios} + 1` }
+              : contribution.moduleType === "TRANSLATION"
+                ? { verifiedTranslations: sql`${userStats.verifiedTranslations} + 1` }
+                : { verifiedScenes: sql`${userStats.verifiedScenes} + 1` };
 
+        await tx
+          .update(userStats)
+          .set({
+            verifiedContributions: sql`${userStats.verifiedContributions} + 1`,
+            pendingContributions: sql`greatest(${userStats.pendingContributions} - 1, 0)`,
+            updatedAt: new Date(),
+            ...moduleCounterUpdate,
+          })
+          .where(eq(userStats.userId, contribution.userId));
+      }
+    } else if (data.decision === "invalid") {
+      // 10d. A rejection used to leave the contributor's stats untouched, so
+      // `pending` never went back down and `rejected` stayed 0 forever. Move
+      // it from pending to rejected, floored at 0 for the same drift reason
+      // as above. (adjustContributionStats in admin.routes.ts reverses this
+      // when an admin deletes a rejected contribution.)
       await tx
         .update(userStats)
         .set({
-          verifiedContributions: sql`${userStats.verifiedContributions} + 1`,
-          pendingContributions: sql`${userStats.pendingContributions} - 1`,
-          totalPoints: sql`${userStats.totalPoints} + ${verifiedBonus}`,
+          pendingContributions: sql`greatest(${userStats.pendingContributions} - 1, 0)`,
+          rejectedContributions: sql`${userStats.rejectedContributions} + 1`,
           updatedAt: new Date(),
-          ...moduleCounterUpdate,
         })
         .where(eq(userStats.userId, contribution.userId));
     }

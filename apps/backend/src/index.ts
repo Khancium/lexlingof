@@ -29,6 +29,8 @@ import wordRoutes from "./modules/contributions/word/word.routes.js";
 import bufferRoutes from "./modules/contributions/buffer/buffer.routes.js";
 import forumRoutes from "./modules/forum/forum.routes.js";
 import termsRoutes from "./modules/terms/terms.routes.js";
+import healthRoutes from "./modules/health/health.routes.js";
+import { startDbWatchdog } from "./services/db-watchdog.service.js";
 import { startSubmissionBufferWorker } from "./services/submission-buffer.service.js";
 import { HttpError } from "./utils/http-error.js";
 
@@ -141,11 +143,13 @@ await server.register(publicContentRoutes, { prefix: "/api/v1" });
 await server.register(forumRoutes, { prefix: "/api/v1/forum" });
 await server.register(termsRoutes, { prefix: "/api/v1" });
 
-// Health checks. The versioned one is what was asked for; the bare one is
-// kept too since it's what infra (load balancers, Railway, etc.) commonly
-// probes by default and nothing asked to remove it.
+// Health checks. The bare /health is a pure liveness probe (process is up --
+// what load balancers and Railway commonly hit by default, and it must stay
+// cheap and DB-independent). /api/v1/health is the readiness check: it runs a
+// query through the DB pool and returns 503 if that fails, so a monitor
+// pointed at it notices a wedged pool that /health would report as fine.
 server.get("/health", async () => ({ status: "ok" }));
-server.get("/api/v1/health", async () => ({ status: "ok", service: "Lexlingo API", timestamp: new Date() }));
+await server.register(healthRoutes, { prefix: "/api/v1" });
 
 // 6. Start the server -- host 0.0.0.0 is required for Railway deployment.
 const port = Number(process.env.PORT ?? 3001);
@@ -154,6 +158,7 @@ const host = process.env.HOST ?? "0.0.0.0";
 try {
   await server.listen({ port, host });
   startSubmissionBufferWorker();
+  startDbWatchdog();
   server.log.info(`Lexlingo API running on port ${port}`);
 } catch (err) {
   server.log.error(err);

@@ -12,6 +12,7 @@ import {
 } from "../../../db/schema.js";
 import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
+import { awardPointsOnce } from "../../../services/points.service.js";
 import { updateStreakOnContribution } from "../../../services/streak.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
@@ -148,10 +149,10 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
     // 5, 6, 7: independent of each other (none reads a value the others
     // write), so issued together instead of as three sequential round
     // trips -- postgres.js pipelines queries sent this way on one
-    // connection. (Spec lists only two counters here -- unlike
-    // word.service's submitWordRecording, there is no explicit step
-    // incrementing user_stats.totalPoints for audio uploads or for
-    // addTranscription/addSegment below; see the module-level note.)
+    // connection. total_points is incremented inline (the contribution id is
+    // brand new, so the ledger insert can't conflict); addTranscription and
+    // addSegment below go through awardPointsOnce, which keeps the ledger and
+    // total_points in step. Both were previously missing.
     // Resolved before the batch below -- see word.service.ts's identical comment.
     const levelExpr = await levelUpdateExpr(1);
 
@@ -173,6 +174,7 @@ export async function submitAudioUpload(userId: string, data: SubmitAudioUploadI
           totalContributions: sql`${userStats.totalContributions} + 1`,
           audioContributions: sql`${userStats.audioContributions} + 1`,
           pendingContributions: sql`${userStats.pendingContributions} + 1`,
+          totalPoints: sql`${userStats.totalPoints} + ${basePoints}`,
           level: levelExpr,
           lastContributionAt: new Date(),
           lastContributionModule: "TRANSCRIPTION",
@@ -260,17 +262,14 @@ export async function addTranscription(userId: string, audioUploadId: string, da
     if (data.englishTranslation) pointsAwarded += await readConfigValue(tx, "points.audio.translation");
 
     if (pointsAwarded > 0) {
-      await tx
-        .insert(pointsTransactions)
-        .values({
-          userId,
-          contributionId,
-          points: pointsAwarded,
-          reason: "TRANSCRIPTION_ADDED",
-          moduleType: "TRANSCRIPTION",
-          idempotencyKey: `${audioUploadId}:TRANSCRIPTION_v${version}`,
-        })
-        .onConflictDoNothing();
+      await awardPointsOnce(tx, {
+        userId,
+        contributionId,
+        points: pointsAwarded,
+        reason: "TRANSCRIPTION_ADDED",
+        moduleType: "TRANSCRIPTION",
+        idempotencyKey: `${audioUploadId}:TRANSCRIPTION_v${version}`,
+      });
     }
 
     return { transcriptionId: transcription.id, version, pointsAwarded };
@@ -307,17 +306,14 @@ export async function addSegment(userId: string, audioUploadId: string, data: Ad
 
     const pointsAwarded = await readConfigValue(tx, "points.audio.segment");
 
-    await tx
-      .insert(pointsTransactions)
-      .values({
-        userId,
-        contributionId,
-        points: pointsAwarded,
-        reason: "SEGMENT_ADDED",
-        moduleType: "TRANSCRIPTION",
-        idempotencyKey: `${audioUploadId}:SEGMENT_${data.segmentIndex}`,
-      })
-      .onConflictDoNothing();
+    await awardPointsOnce(tx, {
+      userId,
+      contributionId,
+      points: pointsAwarded,
+      reason: "SEGMENT_ADDED",
+      moduleType: "TRANSCRIPTION",
+      idempotencyKey: `${audioUploadId}:SEGMENT_${data.segmentIndex}`,
+    });
 
     return { segmentId: segment.id, pointsAwarded };
   });

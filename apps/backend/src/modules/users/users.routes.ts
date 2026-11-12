@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, getTableColumns, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -27,6 +27,7 @@ import {
 import { verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
 import { storageService } from "../../services/storage.service.js";
+import { POINTS_PERIOD_DAYS, pointsInLastDays } from "../../services/points.service.js";
 import { computeStreakDisplay } from "../../services/streak.service.js";
 import { HttpError } from "../../utils/http-error.js";
 import { safeExtension } from "../../utils/filename.js";
@@ -53,7 +54,8 @@ async function getOwnProfile(userId: string) {
       totalPoints: userStats.totalPoints,
       verifiedContributions: userStats.verifiedContributions,
       totalContributions: userStats.totalContributions,
-      pointsThisWeek: userStats.pointsThisWeek,
+      // From the ledger -- user_stats.points_this_week is never written.
+      pointsThisWeek: pointsInLastDays("users.id", POINTS_PERIOD_DAYS.weekly),
       lastContributionAt: userStats.lastContributionAt,
       currentStreak: streaks.currentStreak,
       longestStreak: streaks.longestStreak,
@@ -310,7 +312,17 @@ export default async function usersRoutes(fastify: FastifyInstance) {
     const userId = request.user!.id;
 
     const [[stats], [streak]] = await Promise.all([
-      db.select().from(userStats).where(eq(userStats.userId, userId)).limit(1),
+      db
+        .select({
+          ...getTableColumns(userStats),
+          // The stored points_this_week/month columns are never written, so
+          // override them with the real figures from the points ledger.
+          pointsThisWeek: pointsInLastDays("user_stats.user_id", POINTS_PERIOD_DAYS.weekly),
+          pointsThisMonth: pointsInLastDays("user_stats.user_id", POINTS_PERIOD_DAYS.monthly),
+        })
+        .from(userStats)
+        .where(eq(userStats.userId, userId))
+        .limit(1),
       db.select().from(streaks).where(eq(streaks.userId, userId)).limit(1),
     ]);
 

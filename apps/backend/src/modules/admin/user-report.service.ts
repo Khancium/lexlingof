@@ -11,6 +11,7 @@ import {
   userStats,
   villages,
 } from "../../db/schema.js";
+import { POINTS_PERIOD_DAYS, pointsInLastDays } from "../../services/points.service.js";
 
 /**
  * The full user record as it appears in a report: account, everything filled
@@ -48,8 +49,9 @@ export const userReportSelection = {
   quarterName: quarters.name,
   level: userStats.level,
   totalPoints: userStats.totalPoints,
-  pointsThisWeek: userStats.pointsThisWeek,
-  pointsThisMonth: userStats.pointsThisMonth,
+  // From the points ledger -- user_stats.points_this_week/month are never written.
+  pointsThisWeek: pointsInLastDays("users.id", POINTS_PERIOD_DAYS.weekly),
+  pointsThisMonth: pointsInLastDays("users.id", POINTS_PERIOD_DAYS.monthly),
   totalContributions: userStats.totalContributions,
   verifiedContributions: userStats.verifiedContributions,
   pendingContributions: userStats.pendingContributions,

@@ -23,6 +23,7 @@ import {
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { getLevelThresholds } from "../../services/level.service.js";
+import { POINTS_PERIOD_DAYS, pointsInLastDays } from "../../services/points.service.js";
 import { computeStreakDisplay } from "../../services/streak.service.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -34,17 +35,20 @@ const leaderboardQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   offset: z.coerce.number().int().min(0).default(0),
   // Spec names only "all_time" as the default; weekly/monthly are accepted
-  // and actually change the ranking metric (userStats already carries
-  // pointsThisWeek/pointsThisMonth for exactly this purpose) rather than
-  // being silently ignored, which would otherwise mislead a client asking
-  // for a weekly board into getting the all-time one back.
+  // and actually change the ranking metric rather than being silently
+  // ignored, which would otherwise mislead a client asking for a weekly
+  // board into getting the all-time one back.
   period: z.enum(["all_time", "weekly", "monthly"]).default("all_time"),
 });
 
-const PERIOD_POINTS_COLUMN = {
+// All-time ranks by the running total in user_stats (indexed, and kept in step
+// with the ledger by awardPointsOnce). Weekly/monthly are the last 7 / 30 days
+// summed straight from the points ledger: user_stats.points_this_week/month
+// were never written by anything, so those boards used to be all zeros.
+const PERIOD_POINTS_EXPR = {
   all_time: userStats.totalPoints,
-  weekly: userStats.pointsThisWeek,
-  monthly: userStats.pointsThisMonth,
+  weekly: pointsInLastDays("user_stats.user_id", POINTS_PERIOD_DAYS.weekly),
+  monthly: pointsInLastDays("user_stats.user_id", POINTS_PERIOD_DAYS.monthly),
 } as const;
 
 // Unauthenticated and likely polled often -- but only the default
@@ -186,7 +190,7 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
       if (cached && cached.expiresAt > Date.now()) return cached.data;
     }
 
-    const pointsColumn = PERIOD_POINTS_COLUMN[period];
+    const pointsColumn = PERIOD_POINTS_EXPR[period];
 
     const rows = await db
       .select({
