@@ -6,6 +6,7 @@ import { db } from "../../../db/index.js";
 import { audioUploads, contributions, transcriptionSegments, transcriptions } from "../../../db/schema.js";
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
+import { requireModule } from "../../../services/feature-flags.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { addSegment, addTranscription, submitAudioUpload } from "./audio-upload.service.js";
 
@@ -62,7 +63,7 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 const segmentParamSchema = z.object({ id: z.string().uuid(), segId: z.string().uuid() });
 
 export default async function audioUploadRoutes(fastify: FastifyInstance) {
-  fastify.post("/", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
+  fastify.post("/", { preHandler: [verifyToken, requireModule(2), blockIfRestricted] }, async (request, reply) => {
     const body = submitSchema.parse(request.body);
     await assertOwnsAudioFile(request.user!.id, body.audioFileId);
     const result = await submitAudioUpload(request.user!.id, body);
@@ -112,13 +113,13 @@ export default async function audioUploadRoutes(fastify: FastifyInstance) {
     return { ...upload, transcription: transcription ?? null, segments };
   });
 
-  fastify.post("/:id/transcription", { preHandler: verifyToken }, async (request) => {
+  fastify.post("/:id/transcription", { preHandler: [verifyToken, requireModule(2)] }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const body = transcriptionSchema.parse(request.body);
     return addTranscription(request.user!.id, id, body);
   });
 
-  fastify.post("/:id/segments", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/:id/segments", { preHandler: [verifyToken, requireModule(2)] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = segmentSchema.parse(request.body);
     const result = await addSegment(request.user!.id, id, body);

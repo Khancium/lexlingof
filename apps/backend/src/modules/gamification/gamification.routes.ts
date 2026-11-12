@@ -22,6 +22,7 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
+import { requireFeature } from "../../services/feature-flags.service.js";
 import { getLevelThresholds } from "../../services/level.service.js";
 import { POINTS_PERIOD_DAYS, pointsInLastDays } from "../../services/points.service.js";
 import { computeStreakDisplay } from "../../services/streak.service.js";
@@ -181,7 +182,7 @@ export default async function gamificationRoutes(fastify: FastifyInstance) {
     return { BRONZE: 0, ...t };
   });
 
-  fastify.get("/leaderboard", async (request) => {
+  fastify.get("/leaderboard", { preHandler: requireFeature("leaderboard_enabled") }, async (request) => {
     const { limit, offset, period } = leaderboardQuerySchema.parse(request.query);
 
     const isDefaultPage = offset === 0 && limit === 50;

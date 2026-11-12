@@ -6,6 +6,7 @@ import { db } from "../../../db/index.js";
 import { categories, conceptMedia, concepts, wordRecordings } from "../../../db/schema.js";
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
+import { requireModule } from "../../../services/feature-flags.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { getRecordedSynonyms, submitWordRecording } from "./word.service.js";
 
@@ -30,7 +31,7 @@ const submitSchema = z.object({
 });
 
 export default async function wordRoutes(fastify: FastifyInstance) {
-  fastify.get("/concepts/next", { preHandler: verifyToken }, async (request) => {
+  fastify.get("/concepts/next", { preHandler: [verifyToken, requireModule(1)] }, async (request) => {
     const { categoryId } = nextConceptQuerySchema.parse(request.query);
     const userId = request.user!.id;
 
@@ -101,14 +102,14 @@ export default async function wordRoutes(fastify: FastifyInstance) {
     };
   });
 
-  fastify.get("/contributions/word/:conceptId/limits", { preHandler: verifyToken }, async (request) => {
+  fastify.get("/contributions/word/:conceptId/limits", { preHandler: [verifyToken, requireModule(1)] }, async (request) => {
     const { conceptId } = conceptIdParamSchema.parse(request.params);
     return getRecordedSynonyms(request.user!.id, conceptId);
   });
 
   // The legacy direct-submit path (mobile still uses it). It used to skip
   // blockIfRestricted and trust whatever audioFileId the client sent.
-  fastify.post("/contributions/word", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
+  fastify.post("/contributions/word", { preHandler: [verifyToken, requireModule(1), blockIfRestricted] }, async (request, reply) => {
     const body = submitSchema.parse(request.body);
     await assertOwnsAudioFile(request.user!.id, body.audioFileId);
     const result = await submitWordRecording(request.user!.id, body);

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { blockIfRestricted, hasPermission, verifyToken } from "../../../middleware/auth.js";
 import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
+import { requireModule } from "../../../services/feature-flags.service.js";
 import { queryBoolean } from "../../../utils/query-params.js";
 import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneContribution } from "./scene.service.js";
 
@@ -63,9 +64,9 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
     });
   });
 
-  fastify.get("/daily", { preHandler: verifyToken }, async () => getDailyScene());
+  fastify.get("/daily", { preHandler: [verifyToken, requireModule(4)] }, async () => getDailyScene());
 
-  fastify.get("/random", { preHandler: verifyToken }, async (request) => {
+  fastify.get("/random", { preHandler: [verifyToken, requireModule(4)] }, async (request) => {
     const { exclude } = randomQuerySchema.parse(request.query);
     return getRandomScene(exclude);
   });
@@ -76,7 +77,7 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
     return getSceneById(id, canManage);
   });
 
-  fastify.post("/:id/contributions", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
+  fastify.post("/:id/contributions", { preHandler: [verifyToken, requireModule(4), blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = submitSchema.parse(request.body);
     await assertOwnsAudioFile(request.user!.id, body.audioFileId);

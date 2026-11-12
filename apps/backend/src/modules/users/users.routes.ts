@@ -26,6 +26,7 @@ import {
 } from "../../db/schema.js";
 import { verifyToken } from "../../middleware/auth.js";
 import { deleteUserAccount } from "../../services/account.service.js";
+import { requireFeature } from "../../services/feature-flags.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { POINTS_PERIOD_DAYS, pointsInLastDays } from "../../services/points.service.js";
 import { computeStreakDisplay } from "../../services/streak.service.js";
@@ -508,7 +509,7 @@ export default async function usersRoutes(fastify: FastifyInstance) {
     reply.code(201).send(created);
   });
 
-  fastify.get("/:id", async (request) => {
+  fastify.get("/:id", { preHandler: requireFeature("public_profiles_enabled") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
 
     const [row] = await db
