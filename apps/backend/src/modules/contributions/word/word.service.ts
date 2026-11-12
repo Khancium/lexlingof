@@ -1,7 +1,16 @@
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "../../../db/index.js";
-import { audioFiles, contributions, gamificationConfig, pointsTransactions, streaks, userStats, wordRecordings } from "../../../db/schema.js";
+import {
+  audioFiles,
+  contributions,
+  gamificationConfig,
+  pointsTransactions,
+  publishedWordRecordings,
+  streaks,
+  userStats,
+  wordRecordings,
+} from "../../../db/schema.js";
 import { writeAuditLog } from "../../../services/audit-log.service.js";
 import { insertLevelUpNotificationIfChanged, levelUpdateExpr } from "../../../services/level.service.js";
 import { storageService } from "../../../services/storage.service.js";
@@ -280,7 +289,16 @@ async function overrideWordRecording(
   const oldAudioFileId = existing.audioFileId;
   const [oldAudio] = await db.select({ storageKey: audioFiles.storageKey }).from(audioFiles).where(eq(audioFiles.id, oldAudioFileId)).limit(1);
 
-  await db.transaction(async (tx) => {
+  const withdrawn = await db.transaction(async (tx) => {
+    // The public API serves a published recording by its row, not by its review status, so a retake
+    // would otherwise put brand-new, UNREVIEWED audio live on the public dictionary under an admin's
+    // earlier approval. Pull it off the public site in the same transaction as the swap; an admin
+    // re-publishes it after re-reviewing (the contribution is back to "pending" below).
+    const unpublished = await tx
+      .delete(publishedWordRecordings)
+      .where(eq(publishedWordRecordings.wordRecordingId, existing.id))
+      .returning({ conceptId: publishedWordRecordings.conceptId, publishedBy: publishedWordRecordings.publishedBy });
+
     await tx
       .update(wordRecordings)
       .set({
@@ -324,7 +342,21 @@ async function overrideWordRecording(
         .set({ processingStatus: "quarantined", processingError: "Superseded by a newer recording for this word/synonym" })
         .where(eq(audioFiles.id, oldAudioFileId));
     }
+
+    return unpublished;
   });
+
+  if (withdrawn.length > 0) {
+    await writeAuditLog({
+      actorId: userId,
+      actorRole: null,
+      action: "published_recording_withdrawn_on_retake",
+      resourceType: "word_recording",
+      resourceId: existing.id,
+      beforeState: { published: true, conceptId: withdrawn[0]!.conceptId, publishedBy: withdrawn[0]!.publishedBy },
+      afterState: { published: false, reason: "contributor re-recorded; needs re-review and re-publishing" },
+    });
+  }
 
   if (oldAudio) {
     // The DB write above already committed -- an R2 failure here is logged,
