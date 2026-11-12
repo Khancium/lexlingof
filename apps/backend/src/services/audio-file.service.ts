@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import { audioFiles, audioFormat, contributionModule } from "../db/schema.js";
-import { trimSilence } from "./audio-trim.service.js";
+import { measureDurationMs, trimSilence } from "./audio-trim.service.js";
 import { HttpError } from "../utils/http-error.js";
 import { sanitizeFilename } from "../utils/filename.js";
 import { storageService } from "./storage.service.js";
@@ -132,6 +132,12 @@ export async function storeAudioBuffer(params: {
     const trimResult = await trimSilence(params.buffer, format);
     finalBuffer = trimResult.buffer;
     finalDurationMs = trimResult.durationMs;
+  } else {
+    // Scene and transcription audio isn't trimmed, so nothing measured it: the stored duration was
+    // whatever the client claimed -- and that number drives the scene long-description bonus and
+    // the per-recording segment limit. Measure it here, where the bytes are in memory.
+    const measured = await measureDurationMs(params.buffer, format);
+    if (measured !== null) finalDurationMs = measured;
   }
 
   const checksumSha256 = createHash("sha256").update(finalBuffer).digest("hex");

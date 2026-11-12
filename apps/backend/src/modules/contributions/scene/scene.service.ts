@@ -3,6 +3,7 @@ import { and, eq, gte, ilike, isNull, lte, ne, notInArray, sql } from "drizzle-o
 import { containsPattern } from "../../../utils/sql-like.js";
 import { db } from "../../../db/index.js";
 import {
+  audioFiles,
   contributions,
   gamificationConfig,
   pointsTransactions,
@@ -214,14 +215,18 @@ export async function getSceneById(sceneId: string, canManage: boolean) {
 export async function submitSceneContribution(userId: string, sceneId: string, data: SubmitSceneContributionInput) {
   // 1. Verify the scene exists and is active. Independent of the user's
   // current level, so fetched concurrently.
-  const [[scene], levelRow] = await Promise.all([
+  const [[scene], levelRow, [audioRow]] = await Promise.all([
     db
       .select({ id: scenes.id, isDaily: scenes.isDaily, difficulty: scenes.difficulty })
       .from(scenes)
       .where(and(eq(scenes.id, sceneId), eq(scenes.isActive, true), isNull(scenes.deletedAt)))
       .limit(1),
     db.select({ level: userStats.level }).from(userStats).where(eq(userStats.userId, userId)).limit(1),
+    db.select({ durationMs: audioFiles.durationMs }).from(audioFiles).where(eq(audioFiles.id, data.audioFileId)).limit(1),
   ]);
+  // The long-description bonus goes by the duration stored on the audio file (measured by the
+  // server) -- like word.service.ts -- and not by the number the client sent along with it.
+  const durationMs = audioRow?.durationMs ?? data.durationMs;
 
   if (!scene) {
     throw new HttpError(404, "NOT_FOUND", "Scene not found or not active");
@@ -295,7 +300,7 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
       ? [0, 0, 0, 0]
       : await Promise.all([
           readConfigValue(tx, "points.scene.base"),
-          data.durationMs > LONG_DESCRIPTION_THRESHOLD_MS ? readConfigValue(tx, "points.scene.long_bonus") : Promise.resolve(0),
+          durationMs > LONG_DESCRIPTION_THRESHOLD_MS ? readConfigValue(tx, "points.scene.long_bonus") : Promise.resolve(0),
           scene.isDaily ? readConfigValue(tx, "points.scene.daily_bonus") : Promise.resolve(0),
           scene.difficulty === "expert" ? readConfigValue(tx, "points.scene.expert_bonus") : Promise.resolve(0),
         ]);

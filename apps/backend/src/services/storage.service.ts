@@ -6,6 +6,7 @@ import type { ReadableStream as NodeReadableStream } from "node:stream/web";
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -138,6 +139,22 @@ class StorageService {
     const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
     return { uploadUrl, expiresAt };
+  }
+
+  /**
+   * What is actually in the bucket at this key: its size in bytes, or null if nothing is there.
+   * A presigned PUT is a promise the client may or may not have kept (it can also upload a different
+   * size than it declared), so the confirm step checks this instead of taking its word for it.
+   */
+  async headAudioObject(storageKey: string): Promise<{ sizeBytes: number } | null> {
+    try {
+      const head = await r2.send(new HeadObjectCommand({ Bucket: AUDIO_BUCKET, Key: storageKey }));
+      return { sizeBytes: head.ContentLength ?? 0 };
+    } catch (err) {
+      const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+      if (e.name === "NotFound" || e.name === "NoSuchKey" || e.$metadata?.httpStatusCode === 404) return null;
+      throw err;
+    }
   }
 
   /** Used by the submission-buffer worker, which already holds the bytes server-side and skips the presigned-URL round trip entirely. */
