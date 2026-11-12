@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
@@ -43,10 +43,13 @@ export default async function deviceRoutes(fastify: FastifyInstance) {
   fastify.delete("/devices/unregister", { preHandler: verifyToken }, async (request, reply) => {
     const body = unregisterDeviceSchema.parse(request.body);
 
+    // Scoped to the caller's own tokens. It used to match on the token alone, so anyone who
+    // had (or guessed) another device's push token could silently switch that user's
+    // notifications off.
     await db
       .update(deviceTokens)
       .set({ isActive: false, updatedAt: new Date() })
-      .where(eq(deviceTokens.token, body.token));
+      .where(and(eq(deviceTokens.token, body.token), eq(deviceTokens.userId, request.user!.id)));
 
     reply.code(200).send({ success: true });
   });

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { and, asc, desc, eq, gte, ilike, isNull, lte, sql } from "drizzle-orm";
 import { z } from "zod";
 
+import { containsPattern } from "../../utils/sql-like.js";
 import { db } from "../../db/index.js";
 import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
 import { hasPermission, verifyToken } from "../../middleware/auth.js";
@@ -51,7 +52,7 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
       conditions.push(eq(concepts.createdBy, request.user!.id));
     }
     if (search) {
-      conditions.push(ilike(concepts.labelEnglish, `%${search}%`));
+      conditions.push(ilike(concepts.labelEnglish, containsPattern(search)));
     }
     if (createdFrom) {
       conditions.push(gte(concepts.createdAt, new Date(createdFrom)));
@@ -103,6 +104,10 @@ export default async function conceptsRoutes(fastify: FastifyInstance) {
         .innerJoin(categories, eq(categories.id, concepts.categoryId))
         .leftJoin(conceptMedia, and(eq(conceptMedia.conceptId, concepts.id), eq(conceptMedia.isPrimary, true)))
         .where(and(...conditions))
+        // Paging without an ORDER BY lets Postgres return rows in any order, so consecutive pages
+        // could repeat or skip items. Creation order (id as the tie-breaker) matches what the
+        // list effectively showed before, but is now guaranteed stable.
+        .orderBy(asc(concepts.createdAt), asc(concepts.id))
         .limit(limit)
         .offset(offset),
       db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(concepts).where(and(...conditions)),

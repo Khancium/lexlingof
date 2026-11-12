@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, inArray, sql } from "drizzle-orm";
 
 import { db } from "../db/index.js";
 import { pendingChanges, users } from "../db/schema.js";
@@ -70,18 +70,65 @@ export async function requirePendingRow(id: string) {
   return row;
 }
 
-export async function markApproved(id: string, adminId: string, resultResourceId: string | null): Promise<void> {
-  await db
+/**
+ * Atomically takes ownership of a still-pending change for approval, in ONE statement
+ * (`UPDATE ... WHERE status = 'pending' RETURNING`), and returns the row.
+ *
+ * Approval used to be check-then-act: requirePendingRow() read the row, the change was
+ * applied, and only afterwards did markApproved() update it -- with no `WHERE status =
+ * 'pending'` -- so two admins (or one double-click) both passed the check and both
+ * applied it. An image add would then be duplicated. Claiming first means exactly one
+ * caller wins; the other gets the same 409 a late reviewer always got.
+ *
+ * If applying the change then fails, call releasePendingChange() so it goes back to
+ * "pending" (the admin can still reject it or retry once the underlying problem is fixed).
+ */
+export async function claimPendingChange(id: string, adminId: string) {
+  const [claimed] = await db
     .update(pendingChanges)
-    .set({ status: "approved", reviewedBy: adminId, reviewedAt: new Date(), resultResourceId })
-    .where(eq(pendingChanges.id, id));
+    .set({ status: "approved", reviewedBy: adminId, reviewedAt: new Date() })
+    .where(and(eq(pendingChanges.id, id), eq(pendingChanges.status, "pending")))
+    .returning();
+  if (claimed) return claimed;
+
+  const existing = await getPendingChangeById(id);
+  if (!existing) {
+    throw new HttpError(404, "NOT_FOUND", "Pending change not found");
+  }
+  throw new HttpError(409, "ALREADY_REVIEWED", `This change was already ${existing.status}`);
 }
 
-export async function markRejected(id: string, adminId: string, reason: string | undefined): Promise<void> {
+/** Puts a change claimed by claimPendingChange() back to "pending" because applying it failed. */
+export async function releasePendingChange(id: string): Promise<void> {
   await db
     .update(pendingChanges)
+    .set({ status: "pending", reviewedBy: null, reviewedAt: null })
+    .where(and(eq(pendingChanges.id, id), eq(pendingChanges.status, "approved")));
+}
+
+/** Records what an approved change produced (e.g. the new concept's id), after it was applied. */
+export async function finishApproval(id: string, resultResourceId: string | null): Promise<void> {
+  await db.update(pendingChanges).set({ resultResourceId }).where(eq(pendingChanges.id, id));
+}
+
+/** Conditional on "still pending", so a change that was just approved (or rejected) elsewhere can't be overwritten. */
+export async function markRejected(id: string, adminId: string, reason: string | undefined): Promise<void> {
+  const [rejected] = await db
+    .update(pendingChanges)
     .set({ status: "rejected", reviewedBy: adminId, reviewedAt: new Date(), rejectionReason: reason ?? null })
-    .where(eq(pendingChanges.id, id));
+    .where(and(eq(pendingChanges.id, id), eq(pendingChanges.status, "pending")))
+    .returning({ id: pendingChanges.id });
+  if (!rejected) {
+    const existing = await getPendingChangeById(id);
+    if (!existing) throw new HttpError(404, "NOT_FOUND", "Pending change not found");
+    throw new HttpError(409, "ALREADY_REVIEWED", `This change was already ${existing.status}`);
+  }
+}
+
+/** True for a Postgres unique-constraint violation (SQLSTATE 23505), which Drizzle wraps in a DrizzleQueryError. */
+export function isUniqueViolation(err: unknown): boolean {
+  const cause = err instanceof Error ? (err.cause as { code?: string } | undefined) : undefined;
+  return cause?.code === "23505" || (err as { code?: string } | undefined)?.code === "23505";
 }
 
 export async function listPendingChanges(filters: {
@@ -97,8 +144,25 @@ export async function listPendingChanges(filters: {
   if (filters.status) conditions.push(eq(pendingChanges.status, filters.status));
   const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
+  // An image-add change carries the whole file base64-encoded inside `payload` (up to ~13 MB a
+  // row), and the list views (the admin panel's list, a volunteer's activity view of up to
+  // 500 rows) never show it -- but `select *` shipped every byte of it anyway. Any single
+  // value over 2000 characters is replaced by a short marker IN SQL, so it never leaves the
+  // database. The full payload is still read (by id) when a change is approved.
+  // (Written as literal table-qualified SQL on purpose; see the My Contributions note in
+  // users.routes.ts about drizzle's unqualified column references.)
+  const { payload: _fullPayload, ...columns } = getTableColumns(pendingChanges);
   return db
-    .select()
+    .select({
+      ...columns,
+      payload: sql<Record<string, unknown>>`(
+        select coalesce(
+          jsonb_object_agg(e.key, case when length(e.value::text) > 2000 then to_jsonb('[omitted: large value]'::text) else e.value end),
+          '{}'::jsonb
+        )
+        from jsonb_each("pending_changes"."payload") as e
+      )`,
+    })
     .from(pendingChanges)
     .where(whereClause)
     .orderBy(desc(pendingChanges.createdAt))

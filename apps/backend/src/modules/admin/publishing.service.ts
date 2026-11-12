@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, ilike, inArray, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 
+import { containsPattern } from "../../utils/sql-like.js";
 import { db } from "../../db/index.js";
 import {
   audioFiles,
@@ -69,7 +70,7 @@ function buildContributionConditions(q: PublishingFilters, recordingUserId: PgCo
   if (q.quarterId?.length) conditions.push(inArray(contributorDemographics.quarterId, q.quarterId));
   if (q.gender?.length) conditions.push(inArray(contributorDemographics.gender, q.gender));
   if (q.educationLevel?.length) conditions.push(inArray(contributorDemographics.educationLevel, q.educationLevel));
-  if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
+  if (q.profession) conditions.push(ilike(contributorDemographics.profession, containsPattern(q.profession)));
   return conditions;
 }
 
@@ -161,7 +162,7 @@ function applyLocationPrivacy<T extends { city: string | null; tribeName: string
 
 export async function listConceptsForPublishing(params: PublishingFilters) {
   const conditions = [sql`${concepts.deletedAt} is null`, inArray(concepts.id, conceptIdsMatchingFilters(params))];
-  if (params.search) conditions.push(ilike(concepts.labelEnglish, `%${params.search}%`));
+  if (params.search) conditions.push(ilike(concepts.labelEnglish, containsPattern(params.search)));
   if (params.categoryId) conditions.push(eq(concepts.categoryId, params.categoryId));
   const whereClause = and(...conditions);
 
@@ -328,7 +329,7 @@ export async function setRecordingsGrammar(conceptId: string, wordRecordingIds: 
 
 export async function listSentencesForPublishing(params: PublishingFilters) {
   const conditions = [sql`${sentences.deletedAt} is null`, inArray(sentences.id, sentenceIdsMatchingFilters(params))];
-  if (params.search) conditions.push(ilike(sentences.englishText, `%${params.search}%`));
+  if (params.search) conditions.push(ilike(sentences.englishText, containsPattern(params.search)));
   if (params.categoryId) conditions.push(eq(sentences.categoryId, params.categoryId));
   const whereClause = and(...conditions);
 

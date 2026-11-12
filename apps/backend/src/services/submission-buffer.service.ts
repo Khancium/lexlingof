@@ -1,5 +1,6 @@
 import { and, asc, db, eq, inArray, sql } from "../db/index.js";
 import { contributions, notifications, pendingSubmissions, pointsTransactions, transcriptionSegments, transcriptions } from "../db/schema.js";
+import { HttpError } from "../utils/http-error.js";
 import { storeAudioBuffer } from "./audio-file.service.js";
 import { writeAuditLog } from "./audit-log.service.js";
 import { submitWordRecording, type SubmitWordRecordingInput } from "../modules/contributions/word/word.service.js";
@@ -30,6 +31,9 @@ type ScenePayload = Omit<SubmitSceneContributionInput, "audioFileId" | "duration
 // human to look at instead of being retried again.
 const MAX_ATTEMPTS = 3;
 const BATCH_SIZE = 5;
+// Per user, counting rows still "pending" or "processing" (see the check in enqueueSubmission).
+// Well above anything a person can queue by hand -- the worker drains 5 rows every 3 seconds.
+const MAX_WAITING_SUBMISSIONS_PER_USER = 25;
 const POLL_INTERVAL_MS = 3000;
 
 let isProcessing = false;
@@ -58,6 +62,19 @@ export async function enqueueSubmission(params: {
   // attempt -- there's nothing left to act on for the old one once a fresh
   // attempt has been queued.
   await deleteStaleFailedSubmissionsForSameTarget(params.userId, params.moduleType, params.payload);
+
+  // Each queued row holds its whole audio file in the database (up to 110 MB for a Module 2
+  // upload) until the worker has uploaded it, and the request itself was read fully into
+  // memory. Nothing bounded how many one user could have queued, so a script could fill the
+  // database and the server's memory with unprocessed uploads. A person submitting by hand
+  // never has this many waiting at once, because the worker drains the queue every few seconds.
+  const [waitingRow] = await db
+    .select({ waiting: sql<number>`count(*)::int` })
+    .from(pendingSubmissions)
+    .where(and(eq(pendingSubmissions.userId, params.userId), inArray(pendingSubmissions.status, ["pending", "processing"])));
+  if ((waitingRow?.waiting ?? 0) >= MAX_WAITING_SUBMISSIONS_PER_USER) {
+    throw new HttpError(429, "TOO_MANY_PENDING", "You already have several submissions waiting to be processed. Please wait a moment for them to finish, then try again.");
+  }
 
   const [row] = await db
     .insert(pendingSubmissions)

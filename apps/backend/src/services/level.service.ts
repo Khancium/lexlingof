@@ -84,6 +84,30 @@ export async function levelUpdateExpr(increment: number) {
   end)::contributor_level`;
 }
 
+/**
+ * Re-derives every user's level from their contribution count using the CURRENT thresholds, in
+ * one statement, and returns how many users changed. Level is otherwise only recalculated when
+ * a user next contributes, so after an admin edits a threshold the stored levels (and
+ * everything gated on them -- peer review unlocks at SILVER) stayed stale, and could then
+ * change unpredictably the next time each user happened to submit something.
+ */
+export async function recomputeAllUserLevels(): Promise<number> {
+  const t = await getLevelThresholds();
+  const expr = sql`(case
+    when ${userStats.totalContributions} >= ${t.PLATINUM} then 'PLATINUM'
+    when ${userStats.totalContributions} >= ${t.GOLD} then 'GOLD'
+    when ${userStats.totalContributions} >= ${t.SILVER} then 'SILVER'
+    else 'BRONZE'
+  end)::contributor_level`;
+
+  const changed = await db
+    .update(userStats)
+    .set({ level: expr, updatedAt: new Date() })
+    .where(sql`${userStats.level} <> ${expr}`)
+    .returning({ userId: userStats.userId });
+  return changed.length;
+}
+
 /** Inserts the in-app "Level Up" notification row when the level actually changed -- a no-op otherwise. Call inside the same transaction as the userStats update, using its returned new level. */
 export async function insertLevelUpNotificationIfChanged(
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
