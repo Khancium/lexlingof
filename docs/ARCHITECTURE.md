@@ -6,7 +6,13 @@ each other's submissions; points/levels/badges drive engagement; admins moderate
 the corpus. This document describes the system **as currently implemented**, plus the
 non-obvious decisions and bugs behind it, so future work doesn't have to rediscover them.
 
-Last updated: 2026-09-15.
+Last updated: 2026-11-11.
+
+> **How this refresh was done.** Sections 3.16-3.22 and 8 are new, and §§1, 2, 4-7 were
+> corrected against the code as of commit `cc126bb`. The 2026-11-11 pass was a **read-only
+> code audit** (nothing was run or live-tested). Findings from it are listed in §7.2 and
+> labelled *code-read*; items elsewhere in this doc that say "verified live" come from earlier
+> sessions that did exercise the real backend.
 
 ---
 
@@ -16,16 +22,20 @@ Last updated: 2026-09-15.
 - **Backend** (`apps/backend`): Fastify (Node, TypeScript, ESM) + Drizzle ORM + PostgreSQL
   (Supabase-hosted). Deployed to **Railway** (`railway.json`: Railpack build, starts
   `node apps/backend/dist/index.js`).
-- **Web** (`apps/web`): Next.js 15 (App Router), React 19, Tailwind, Zustand for client
+- **Web** (`apps/web`): Next.js 15 (App Router), React 19, Tailwind 4, Zustand for client
   state, `react-hook-form` + `zod` for forms, `axios` for API calls.
-- **Mobile** (`apps/mobile`): React Native / Expo. Present in the repo but **out of scope**
-  for this log — untracked/not actively developed in the sessions this doc summarizes.
+- **Mobile** (`apps/mobile`): Expo (SDK 57, dev-client only) / React Native 0.86, React
+  Navigation, Zustand, WatermelonDB, Firebase push. A real, working-looking app that the
+  backend has since **drifted away from** — Module 1 is broken against the current API and
+  it gets none of the newer web features. See §8.
+- **Public API**: a read-only, unauthenticated `/public/*` feed of admin-published words and
+  sentences, consumed by the separate Pashtowal WordPress site (§3.17).
 - **File storage**: audio → **Cloudflare R2** (S3-compatible, via `@aws-sdk/client-s3` +
   presigned URLs); images (concept/scene/avatar) → **Supabase Storage**.
 - **Push notifications**: Firebase Cloud Messaging (`firebase-admin`), gated by both a
   server-config check (`FIREBASE_PROJECT_ID` set) and a per-user preference.
-- **Migrations**: Drizzle Kit, hand-reviewed SQL files in `database/migrations/` (26 as of
-  this writing), applied via `npm run db:migrate` — **no separate dev database**; all work
+- **Migrations**: Drizzle Kit, hand-reviewed SQL files in `database/migrations/` (41 as of
+  this writing, `0000`-`0040`), applied via `npm run db:migrate` — **no separate dev database**; all work
   happens against the same Supabase Postgres instance with careful test-data cleanup.
 
 ---
@@ -42,10 +52,11 @@ internal paths already self-namespace.
 
 | Module | Responsibility |
 |---|---|
-| `auth` | Register/login/refresh/logout, password hashing (bcrypt), JWT issuance |
-| `users` | Own-profile CRUD, avatar upload, own contributions list, mother-tongue demographics form |
-| `categories` | Public concept-category + concept listing (browse, search) |
-| `languages` | Public active-languages + dialects list (60-min in-memory cache) |
+| `auth` | Register (requires accepting the current terms version) / login / refresh / logout, change + forgot/reset password, bcrypt, JWT issuance, httpOnly refresh cookie (§2.2) |
+| `users` | Own-profile CRUD, avatar upload, own contributions list, suggestion box, self-service account deletion, minimal public profile (`GET /users/:id`) |
+| `users` (demographics, geo) | Onboarding form (`/users/me/demographics`), tribe / sub-tribe / village / quarter lookups, `/geo/countries` + `/geo/cities` (served from the backend so the web bundle doesn't ship the whole `country-state-city` dataset) |
+| `categories` | Concept-category + concept listing (browse, search). **Auth required** except `GET /categories/:id`, which is public |
+| `languages` | Public active-languages + dialects list (60-min in-memory cache, no invalidation hook) |
 | `contributions/word` | Module 1: record a word for a concept (up to 3 synonyms/slots per concept) |
 | `contributions/audio` | Module 2: freeform audio upload + transcription + segments |
 | `contributions/translation` | Module 3: translate an English sentence, incl. the sentence-grouping/tile feature |
@@ -54,7 +65,13 @@ internal paths already self-namespace.
 | `reviews` | Peer review queue + decision submission (§2.4) |
 | `gamification` | Leaderboard, badges, corpus-wide stats, level thresholds |
 | `notifications` | In-app notification list/read, device token register/unregister, push sending |
-| `admin` | All admin/moderation endpoints — by far the largest module (§2.5) |
+| `audio` | Legacy presigned-upload flow (`POST /audio/upload-url` → PUT to R2 → `POST /audio/:id/confirm`) plus `GET /audio/:id/play-url`. The web app only uses `play-url`; **mobile still uses the whole upload flow** (§8) |
+| `forum` | Open discussion forum: posts, threaded comments, reactions, polls (§3.18) |
+| `terms` | `GET /terms` — current Terms & Conditions text + version (§3.19) |
+| `health` | `GET /api/v1/health` — DB-backed readiness check (503 when the pool can't answer); the bare `GET /health` liveness route lives in `index.ts` (§2.7) |
+| `public-content` | Unauthenticated `/public/dictionary` and `/public/language-learning` feeds (§3.17) |
+| `admin` | All admin/moderation endpoints — by far the largest module (107 routes in `admin.routes.ts`, §2.5) |
+| `admin/publishing` | Curation of which recordings/translations go to the public API (11 routes, `publishing.manage`, §3.17) |
 
 ### 2.2 Auth & permissions (`middleware/auth.ts`)
 
@@ -70,7 +87,41 @@ internal paths already self-namespace.
 - `requireReviewerEligibility()`: contributor role must be **SILVER or above** to hit the
   review-queue endpoints; admins/super_admins are exempt (they're moderators, not peers).
 - `blockIfRestricted`: lighter than a full suspension — blocks new submissions only, login
-  and browsing still work.
+  and browsing still work. ⚠️ **It is applied only to the four `POST /contributions/buffer/*`
+  routes.** The legacy direct-submit routes (`POST /contributions/word`,
+  `/contributions/audio`, `/sentences/:id/translation`, `/scenes/:id/contributions` — what
+  mobile uses) and the forum do not run it, so a restricted user can still submit through
+  those and still post/comment.
+
+**Session & token model** (`modules/auth`):
+
+- Access token: 15-minute JWT (`sub`, `email`, `role`), kept **in memory only** on the
+  client. Refresh token: 32 random bytes, 30-day lifetime, stored hashed (sha256) in
+  `refresh_tokens`, rotated on every use.
+- **Web** receives the refresh token only as an **httpOnly cookie** `lexlingo_refresh_token`
+  (path `/api/v1/auth`; `Secure; SameSite=None` in production, `Lax` in dev), so an XSS can't
+  exfiltrate it. CORS is therefore an explicit `ALLOWED_ORIGINS` allowlist with
+  `credentials: true`. The cookie is cross-site in production (web and API are on different
+  domains), so it is exposed to Safari ITP / third-party-cookie blocking.
+- **Mobile** sends `X-Client-Platform: mobile`; the API then *also* returns `refreshToken` in
+  the response body, and `/refresh` + `/logout` accept it in the body (cookie wins if both
+  are present). The header is a delivery-channel switch, not an authorization boundary.
+- `POST /auth/refresh` validates and revokes in a **single** `UPDATE ... WHERE valid
+  RETURNING`, so concurrent replays can't both succeed. Changing or resetting a password
+  revokes every active refresh token for the user.
+- Password reset: `forgot-password` always returns the same response (no account
+  enumeration, SMTP failure swallowed); the emailed link carries a one-hour single-use token
+  (`password_reset_tokens`, hashed, consumed atomically).
+- Rate limits: 300 req/min/IP globally, and 10 per 10 minutes on
+  login/register/forgot-password/reset-password. `trustProxy: true` is **required** on
+  Railway — without it every request shared the proxy's IP and the limiter collapsed the
+  whole user base into one bucket (this 429'd unrelated users' submissions).
+
+**Roles** (`user_role` enum): `contributor` → `volunteer` → `admin` → `super_admin`.
+`volunteer` is a restricted content-curation role whose create/delete actions are routed
+through an approval queue (§3.16). `isReviewerEligible()` returns `true` for **every
+non-contributor role**, so a volunteer can use the peer-review queue without reaching SILVER
+(this was only documented for admins before).
 
 ### 2.3 The submission buffer (`services/submission-buffer.service.ts`)
 
@@ -100,6 +151,30 @@ choke point instead of writing directly to its module's tables:
 `sourceBufferId` on the eventual `contributions` row anchors idempotency: a worker retry
 that finds a `contributions` row already pointing at this buffer id just finalizes instead
 of resubmitting (which would double-award points).
+
+Additional behaviour worth knowing (added 2026-11-11, *code-read*):
+
+- The route reads the whole multipart body into memory (limit 110 MB, set in `index.ts`) and
+  stores it as `bytea`. MIME type and size are validated **in the worker, after the row
+  exists**, and there is no per-user queue cap.
+- **Silence trimming** (`services/audio-trim.service.ts`) applies to WORD and TRANSLATION
+  audio only: ffmpeg `silenceremove` at -55 dB / 0.5 s minimum run, then 0.6 s of padding
+  put back on each end; the result is kept only if it is shorter than the original and at
+  least 1.4 s, otherwise the original stands. On the buffered path it runs synchronously in
+  `storeAudioBuffer` and the stored `durationMs` is the measured post-trim value (commit
+  `7b9e2c0` fixed WORD submissions failing on a `NaN` duration from browser-recorded webm).
+  If ffprobe fails the duration falls back to 0. TRANSCRIPTION (Module 2) audio is never
+  trimmed.
+- For TRANSCRIPTION, the transcription + segments are applied **after** the submit
+  transaction commits. If that second step fails, the retry finds the contribution through
+  `sourceBufferId`, marks the buffer row `done`, and the transcription/segments are silently
+  lost (not atomic).
+- **A legacy direct-submit path still exists** next to the buffer: `POST
+  /contributions/word`, `/contributions/audio`, `/sentences/:id/translation`,
+  `/scenes/:id/contributions`, fed by the presigned `/audio/*` flow. Mobile uses it. It skips
+  `blockIfRestricted` and does not check that the supplied `audioFileId` belongs to the caller.
+- Idempotency of the points ledger comes from `idempotency_key` values of the form
+  `${contributionId}:REASON` inserted with `onConflictDoNothing`.
 
 ### 2.4 Peer review (`modules/reviews`)
 
@@ -132,6 +207,32 @@ of resubmitting (which would double-award points).
   `reviews` directly.
 - Reviewer earns points per completed review (idempotent per contribution+reviewer);
   contributor earns a module-specific verified bonus only on `valid`.
+- **A single review decides** — there is no quorum or second opinion. `valid` → `verified`,
+  `invalid` → `rejected`, `cannot_decide` leaves the contribution `pending`.
+  `needs_correction` is still accepted by the route schema (`reviews.routes.ts`).
+- The queue returns at most **20** items, oldest first, so every eligible reviewer in the
+  same tribe/city/language sees the same 20. A reviewer's own earlier reviews are excluded.
+- A reviewer earns the review award (default 5) for **every** decision, `cannot_decide`
+  included.
+- Scoping compares `city` with exact string equality (city is free text with only
+  `.trim()`), so spelling/case variants fall out of each other's scope. A user with no
+  `contributor_demographics` row (e.g. one who only ever used mobile, whose onboarding never
+  writes that table) gets an **empty** queue; a deleted submitter's pending contributions can
+  no longer be reviewed at all (their demographics are scrubbed).
+- **Concurrency (fixed 2026-11-12).** The `pending` check used to run outside the transaction
+  and the status `UPDATE` wasn't conditional on it, so two simultaneous decisions both applied
+  and double-incremented the contributor's counters. `submitReview` now re-checks inside the
+  transaction with `SELECT ... WHERE status = 'pending' FOR UPDATE`: a second reviewer blocks on
+  the row lock, then re-evaluates against the already-decided row and gets the usual `409
+  CONTRIBUTION_NOT_PENDING`. (Tested through the Supavisor pooler: the second transaction waited
+  ~2.7 s behind the first.) `reviews` still has no unique index on (contribution, reviewer).
+- **Counters per decision (fixed 2026-11-12).** `valid` bumps verified/per-module counters and
+  decrements `pendingContributions` (floored at 0) **only on the first verification** — a retaken
+  contribution being re-verified no longer counts twice or re-awards points. `invalid` now moves
+  the contributor's `pending` → `rejected` (floored). Both used to be missing, so `pending`
+  drifted upward on every rejection and `rejected` stayed 0. Edge: a retake doesn't re-add to
+  `pending`, so a retaken-then-rejected contribution can still skew `pending` by one (the floor
+  keeps it from going negative); `db:recompute-stats` (§7.3) re-derives both from `contributions`.
 
 ### 2.5 Admin module (`modules/admin/admin.routes.ts`)
 
@@ -194,6 +295,38 @@ Key sub-features:
 - **Suggestions inbox** (`/admin/suggestions`): lists user-submitted feedback
   (`POST /users/me/suggestions`), reuses the `audit.read` permission rather than minting a
   new permission code.
+- **Bulk user actions** (`POST /admin/users/bulk-restrict`, `/bulk-unrestrict`,
+  `/bulk-delete` (ban), `/bulk-volunteer`; cap 500 ids each) mirror the single-user actions;
+  the Users page's bulk bar drives them, and a selection persists across pages. Bulk ban and
+  the leaderboard cache: banning clears the cache, but **undoing** a ban does not.
+- **Credentials** (`POST /admin/users/:id/credentials`): change a user's email, password or
+  display name. Guards: never a `super_admin` target; an `admin` target only by a
+  `super_admin`. A password change revokes the target's sessions. (The moderation actions —
+  restrict, suspend, cool-off, ban — have **no** such target-role guard.)
+- **Volunteers & approval queue** — §3.16. **Publishing** — §3.17.
+- **Permissions actually enforced** by some route: `contributions.manage`, `users.manage`,
+  `concepts.manage`, `scenes.manage`, `sentences.manage`, `volunteers.manage`,
+  `publishing.manage`, `analytics.read`, `audit.read`, `system.manage`. The other seeded codes
+  (`categories.manage`, `languages.manage`, `gamification.manage`, `users.suspend`,
+  `users.delete`, `contributions.verify/reject/review`, `admins.manage`, `exports.*`, the
+  `*.own` codes) are **never checked**. In practice only `super_admin` passes
+  `system.manage`, so `/superadmin/gamification`, `/superadmin/feature-flags` and
+  `POST /superadmin/admins` are super-admin-only. Forum moderation reuses `users.manage`.
+  `user_additional_permissions` is never read, so per-user grants do nothing. There are **no
+  admin routes for languages/dialects** despite the seeded `languages.manage`.
+- **Undo coverage.** Undoable (has `beforeState`): contribution status/delete, concept and
+  scene update/delete, sentence delete/bulk-edit, gamification config, feature flags, user
+  restrict/suspend/ban. Logged but **not** revertible: permanent deletes, category create,
+  credentials, grant admin/volunteer, pending-change approve/reject. **Not logged at all:**
+  concept/scene/sentence *create* (single and bulk), image add/delete/crop, contribution
+  remarks/keywords, scene keywords/coverage, suggestions-reviewed, and every publishing action.
+- **Transactions.** Only the concept permanent delete runs in one. Everything else is a
+  sequence of separate statements (mutation, stats adjustment, audit write), so an audit
+  failure after the mutation returns 500 with the change already applied.
+- **Concurrency/chunking.** `insertBulkInChunks` inserts 500 rows per statement and falls back
+  to per-row inserts if a chunk fails. Bounded concurrency of 5 is used for permanent delete,
+  stats reversal and Openverse/Wikimedia autofill. `bulk-url` image fetches (up to 200 ids, 10 MB
+  each) have no concurrency cap and several bulk-id arrays have no `.max()`.
 
 ### 2.6 Gamification (`modules/gamification`)
 
@@ -209,6 +342,27 @@ Key sub-features:
   ⚠️ `contributions.total_points` is a **generated column** (`base_points + bonus_points`)
   that nothing ever populates — the real total for a contribution is the sum of its
   `points_transactions` rows (see the My Contributions bug in §4).
+- **`user_stats.totalPoints` now tracks the ledger (fixed 2026-11-12).** It used to be
+  incremented in only two places (a WORD submission and the verified bonus), while translation,
+  scene and audio submissions, transcription/segment bonuses and reviewer awards reached
+  `points_transactions` only — yet `totalPoints` is what the leaderboard, dashboard and admin
+  sorting read. A live dry run found **10 of 44 users under-counted, net 2,270 points** (the
+  largest gap: one user stored at 620 against a ledger total of 1,835). Now every award keeps the two in step via
+  `services/points.service.ts`: `awardPointsOnce()` inserts the idempotency-keyed ledger row and
+  adds to `total_points` **only if the row was new** (used by transcription, segment, reviewer
+  and verified-bonus awards, which can be replayed); submit-time awards, whose contribution id
+  is brand new and so can't conflict, add to `total_points` inline in their existing
+  `user_stats` UPDATE. Existing drift is repaired by the one-off `db:recompute-stats` script
+  (§7.3). Admin deletes still don't claw points back (a product decision, not a bug).
+- **Point amounts** come from `gamification_config` (seeded defaults: word 10 + verified 10;
+  translation 10 + audio 10 + romanization 5 + IPA 10, verified 10, max 35 on submit; scene
+  20 + long-description 10 + daily 5 + expert 20, verified 10; audio upload 10, native text
+  10, romanization 5, IPA 10, English translation 10, segment 5; review award 5). Hardcoded
+  rather than configurable: the 3-synonym cap, the 10 s word-recording limit (also a DB
+  `CHECK`), the 500 KB word file cap, the 100 MB default upload cap, the 50-sentence group
+  size, and the 60 s "long description" threshold. Seeded-but-unused keys:
+  `points.word.synonym_bonus`, `levels.bronze.min`, and the three `modules.*` keys
+  (`modules.word.max_duration_ms = 3000` contradicts the real 10000).
 - **Streaks** (`services/streak.service.ts`): `updateStreakOnContribution` bumps
   `streaks.currentStreak` inside the same transaction as a qualifying contribution — but it
   only ever *runs* on a contribution, so a broken streak stayed showing its last known value
@@ -230,7 +384,18 @@ Key sub-features:
   backend — found while investigating the streak bug above, not yet fixed. Every seeded
   badge (including the `streak_days` trigger type, which reads `currentStreak` the same way
   this section describes) is permanently unreachable until something calls it after a
-  contribution/review completes.
+  contribution/review completes. *(Re-confirmed 2026-11-11: still zero callers; `user_badges`
+  is never populated.)*
+- **Leaderboard** (`GET /leaderboard`, **public**, exposes `userId` + `displayName`): ranks
+  from `user_stats`, default page cached 2 minutes per period (cleared on ban / bulk ban, not
+  on undo). Ranks use `row_number`, so ties get arbitrary distinct ranks. **All-time** ranks
+  by `user_stats.total_points`. **Weekly / monthly** (fixed 2026-11-12) rank by the points a
+  user earned in the **last 7 / 30 days (rolling)**, summed from `points_transactions` through
+  `pointsInLastDays()` in `points.service.ts` — they used to read
+  `user_stats.points_this_week/month`, which nothing ever wrote (and nothing resets on a
+  schedule), so those boards were all zeros. The same helper now feeds `pointsThisWeek` /
+  `pointsThisMonth` on `GET /users/me`, `GET /users/me/stats` and the admin user
+  report/details. The two stored columns and `leaderboard_snapshots` remain unused.
 - ⚠️ **Deleting a contribution never adjusted `user_stats`.** `DELETE /admin/contributions/:id`
   (and its bulk form) soft-deleted the `contributions` row but left
   `totalContributions`/the per-module counter/`verifiedContributions` untouched — found live
@@ -243,18 +408,21 @@ Key sub-features:
   action is `admin_contribution_delete` (restoring a deleted contribution without
   re-incrementing its counters would be the same bug in reverse). Verified live: delete then
   undo round-trips a real contribution's `user_stats` row back to its exact original values.
-  Deliberately excludes `rejectedContributions` — `reviews.service.ts`'s `invalid` decision
-  only ever decrements `pendingContributions`, it never increments `rejectedContributions`,
-  so that column already sits at 0 for every user regardless of actual rejections (a separate
-  pre-existing bug); adjusting an always-zero counter isn't symmetric once the delete side's
-  `greatest(x-1, 0)` floor kicks in, so it's left alone rather than making it worse. Also
+  It originally excluded `rejectedContributions` because the `invalid` review decision never
+  touched the contributor's `user_stats`, leaving that column at 0 for everyone. **That was
+  fixed 2026-11-12** (§2.4: `invalid` now moves `pending` → `rejected`), so
+  `adjustContributionStats` now also reverses the `rejected` counter when a rejected
+  contribution is deleted or its delete is undone. Rejections from before the fix were never
+  counted, so deleting one floors at 0 and undoing that delete adds a +1 the original never had
+  — a one-off drift that `db:recompute-stats` (§7.3) repairs. Also
   deliberately excludes `points_transactions`/`totalPoints` — whether a moderation delete
   should claw back already-earned points is a separate product decision, not a bug fix.
   **Not retroactively repaired**: the fix stops future drift; farrukh@lexlingo.app's stats
   still read 4/10 points with 0 live contributions as of this writing, since correcting
   already-stored counters is a data change outside the app's normal code path.
 - **Corpus Analytics** (public `/corpus` page): aggregate stats (audio hours, contributor
-  count, languages covered) plus a per-language contribution breakdown, both cached.
+  count, languages covered) plus a per-language contribution breakdown. Only `/corpus/stats` is cached (1 hour);
+  `/corpus/categories` and `/corpus/languages` are not.
 
 ### 2.7 Cross-cutting infrastructure notes
 
@@ -273,10 +441,51 @@ Key sub-features:
   practical rule this produced: never pull a large row set into Node to post-process; do
   aggregation/bucketing in one SQL statement and only return the small, already-summarized
   result. (This is exactly the fix applied to the sentence-grouping feature, §3.)
-- **Row Level Security**: enabled on every table (`0015_enable_rls_all_tables.sql`) but with
+- **Row Level Security**: enabled on the 45 tables that existed at
+  `0015_enable_rls_all_tables.sql` (plus `contribution_keywords` in `0017`) — **but not on the
+  12 tables created since** (the 6 forum tables — posts, comments, the two reaction tables,
+  poll options, poll votes — plus `password_reset_tokens`, `terms_acceptances`,
+  `pending_changes`, `suggestions`, `published_word_recordings`, `published_translations`;
+  46 of 58 tables have it) — and with
   **no policies defined** — the backend's DB role owns the tables / bypasses RLS, so this is
   currently inert protection against a future misconfigured low-privilege role, not an
-  active access-control layer.
+  active access-control layer. Whether the gap on the newer tables matters depends on whether
+  Supabase's Data API (PostgREST) is exposed for the `public` schema; if it is, those tables —
+  including `password_reset_tokens` (token hashes) — are reachable with the anon key.
+  **Fix written 2026-11-12:** `0041_enable_rls_remaining_tables.sql` enables RLS on all 12
+  (same no-policies posture as `0015`). It takes effect only once applied with `npm run
+  db:migrate` (§7.3).
+- **Pool health, `/api/v1/health` and the watchdog** (added 2026-11-12, after the Railway API's
+  connection pool wedged — the process stayed up and `/health` stayed green while every
+  database-backed endpoint hung until clients gave up at 30 s). Three layers:
+  1. `db/index.ts` now sets `connect_timeout: 10`, `idle_timeout: 60`, `max_lifetime: 1200`
+     (seconds). The postgres.js defaults (idle connections kept forever, 30 s connect wait —
+     the same 30 s as the clients' axios timeout) meant a pool of silently-dead connections
+     never recovered and callers saw only `timeout of 30000ms exceeded`. `idle_timeout` is
+     deliberately not small: this deployment is cross-region, so every reconnect costs ~1-2 s.
+  2. `GET /api/v1/health` is now a **readiness** check (`modules/health/health.routes.ts`): it
+     runs `select 1` through the pool with a 5 s timeout and returns `503 {status:
+     "degraded"}` (no error detail — it's unauthenticated) on failure. The bare `GET /health`
+     stays a cheap liveness probe. **Point uptime monitors at `/api/v1/health`.**
+  3. `services/db-watchdog.service.ts` probes the pool every 30 s. After 3 consecutive
+     failures it opens one brand-new connection: if that **works** the database is fine and the
+     pool is wedged, so the process exits and Railway restarts it with a fresh pool; if that
+     **also fails** the database itself is down, so it does *not* exit (a restart can't fix it,
+     and repeated exits would exhaust Railway's restart retries and leave the service crashed
+     after the database returns). Restarting is safe for in-flight submissions: the
+     submission-buffer worker resets rows stuck in `processing` to `pending` on startup.
+- **In-process caches** (all per Node process, so multiple replicas would drift): user row
+  30 s and role permissions 5 min (`middleware/auth.ts`), categories-with-counts 30 min
+  (invalidated by every concept mutation but **not** by category creation), languages 60 min
+  (no invalidation), level thresholds 5 min, leaderboard 2 min, corpus stats 1 h, public
+  dictionary/learning *filter options* 5 min (never invalidated on publish/unpublish).
+- **Security headers / CSP**: `next.config.ts` sets a CSP with `media-src` limited to `self`,
+  `blob:` and `*.r2.cloudflarestorage.com`, and `connect-src` limited to self plus the API
+  origin (from `NEXT_PUBLIC_API_URL`). A past bug: the CSP blocked local `blob:` preview
+  playback until `blob:` was added.
+- **Feature flags are inert.** `feature_flags` is seeded (10 flags) and editable at
+  `/admin/feature-flags`, but nothing in the backend or web app *reads* a flag to gate
+  behaviour — only the admin routes touch them. Toggling one has no effect today.
 - **Audit logging** (`services/audit-log.service.ts`): `writeAuditLog()` (single) and
   `writeAuditLogs()` (batch — one multi-row `INSERT` instead of N single-row ones for bulk
   admin actions) are called from auth, every contribution-submission service, permanent
@@ -648,6 +857,16 @@ vs. "created before 2020" (0, as expected) counts all matched.
 
 ### 3.15 Has-image badge, category/image-status filters, and image cropping
 
+> **Superseded in part (2026-11-11).** Concept images are no longer 1:1. Both concept and
+> scene uploads now auto-crop to **16:9 at 1600×900** (`CONCEPT_IMAGE_SIZE` /
+> `SCENE_IMAGE_SIZE` in `storage.service.ts`, still `fit: "cover"` + `position: "attention"`).
+> The concept manual cropper is now **free-form** (`aspectRatio={null}`: any rectangle, any
+> ratio) and is stored via `uploadFreeformCroppedImage` — longest edge capped at 1600,
+> `fit: "inside"`, never upscaled, admin's ratio kept — while scene crops stay fixed 16:9
+> (`fit: "fill"`). The "1:1", "1200×1200" and per-ratio statements below describe the
+> original implementation and are kept for the reasoning, not the numbers. Avatars are still
+> 1:1 / 512 px.
+
 - **Has-image badge**: a small "✓ IMAGE" / "NO IMAGE" tag on every concept/scene row —
   purely a frontend read of the `imageUrl` field the list endpoints already returned; no
   backend change needed for the badge itself.
@@ -708,6 +927,161 @@ vs. "created before 2020" (0, as expected) counts all matched.
     the swap and the previous storage object is actually gone (`storage.list`, not just the
     public URL, which can be stale from CDN caching per the permanent-delete note in §2.5).
 
+### 3.16 Volunteers and the pending-changes approval queue
+
+A fourth role, `volunteer`, lets trusted non-admins help curate content without being able to
+change the corpus unsupervised. Seeded permissions for the role: `concepts.manage`,
+`scenes.manage`, `sentences.manage` (nothing else). The web admin layout admits volunteers,
+and `AdminNav` shows them only Concepts, Scenes and Sentences.
+
+- **Gate** (`services/pending-changes.service.ts`, `gateVolunteerAction`): wraps the
+  single-item *create* and *delete* routes for categories, concepts, scenes and sentences, and
+  the four image-add routes (upload / URL / Openverse / Wikimedia) for concepts and scenes.
+  Outcome: admin or super_admin → applied immediately; volunteer with
+  `users.auto_approve_volunteer` → applied immediately; any other volunteer → a
+  `pending_changes` row (`target_type`, `action` = create | delete, jsonb `payload`) and a
+  **202** `{ pending: ... }` response (the web client's `PendingResult` type, narrowed with
+  `"pending" in result`). Uploaded image bytes are stored **base64 inside the jsonb**.
+- A volunteer may delete only rows they created (`createdBy`), checked in the route and
+  again in `applyDelete*`. `concepts`/`scenes`/`sentences` gained a `created_by` column
+  (`0029`), set only for volunteer-created rows.
+- **Approval** (`volunteers.manage`, held by admin/super_admin): `/admin/volunteers` lists
+  volunteers with pending counts and an auto-approve toggle; the per-volunteer view reviews
+  each pending row (approve/reject, group approve/reject all, history, audit log). Status
+  moves `pending` → `approved` | `rejected` once; `applyPendingChange` replays the payload
+  through the same `apply*` functions the live routes use, re-running domain checks at
+  approval time. If apply throws, the row stays `pending`. Bulk approve/reject cap: 200.
+- ⚠️ *Code-read:* the gate wraps **only** those routes. Volunteers hold the full `*.manage`
+  codes, so they can still call the *ungated* routes directly: PUT edits, bulk-edit,
+  bulk-delete, `bulk-delete-permanent` and single `/permanent` (any concept/scene/sentence
+  with no recordings, regardless of `createdBy`), bulk and bulk-text creates (which also
+  leave `createdBy` null), image delete/crop/bulk-url/autofill, and Undo. The comment in
+  `seed.ts` overstates the coverage. Approval itself is also not atomic: `markApproved`
+  has no `WHERE status = 'pending'`, so a double-click or two admins can double-apply (image
+  adds would duplicate), and `listPendingChanges` does `select *`, returning the base64 payloads.
+- Web gaps: volunteers have no nav link into `/admin` (they must type `/admin/concepts`),
+  and Undo buttons render for them even though that isn't their intended scope.
+
+### 3.17 Publishing and the public API (Pashtowal)
+
+Contributions are not public by default. An admin with `publishing.manage` curates exactly
+which recordings and translations are exposed, and an unauthenticated read-only API serves
+only those.
+
+- **Tables** (`0036`): `published_word_recordings(concept_id, word_recording_id UNIQUE,
+  sort_order, published_by)` and `published_translations(sentence_id, translation_id
+  UNIQUE, ...)`. Publishing a row is an `INSERT ... ON CONFLICT DO NOTHING`; unpublishing
+  deletes it. There is no approval step. `sort_order` is read but no route sets it.
+- **Admin UI** (`/admin/publishing`, backend `modules/admin/publishing.*`): Words and
+  Sentences tabs with the same demographic filters as the contributions page; per-concept /
+  per-sentence lists of current (`isCurrent`) recordings with a presigned audio URL;
+  publish/unpublish one, or withdraw a whole word (`DELETE /concepts/:id/recordings`);
+  bulk-tag grammar (`PUT /concepts/:id/recordings/grammar`: gender, part of speech, number).
+  Commit `7b519ad` deliberately dropped the earlier "verified only" requirement — recordings
+  of **any** review status can be published.
+- **Public endpoints** (`modules/public-content`): `GET /public/dictionary`,
+  `/public/dictionary/filters`, `/public/language-learning`, `/public/language-learning/filters`.
+  The dictionary is organised by concept (recordings, primary image, up to 6 related words
+  from the same category); language-learning by sentence. Each recording carries native text,
+  romanization, IPA, language, dialect and (words only) grammar tags. Audio is a **10-minute
+  presigned R2 URL**.
+- **Access control**: an optional `PUBLIC_API_KEY` env var checked against the
+  `x-public-api-key` header with a plain `!==`; **if unset the API is fully open**. The
+  separate Pashtowal WordPress theme is the intended consumer.
+- **Privacy**: a contributor's city, tribe, village and gender are included — and the location
+  filters honour them — only when `contributor_profiles.show_location` is true
+  (`privacyFields()` in `public-content.service.ts`).
+- ⚠️ *Code-read:* neither the publish step nor the public feed checks the contribution's
+  status, `isCurrent` or `deletedAt`. A recording that is later rejected, deleted or
+  superseded stays public until unpublished, and a **retake of a published recording** swaps
+  the audio in place (`word_recordings.audio_file_id`) so the new, unreviewed audio goes live
+  while the contribution is back to `pending`. Publishing actions are also not audit-logged
+  (so not undoable), and `ilike` search doesn't escape `%`/`_`.
+
+### 3.18 Discussion forum
+
+An open forum, all routes authenticated (`modules/forum`, mounted at `/api/v1/forum`):
+posts (≤4000 chars, optional image ≤10 MB re-encoded to WebP and stored in the shared
+Supabase image bucket, optional share-link to a concept or sentence via
+`?conceptId=` / `?sentenceId=`, optional single-choice poll of 2-6 options — a post is a poll
+when it has `forum_poll_options` rows), threaded comments (`parent_comment_id`, ≤500 per post,
+no pagination; the web UI caps visual indent at depth 4), 7 reaction types
+(`like/dislike/laugh/love/wow/sad/angry`, one per user per target by unique index) and poll
+votes (changeable, no close/expiry). Comments, replies and first-time reactions create in-app
+notifications plus best-effort push.
+
+- **Moderation** is delete-only: the author or any holder of `users.manage` can soft-delete a
+  post or comment. There is no report, hide, lock, edit, forum-ban or admin listing, and no
+  forum-specific rate limit beyond the global 300/min/IP.
+- ⚠️ *Code-read:* `blockIfRestricted` isn't applied, so restricted users can still post;
+  deleting a post doesn't remove its image from storage (`image_storage_key` is stored but
+  never used); posts by banned users stay visible as "Deleted User"; toggling a reaction off
+  and on re-notifies the author each time; `votePoll` doesn't check the post is non-deleted.
+  A GIF attachment existed briefly (`0034`) and was dropped (`0035`).
+
+### 3.19 Terms & Conditions
+
+`src/content/terms.ts` holds `CURRENT_TERMS_VERSION` (currently `"2026-10-20"`) and
+`TERMS_CONTENT` (a 13-section markdown string), served by `GET /terms` and rendered by the web
+`/terms` page and the register form (mobile shows it in a modal).
+
+- **Enforcement**: `POST /auth/register` requires `termsVersion`; the server rejects anything
+  but the current version with `409 TERMS_VERSION_MISMATCH` and inserts a `terms_acceptances`
+  row (append-only, unique on user+version) in the same transaction as the account. Web and
+  mobile register forms fetch the version immediately before submitting.
+- **No re-acceptance**: existing users are never re-prompted when the version changes.
+- ⚠️ The text is marked as an **unreviewed draft, not legal advice**, still contains
+  unfilled placeholders (`[Jurisdiction]`, `[contact email]`), grants a perpetual commercial /
+  AI licence with no compensation, and says 18+ while signup enforces
+  `MINIMUM_SIGNUP_AGE = 14` (§3.7). The unused `consents` table's defaults (CC-BY-4.0,
+  `commercial = false`) contradict it.
+
+### 3.20 Password recovery
+
+`/forgot-password` → `POST /auth/forgot-password` (identical response whether or not the
+email exists; SMTP failure swallowed) → emailed link `${FRONTEND_URL}/reset-password?token=…`
+→ `POST /auth/reset-password` (token consumed atomically; all sessions revoked). Mail goes
+through `mailer.service.ts` (nodemailer, SMTP env vars, §6). In production an unset
+`SMTP_HOST` throws, and the caller swallows it, so a misconfigured mailer fails silently.
+Account emails are **case-sensitive**: `uq_users_email_active` is on raw `email`, so
+`Foo@x.com` and `foo@x.com` are different accounts and the "banned email can't re-register"
+guard only matches an exact string.
+
+### 3.21 Word recordings: synonyms, retakes, grammar metadata
+
+- A contributor records a concept in up to **3 synonym slots** (`synonym_index` 1-3, unique per
+  user+concept+slot while not deleted); the 3-slot cap is hardcoded in the route.
+  `GET /contributions/word/:conceptId/limits` returns `{1: bool, 2: bool, 3: bool}` (which
+  slots are taken). An earlier "takes" model was removed (commit `4d4e087`) — mobile still
+  speaks the old shape (§8).
+- Recording length is capped at **10 s** (zod, a re-check against the post-trim duration, and
+  the DB `CHECK ck_word_recording_max_duration`; raised from 5 s in `0039`). Several stale
+  comments still say "3-second"/"5-second".
+- **Retake**: re-submitting the same user+concept+slot replaces the audio in place, resets
+  the contribution to `pending`, clears verified/rejected fields, bumps `version` and
+  `submittedAt`, quarantines the old `audio_files` row and deletes the old R2 object. It
+  awards **no** points and doesn't touch `user_stats`. An override that gets the same
+  `audioFileId` short-circuits.
+- **Grammar metadata is per recording** (`grammatical_gender`, `part_of_speech`,
+  `grammatical_number` on `word_recordings`; added to `concepts` in `0037`, moved in `0038`
+  because different speakers/dialects can differ). Shown in My Contributions and in the
+  public API; admins bulk-tag it from the publishing page.
+- Uniqueness for words and translations is **language-agnostic**, so a second-language
+  submission silently overrides the first, and `language_id` isn't updated on override.
+
+### 3.22 Sentence source language and paste-text sentence upload
+
+- `sentences.source_language` (`sentence_source_language` enum: `english | urdu | persian`,
+  default `english`, `0031`) lets the corpus hold Urdu and Persian prompts. The translate page
+  has a source-language filter and renders such sentences with `dir="rtl"`. ⚠️ The column that
+  stores the prompt is still named `english_text` (and its FTS index uses the `'english'`
+  config), so the name is now misleading.
+- `POST /admin/sentences/bulk` (file) takes `?sourceLanguage=`; `POST
+  /admin/sentences/bulk-text` (paste, one sentence per line — commit `57a2793`) takes the
+  same. The admin Sentences page has one shared "bulk upload language" selector for both.
+  Both reuse the silent case-insensitive de-dupe from §3.11. There is no PUT to edit a
+  sentence's text.
+
 ---
 
 ## 4. Frontend Architecture
@@ -717,7 +1091,9 @@ vs. "created before 2020" (0, as expected) counts all matched.
   `<AdminNav>`, gated by role). `app/onboarding/page.tsx` sits outside all three groups.
 - **State**: a single Zustand store (`lib/store.ts`) holds the current user
   (`UserProfile`) and loading/error state; `loadUser()` is called once on app mount via
-  `<AuthProvider>` and **skips the network call entirely** if there's no stored refresh
+  `<AuthProvider>` and **skips the network call entirely** if the `lexlingo_has_session`
+  localStorage flag isn't set — the refresh token is now an httpOnly cookie JS can't read, so
+  the flag is the only hint; it used to check for a stored refresh
   token (added specifically to stop a real 401 from showing in the browser console for
   every anonymous visitor landing on `/login` — harmless, but looked like a bug).
 - **API client** (`lib/api.ts`): one `axios` instance, bearer token attached via
@@ -754,6 +1130,51 @@ vs. "created before 2020" (0, as expected) counts all matched.
   submission. Each of these three pages is wrapped in a `<Suspense>` boundary because
   `useSearchParams()` requires one for static prerendering.
 
+### 4.1 Route map (added 2026-11-11)
+
+There is **no `middleware.ts`**: every guard is client-side, and `AuthProvider` renders only a
+spinner until `loadUser()` resolves, so the server HTML of every page — including `/` and
+`/terms`, which fetch data on the server — is effectively a spinner.
+
+| Area | Routes |
+|---|---|
+| Public | `/` (marketing + corpus stats, `force-dynamic`), `/terms` (server-rendered, hand-rolled markdown subset) |
+| Auth (`(auth)`, no layout) | `/login`, `/register` (fetches `GET /terms`, sends `termsVersion`, then → `/onboarding`), `/forgot-password`, `/reset-password?token=` |
+| Onboarding | `/onboarding` — demographics form (zod `mode: "onChange"`, `MINIMUM_SIGNUP_AGE = 14`, free-text tribe/village/quarter via datalist `Combobox`, arbitrary-depth sub-tribe chain, country sent as a *name*) |
+| Contributor (`(app)`, `<Nav>`) | `/dashboard`, `/contribute` (hub) → `/contribute/concept`, `/contribute/translate`, `/contribute/scene`, `/contribute/audio`; `/contributions` (history + failed submissions), `/review` (SILVER+), `/leaderboard`, `/corpus`, `/forum`, `/forum/[id]`, `/profile`, `/settings` |
+| Admin (`(admin)/admin`, `<AdminNav>`) | `dashboard`, `users`, `contributions`, `concepts`, `scenes`, `sentences`, `volunteers`, `publishing`, `suggestions`, and super-admin-only `gamification`, `feature-flags`, `logs` |
+
+- **Guards**: `(app)/layout.tsx` redirects to `/login` when there's no user. The admin layout
+  admits `admin`, `super_admin` **and `volunteer`**; `AdminNav` filters links by role, and the
+  gamification / feature-flags pages self-check for `super_admin`. Other admin pages (users,
+  logs, …) have no page-level role check — a volunteer who types the URL sees the shell and
+  gets 403s from the API.
+- **Gates**: terms are only enforced at registration (§3.19). Onboarding is only reached via
+  `register → /onboarding`; login always goes to `/dashboard`, so a user who skipped it sees
+  "Set your language in your profile before contributing" on every contribute page, but the
+  profile page has no language editor and nothing links back to `/onboarding`.
+- **Contribute pages**: `concept` (3-step: categories → concepts → record; image carousel;
+  3 synonym slots; "Suggest a better image"; "Share to Forum"), `translate` (groups of ≤50 →
+  group → record, 60 s max, per-user shuffle, source-language filter), `scene`, `audio`
+  (100 MB file, optional transcription + time segments). All four submit through the buffer
+  (§2.3). Categories and scenes are ordered with `seededShuffle(userId)`.
+- **Admin pages** share one set of components (`Pagination`, `AdminMultiSelect`,
+  `AdminBulkBar`, `AdminBulkUpload`/`-TextCreate`/`-ImageUrlUpload`, `AdminMediaManager`,
+  Openverse/Wikimedia pickers + autofill, `AdminUndoButton`, `AdminPermanentDeleteButton`,
+  `ImageCropper`, the three user modals) — the Openverse and Wikimedia pickers are
+  near-identical copies. Scenes has no title/description edit UI.
+- **API client**: `lib/api.ts` (~1900 lines) is the whole surface — `auth`, `terms`, `users`,
+  `notifications`, `languages`, `geo`, `demographics`, `categories`, `concepts`, `audio`,
+  `buffer`, `contributions`, `scenes`, `reviews`, `leaderboard`, `levels`, `corpus`, `badges`,
+  `forum`, `admin` (~100 wrappers), `publishing`, `superadmin`. Volunteer-gated calls return
+  `PendingResult`. Many wrappers are unused (the legacy non-buffer submit paths,
+  `admin.getPendingChanges`, `suspendUser`, `scenes.getDaily`, …).
+- **Design system**: Tailwind 4 `@theme` tokens in `globals.css` (`brand` green, `secondary`,
+  `accent`, `gold`, `danger`, `surface*`, `border`, `ink*`; Nunito via `next/font`) and a
+  Duolingo-style kit — `.btn-duo` (+ `-secondary`/`-blue`/`-danger`), `.card-duo`,
+  `.progress-duo-*`. **No i18n**: `<html lang="en">` with no `dir`; the only RTL support is
+  `dir="rtl"` on Urdu/Persian source sentences in translate.
+
 ---
 
 ## 5. Database Schema — Domain Grouping
@@ -763,7 +1184,7 @@ restatement of every column.)
 
 | Domain | Tables |
 |---|---|
-| Identity & access | `users`, `refresh_tokens`, `device_tokens`, `permissions`, `role_permissions`, `user_additional_permissions` |
+| Identity & access | `users`, `refresh_tokens`, `password_reset_tokens`, `terms_acceptances`, `device_tokens`, `permissions`, `role_permissions`, `user_additional_permissions` (never read) |
 | Demographics & geography | `contributor_demographics`, `contributor_profiles`, `tribes`, `sub_tribes`, `villages`, `quarters` |
 | Content taxonomy | `languages`, `dialects`, `categories`, `concepts`, `concept_media`, `sentences`, `scenes`, `scene_media`, `scene_image_keywords`, `scene_concepts` |
 | Contributions (per module) | `word_recordings` (Module 1), `audio_uploads` + `transcriptions` + `transcription_segments` (Module 2), `translations` (Module 3), `scene_contributions` (Module 4), plus the umbrella `contributions` table every module row is linked from |
@@ -772,13 +1193,40 @@ restatement of every column.)
 | Review & moderation | `reviews`, `contribution_keywords`, `audit_logs`, `suggestions` |
 | Gamification | `user_stats`, `streaks`, `gamification_config`, `points_transactions`, `badges`, `user_badges`, `perks`, `leaderboard_snapshots` |
 | Comms & compliance | `notifications`, `consents`, `data_exports` |
-| Ops | `feature_flags` |
+| Ops | `feature_flags` (inert, §2.7) |
+| Forum (§3.18) | `forum_posts`, `forum_comments`, `forum_post_reactions`, `forum_comment_reactions`, `forum_poll_options`, `forum_poll_votes` |
+| Publishing (§3.17) | `published_word_recordings`, `published_translations` |
+| Volunteer workflow (§3.16) | `pending_changes` (+ `users.auto_approve_volunteer`, `created_by` on `concepts`/`scenes`/`sentences`) |
 
 `contributions` is the single row every review/point/status action operates on regardless
 of module — it holds exactly one of `word_recording_id` / `audio_upload_id` /
 `translation_id` / `scene_contribution_id` (enforced by a `CHECK` constraint,
 `ck_contribution_single_reference`), plus `status`, `language_id`, `dialect_id`, and the
 (effectively dead — see §2.6) `base_points`/`bonus_points`/`total_points` generated column.
+
+As of 2026-11-11 there are **58 tables and 27 enums**. Other things worth knowing:
+
+- **Never referenced outside `schema.ts`**: `consents`, `data_exports`, `perks`,
+  `leaderboard_snapshots`, `user_additional_permissions`. `audio_files`' virus-scan/processing
+  columns are largely unused. `bullmq` and `ioredis` are in `apps/backend/package.json` but
+  never imported.
+- `contributions` and `pending_submissions` reference each other (circular FKs), which forces
+  nullable-then-backfill insert order. `pending_changes.result_resource_id` has no FK and its
+  `payload` is untyped jsonb. Drizzle `relations()` exist only for the older tables; forum,
+  publishing, `pending_changes`, `suggestions`, `terms_acceptances` and
+  `password_reset_tokens` use manual joins.
+- `contributor_profiles` (language, location, tribe as free text) overlaps with
+  `contributor_demographics` (the real onboarding form); mobile onboarding writes only the
+  former, the web form writes both.
+- `audit_logs.resource_id` is a `uuid`, so resources keyed by text (`gamification_config`,
+  `feature_flags`) can't be stored there (see §2.5's undo note).
+- `pending_submissions` history: `audio_data` bytea (`0008`) → dropped (`0011`) → local-disk
+  `audio_file_path` (`0010`) → back to `audio_buffer` bytea (`0018`). Some `schema.ts`
+  comments (the `pending_submissions` docblock, the "3-second limit") are stale.
+- Migrations `0018`–`0020` are hand-written with commented SQL, and `0018` has no
+  `meta/*_snapshot.json`. `0007`, `0012`, `0019` and `0022` include data backfills.
+- Emails are case-sensitive in the unique index (§3.20); `contributor_demographics.age` is
+  server-computed from `date_of_birth`.
 
 ---
 
@@ -800,11 +1248,44 @@ of module — it holds exactly one of `word_recording_id` / `audio_upload_id` /
   against the same production Supabase instance, with disciplined creation/cleanup of
   throwaway test accounts and careful FK-order deletion.
 
+### 6.1 Environment variables (as read by the code, 2026-11-11)
+
+**Backend** (`apps/backend`):
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | Postgres connection string — the Supabase **pooler** (6543); `prepare: false` is required (§2.7) |
+| `DATABASE_DIRECT_URL` | Used only by `drizzle.config.ts` (`db:migrate`); falls back to `DATABASE_URL`, but a pooled URL can't run DDL reliably |
+| `JWT_SECRET` | Signs/verifies access tokens |
+| `ALLOWED_ORIGINS` | Comma-separated CORS allowlist (default `http://localhost:3000`); no wildcard, because cookies need `credentials: true` |
+| `PORT` / `HOST` | Default `3001` / `0.0.0.0` |
+| `NODE_ENV` | `production` → `Secure; SameSite=None` refresh cookie and no stack traces in error bodies |
+| `FRONTEND_URL` | Base of the password-reset link (default `http://localhost:3000`) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Mailer; in production an unset `SMTP_HOST` throws (caller swallows it) |
+| `R2_ENDPOINT`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_AUDIO_BUCKET`, `R2_EXPORTS_BUCKET` | Cloudflare R2 (audio) |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_STORAGE_BUCKET` | Supabase Storage (images) |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | FCM push; unset / `"placeholder"` → push is a logged no-op |
+| `OPENVERSE_CLIENT_ID`, `OPENVERSE_CLIENT_SECRET` | Optional; raises Openverse's anonymous rate limit |
+| `PUBLIC_API_KEY` | Optional; if unset the `/public/*` API is **fully open** (§3.17) |
+
+**Web**: `NEXT_PUBLIC_API_URL` (API base and CSP `connect-src`). `NEXT_PUBLIC_SUPABASE_URL` /
+`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` are read only by `utils/supabase/server.ts`, which
+nothing imports (dead, along with the `@supabase/ssr` / `@supabase/supabase-js` deps).
+**Mobile**: `EXPO_PUBLIC_API_URL` (fallback `http://10.0.2.2:3001`).
+
+**Seeding**: `npm run db:seed` (a plain `tsx` script, not idempotent). See §7.2 for its
+failure on a freshly migrated database; the `patch-*.ts` seed scripts have no npm script —
+run them with `tsx`. One-off data repair: `npm run db:recompute-stats` (dry run; add
+`-- --apply` to write) — see §7.3.
+
 ---
 
 ## 7. Known Gaps / Not Yet Implemented
 
-- Mobile app (`apps/mobile`) is present but not part of the work this log describes.
+### 7.1 Carried over from earlier sessions
+
+- Mobile app (`apps/mobile`) has drifted from the backend and gets none of the newer web
+  features — see §8. It is no longer accurate to call it merely "not part of this log".
 - No automated test suite — correctness is established via manual live-testing against the
   real backend/database per change (register throwaway accounts, exercise the real HTTP
   endpoints, verify via direct queries, clean up).
@@ -832,3 +1313,234 @@ of module — it holds exactly one of `word_recording_id` / `audio_upload_id` /
   `contributions` rows. The fix stops the drift going forward; it doesn't repair history,
   since that's a direct data change outside the app's normal code path rather than a code
   fix.
+
+### 7.2 Found by the 2026-11-11 code audit (*code-read*, not live-verified)
+
+Pointers to §2-§3 where an item is already described in detail. Everything here was found by
+reading the code. These were additionally re-checked directly against the source before being
+written down: the `totalPoints` writers, the never-written weekly/monthly counters, the
+uncalled `evaluateAndAwardBadges()`, the review `invalid` path and its race, the volunteer
+gate's route coverage, RLS coverage (46 of 58 tables), the scope of `blockIfRestricted`,
+feature-flag usage, the seed/migration `0007` conflict, and the 16:9 image sizes. The rest
+rests on the audit agents' reading and should be reproduced before being fixed.
+
+**Data integrity & correctness**
+- **Fixed 2026-11-12 (batch 1 — see §7.3 for what still has to be deployed/run):** the
+  `totalPoints` under-count (§2.6), the always-zero weekly/monthly leaderboards (§2.6), the
+  review concurrency race and the `invalid`-decision counters (§2.4).
+  **Still open:** `evaluateAndAwardBadges()` has no callers (§2.6).
+- Admin status changes (`PUT /admin/contributions/:id/status`, bulk-status) set only `status` —
+  no `verifiedAt`/`verifiedBy`/`rejectedAt`, no counter changes, no points — so admin-verified
+  items are missing from the dashboard's "verified today" and a stale `rejectionReason` is kept.
+  `DELETE /admin/contributions/:id` doesn't check `deletedAt`, so a second delete decrements
+  `user_stats` again; concept/scene/sentence bulk-delete don't filter `deletedAt` either.
+- **Undo is fragile.** `beforeState` comes back from jsonb with timestamps as ISO *strings*, and
+  `...before` is passed straight to Drizzle's `.set()`, whose timestamp mapper calls
+  `.toISOString()` — so undoing a change where a timestamp (e.g. `verifiedAt`) was non-null
+  throws a 500. Undoing a ban restores `deletedAt = null` while `isActive` stays false and the
+  PII is already scrubbed (a zombie account); undoing restrict/cool-off leaves the reason/until
+  fields set; redoing a contribution delete doesn't re-decrement stats.
+- Points farming: scenes have no per-user uniqueness; every `POST /:id/transcription` creates a
+  new version and a new idempotency key (re-awarding points); segment arrays are unbounded.
+- Word/translation uniqueness ignores language (§3.21); buffered TRANSCRIPTION can silently lose
+  its transcription/segments (§2.3); retaking a published recording publishes unreviewed audio
+  (§3.17).
+- Account deletion (`deleteUserAccount`, five parallel un-transacted writes) scrubs `users`,
+  demographics, profile, refresh tokens and device tokens only. Forum posts, suggestions,
+  notifications, `terms_acceptances` and reset tokens remain, and the schema's `ON DELETE
+  CASCADE`s never fire because users are only soft-deleted.
+
+**Security**
+- Volunteers can bypass the approval queue through ungated routes (§3.16).
+- No target-role guard on restrict / suspend / cool-off / ban (single and bulk): an admin with
+  `users.manage` can lock out a `super_admin`. `POST /superadmin/admins` doesn't check the
+  target's role, so it can demote a `super_admin` to `admin`.
+- **Undo → privilege re-escalation.** Undo picks its permission by matching
+  `log.action === "superadmin_grant_admin"` exactly. After a super-admin undoes a grant, the
+  newest log is `undo:superadmin_grant_admin`, so any `users.manage` admin can POST undo again
+  and restore `role: "admin"`.
+- Legacy direct-submit routes skip `blockIfRestricted` and don't check `audioFileId`
+  ownership; reviewers can see other users' `audioFileId`s in queue detail, so a reviewer
+  could attach a victim's audio as their own word recording and then retake it — the override
+  path quarantines the old row and deletes the victim's R2 object.
+- The presigned flow trusts the client: `/audio/:id/confirm` compares two client-supplied
+  checksums and never checks R2; the presigned `PutObject` has no content-length limit;
+  `durationMs` is client-reported for SCENE and TRANSCRIPTION in every flow (the scene
+  "long description" bonus can be claimed by lying).
+- SSRF by redirect: `fetchImageFromUrl` checks DNS once for the first host, then `fetch`es
+  with the default `redirect: "follow"`; the Openverse/Wikimedia routes accept any `image.url`
+  host. `bulk-url` can fan out up to 200 parallel 10 MB downloads, and volunteers can call it.
+- Missing RLS on 12 tables (fix written as migration `0041`, **not yet applied** — §2.7, §7.3); `/public/*` open when `PUBLIC_API_KEY` is unset (§3.17);
+  `DELETE /devices/unregister` has no ownership filter on the token; case-sensitive emails
+  (§3.20); public leaderboard exposes `userId`/`displayName`; buffer endpoints hold up to
+  110 MB per request in memory with no per-user queue cap; terms say 18+ but signup allows 14.
+
+**Seed & ops**
+- `npm run db:seed` fails on a freshly migrated database: migration `0007` already inserts
+  `points.audio.translation` and `seed.ts` inserts it again with no `ON CONFLICT`, violating
+  `uq_gamification_config_key_active` and aborting the gamification-config section after the
+  feature flags have already committed.
+- `seed.ts` doesn't include `publishing.manage` (needs `patch-publishing-permissions.ts`),
+  creates no `super_admin` (promotion is manual), and gives demo contributors no
+  demographics (so reviewer scoping returns an empty queue). Seeded level descriptions say
+  "Minimum points" but levels are driven by contribution *count*.
+- Admin tuning issues: `PUT /superadmin/gamification/:key` accepts any number (no
+  threshold-order check) and existing users' levels aren't recomputed afterwards; categories
+  cache isn't invalidated on category *create* (§2.7); `/admin/training-data/images` and
+  `/categories` / `GET /concepts/next` pull whole tables into Node (against §2.7's own rule);
+  `/admin/analytics` counts soft-deleted contributions and banned users.
+- Input handling: `z.coerce.boolean()` turns the string `"false"` into `true` for `mine` /
+  `includeHidden` (concepts, scenes, admin sentences); `readBulkRows` has no `bom: true` so an
+  Excel-saved UTF-8 CSV mismatches its first header; a `null` element in a JSON array 500s;
+  `insertBulkInChunks` returns raw Drizzle query errors; permanent delete reports an FK
+  violation from `suggestions` as `HAS_CONTRIBUTIONS` with a count of 0; `GET
+  /sentences/random` writes `usage_count` on a GET; `/concepts` pagination has no `ORDER BY`.
+- Notifications: `GET /notifications` mutates `sent → delivered`; there is no unread count or
+  mark-all-read; push honours only the global `pushNotificationsEnabled` preference.
+  Streaks are computed in UTC, and parallel buffer rows for one user can race on the streak
+  read-modify-write.
+
+**Web frontend**
+- A failed session restore never clears the `lexlingo_has_session` flag, so every later boot
+  re-fires a failing refresh (the console 401 §4 says was removed); `store.error` is never read.
+- Users who skip onboarding are stuck (§4.1). Volunteers have no nav link into `/admin`.
+- `NotificationBell` is mounted in both the desktop and mobile `Nav` containers (CSS hides one),
+  so notifications are polled twice every 30 s.
+- ~38 call sites still use `err instanceof Error ? err.message`, which yields axios's
+  "Request failed with status code N" — the very problem §4's `getErrorMessage()` exists to
+  avoid. Several loaders have no `.catch` (dashboard, profile, `/corpus` and `/leaderboard`
+  hang on "Loading…"), as do many admin bulk handlers and the forum reaction/poll handlers.
+- Smaller: a `<button>` nested in a `<button>` on the publishing page (invalid HTML) and an
+  undefined `text-ink-faint` token; the audio-upload form resets with no success message;
+  a profile bio can't be cleared (`undefined` is sent); the concepts page doesn't refresh after
+  adding an image so the "✓ Image" badge goes stale; the scene coverage picker loads only the
+  first 200 concepts and is add-only; admin contributions' `togglePlay` doesn't use the
+  `loadedId` pattern §4 calls established; the forum post detail counts only top-level
+  comments; `confirm`/`alert`/`prompt` are used at ~60 sites; admin Users labels "unsuspend"
+  as "Lift ban" next to "Ban (delete)"; there is no self-ban guard.
+
+**Dead code & config**
+- Never read: `feature_flags` (§2.7), `consents`, `data_exports`, `perks`,
+  `leaderboard_snapshots`, `user_additional_permissions`; ~10 seeded permission codes (§2.5);
+  `points.word.synonym_bonus`, `levels.bronze.min`, the `modules.*` config keys;
+  `PermanentFailure` in `submission-buffer.service.ts`; `bullmq` / `ioredis`;
+  `apps/web/utils/supabase/server.ts` and its deps; ~15 unused `lib/api.ts` wrappers;
+  `lib/demographics-constants.ts` is a hand-synced copy of the backend list; `.turbo/turbo-build.log`
+  is stale.
+- Stale comments: `schema.ts` (`pending_submissions` still described as local-disk, "3-second
+  limit", a duplicated JSDoc block), several "3-second" word-limit comments in the services,
+  `storage.service.ts` image comments (JPEG / 1:1), `store.ts` ("sessionStorage"), and
+  `ConfirmDialog`'s "first custom modal".
+
+### 7.3 Batch 1 — what's done, and what still has to be run (2026-11-12)
+
+**Status:** the code changes are in the working tree and typecheck clean. **Nothing has been
+committed, deployed or migrated, and no production data has been written.**
+
+What changed: `services/points.service.ts` (`awardPointsOnce`, `pointsInLastDays`) wired into
+every award path; the review lock + per-decision counters in `reviews.service.ts`; the
+`rejected` branch in `adjustContributionStats`; ledger-backed weekly/monthly figures in the
+leaderboard, `/users/me`, `/users/me/stats` and the admin report; DB pool timeouts, the
+`/api/v1/health` readiness route and the watchdog (§2.7); migration `0041` (RLS); and the
+`database/scripts/recompute-user-stats.ts` repair script.
+
+**Shipping order** (the order matters):
+1. **Commit and deploy the backend** (push to `main` → Railway).
+2. **`npm run db:migrate --workspace=apps/backend`** — applies `0041`: enables RLS on 12
+   tables. Idempotent and metadata-only.
+3. **`npm run db:recompute-stats --workspace=apps/backend`** (a dry run that prints what would
+   change), then again with `-- --apply`. Only **after** step 1 — run before it, the still-old
+   code keeps under-counting and the totals drift again at once. A dry run on 2026-11-12 found
+   10 of 44 users needing change: net +2,270 points, 4 `pending` and 2 `rejected` counters.
+4. **Point an uptime monitor at `GET /api/v1/health`** (not `/health`).
+
+**How it was verified** (throwaway harness, since deleted; run against the real database with
+nothing left behind): watchdog decision logic with fakes (wedged → exit once; database-down →
+never exits; a success resets the count); health route 200 on the real pool and 503 with no error
+detail on a failing probe; `awardPointsOnce` adds exactly the points once and is a no-op on
+replay, inside a rolled-back transaction; leaderboard (weekly/monthly) rows equal the ledger's
+7/30-day sums; `/users/me`, `/users/me/stats` and the admin report match the ledger; and `FOR
+UPDATE` through the Supavisor pooler really blocks a second reviewer (waited ~2.7 s).
+
+**Not tested — do this after deploying, with throwaway accounts (the repo's convention, since
+there is no staging database):** the review `valid`/`invalid` counter changes end to end (the
+lock and the helper were tested in isolation, not a full review by a second user); the
+watchdog's real `process.exit` path (only its decision logic was tested); and a weekly
+leaderboard with non-zero data (there was no activity in the last 7 days; the monthly board had
+real non-zero values and matched).
+
+---
+
+## 8. Mobile App (`apps/mobile`)
+
+*Added 2026-11-11 from a read-only audit; nothing here was built or run on a device.*
+
+**Verdict**: a real app, not a stub — but the backend has moved on and Module 1 does not work
+against it. The only commit to touch it after late September was the narrow auth fix `16c810d`
+(plus two audio-limit constants).
+
+**Stack**: Expo SDK 57 as a **dev-client build** (`expo start --dev-client`; Expo Go can't run
+it), React Native 0.86 / React 19.2, new architecture + Hermes, TypeScript strict, React
+Navigation 7 (native-stack + bottom tabs), Zustand (`auth.store`, `app.store`), axios,
+WatermelonDB 0.28 (one table `offline_contributions`), `react-native-audio-recorder-player` v4
+(AAC `.m4a`, mono, 44.1 kHz), `react-native-blob-util`, `expo-secure-store` (refresh token),
+AsyncStorage (FCM token, 24 h languages/categories cache), `@react-native-firebase/{app,messaging}`
+v26. `@tanstack/react-query` is installed and `QueryClientProvider` wraps the app, but no
+`useQuery`/`useMutation` exists. Android package `com.lexlingo.app`; the iOS Xcode project still
+says `org.name.mobile` and `app.json` has no `ios.bundleIdentifier`, which mismatches the
+committed `GoogleService-Info.plist`. API base: `EXPO_PUBLIC_API_URL`.
+
+**Boot**: `index.js` → `App.tsx` (waits for Nunito fonts) → `AppInitializer` calls `loadUser()`,
+starts the NetInfo sync listener and requests the FCM token (registered via `POST
+/devices/register` once authenticated; no `onTokenRefresh`, no background handler, no
+tap-handling — a foreground message just raises an `Alert`). `RootNavigator` shows a splash,
+then `OnboardingScreen` if `isAuthenticated && justRegistered`, else the tab navigator, else
+`AuthStack`.
+
+**Auth**: sends `X-Client-Platform: mobile` on every call, so the backend returns the refresh
+token in the response body (§2.2); the access token lives in memory, the refresh token in
+SecureStore. A 401 interceptor skips `/auth/*`, shares one in-flight refresh, retries once and
+logs out on failure. Logout is best-effort (`/auth/logout` needs a valid access token).
+
+**Tabs**: Home (stats, daily scene, last 5 contributions), Contribute (hub → Modules 1-4),
+Review (SILVER+, gated client-side), Ranks (leaderboard), Profile (stats, badges, settings).
+
+**Upload path**: mobile uses the **legacy presigned flow** — `POST /audio/upload-url` → PUT to
+R2 → `POST /audio/:id/confirm` → the module's direct-submit JSON — not the durable buffer the
+web uses (§2.3), so it is also the only client that skips `blockIfRestricted`.
+
+**What is real vs placeholder**
+- Real: login, register (with terms), a reduced onboarding, all four contribute modules,
+  review list/detail, leaderboard, badges, profile/stats, settings, push registration.
+- Placeholder/missing: `ContributionHistoryScreen` is a `PlaceholderScreen` nothing navigates
+  to; Settings "Terms of Service: Coming soon" and a "contact support" alert instead of calling
+  `DELETE /users/me`; the Home "pending upload — tap to sync" banner has no `onPress`;
+  ProfileMain never loads the existing biography. Absent versus web: forum, corpus page,
+  contributions/failed-submissions UI, full demographics onboarding, forgot/change password,
+  avatar upload, notification inbox, suggestion box, account deletion, sentence-group browse,
+  and all volunteer/admin tooling.
+- **Offline queue is built but dead**: `syncService.queueContribution()` is never called, no
+  screen writes to WatermelonDB, every module uploads inline and just shows an error on
+  failure. Even if wired, it sends `mimeType: 'audio/m4a'` (not in the backend's allowed list →
+  400), never retries rows stuck in `uploading`, and never surfaces `dead` ones.
+
+**Known drift from the backend**
+1. **Module 1 is broken.** `GET /contributions/word/:conceptId/limits` now returns
+   `{1: bool, 2: bool, 3: bool}` (commit `4d4e087` removed "takes"), but `Module1Screen.tsx`
+   expects `canAddTake`/`nextSynonymIndex`/`takesPerSynonym` and reads
+   `limits?.takesPerSynonym[...]` — a `TypeError` as soon as a concept opens. It also has no
+   synonym selector.
+2. **Module 3 audio is not optional** in the backend (`audioFileId` is required) but the UI
+   says it is and allows a text-only submit → 400.
+3. **Empty review queue** for mobile-only users: scoping needs `contributor_demographics`,
+   which mobile onboarding never writes (it writes `contributor_profiles` with a free-text
+   tribe).
+4. Wrong copy: review "unlocks at GOLD" (gate is SILVER); "3-second word clips" (cap is 10 s).
+   Level thresholds are hardcoded in `utils/level.ts` although they're admin-configurable via
+   `GET /levels/thresholds`. The Daily Challenge opens a *random* scene, so the daily bonus
+   isn't reliably earned.
+5. Server error messages are mostly lost (only `auth.store.ts` extracts `response.data.message`),
+   so e.g. `ACCOUNT_RESTRICTED` shows axios's generic text. Login doesn't trim the email and
+   has no forgot-password link; Register's submit stays disabled forever if `/terms` fails.
+6. Module 2 hashes the whole file as base64 in JS (OOM risk near the 100 MB cap) and segments
+   with `endMs <= startMs` fail backend validation after the audio is already submitted.
