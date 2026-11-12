@@ -37,7 +37,7 @@ import {
   sceneImageKeywords,
   sceneMedia,
   sentences,
-  sentenceSourceLanguage,
+  sentenceCategories,
   subTribes,
   suggestions,
   transcriptions,
@@ -54,6 +54,13 @@ import { buildAttribution, searchOpenverseImages } from "../../services/openvers
 import { searchWikimediaImages } from "../../services/wikimedia.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
 import { invalidateFeatureFlagCache } from "../../services/feature-flags.service.js";
+import {
+  existingSentenceCategoryIds,
+  nextSentenceSortOrder,
+  planSentenceImport,
+  requireActiveSentenceCategory,
+  sentenceTextFields,
+} from "../../services/sentence.service.js";
 import { invalidateLeaderboardCache } from "../gamification/gamification.routes.js";
 import { authService } from "../auth/auth.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
@@ -824,13 +831,15 @@ type ModerationActor = { id: string; role: (typeof userRole.enumValues)[number] 
  * with no review, because the approval queue only covers creating and deleting. Admins and
  * super_admins are unaffected.
  */
-async function assertVolunteerOwns(actor: { id: string; role: string }, kind: "concept" | "scene", id: string): Promise<void> {
+async function assertVolunteerOwns(actor: { id: string; role: string }, kind: "concept" | "scene" | "sentence", id: string): Promise<void> {
   if (actor.role !== "volunteer") return;
   const [row] =
     kind === "concept"
       ? await db.select({ createdBy: concepts.createdBy }).from(concepts).where(eq(concepts.id, id)).limit(1)
-      : await db.select({ createdBy: scenes.createdBy }).from(scenes).where(eq(scenes.id, id)).limit(1);
-  if (!row) throw new HttpError(404, "NOT_FOUND", kind === "concept" ? "Concept not found" : "Scene not found");
+      : kind === "scene"
+        ? await db.select({ createdBy: scenes.createdBy }).from(scenes).where(eq(scenes.id, id)).limit(1)
+        : await db.select({ createdBy: sentences.createdBy }).from(sentences).where(eq(sentences.id, id)).limit(1);
+  if (!row) throw new HttpError(404, "NOT_FOUND", kind === "concept" ? "Concept not found" : kind === "scene" ? "Scene not found" : "Sentence not found");
   if (row.createdBy !== actor.id) {
     throw new HttpError(403, "FORBIDDEN", `Volunteers can only change ${kind}s they added themselves`);
   }
@@ -1144,9 +1153,20 @@ const bulkSceneTextSchema = z.object({
   titles: z.array(z.string().trim().min(1)).min(1).max(500),
 });
 
+// One item = one sentence in all three languages (a pasted row is split into these fields by the web app).
 const bulkSentenceTextSchema = z.object({
-  texts: z.array(z.string().trim().min(1)).min(1).max(500),
-  sourceLanguage: z.enum(sentenceSourceLanguage.enumValues).default("english"),
+  items: z
+    .array(
+      z.object({
+        category: z.string().default(""),
+        english: z.string().default(""),
+        urdu: z.string().default(""),
+        persian: z.string().default(""),
+      }),
+    )
+    .min(1)
+    .max(1000),
+  createCategories: z.boolean().default(false),
 });
 
 const updateSceneSchema = z
@@ -1191,16 +1211,29 @@ const sentencesQuerySchema = z.object({
   // Volunteer's "my own additions" filter -- true restricts the list to
   // sentences this caller themselves created (sentences.createdBy).
   mine: queryBoolean(),
-  sourceLanguage: z.enum(["english", "urdu", "persian"]).optional(),
+  categoryId: z.string().uuid().optional(),
+  // Matches the text in any of the three languages.
+  search: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(1000).default(50),
   offset: z.coerce.number().int().min(0).default(0),
 });
 
+// A sentence is always created with a category and ALL THREE languages.
 const createSentenceSchema = z.object({
-  englishText: z.string().min(1),
-  categoryId: z.string().uuid().optional(),
-  sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english"),
+  categoryId: z.string().uuid(),
+  ...sentenceTextFields,
 });
+
+const updateSentenceSchema = z
+  .object({
+    categoryId: z.string().uuid().optional(),
+    englishText: sentenceTextFields.englishText.optional(),
+    urduText: sentenceTextFields.urduText.optional(),
+    persianText: sentenceTextFields.persianText.optional(),
+    sortOrder: z.number().int().min(0).optional(),
+    isActive: z.boolean().optional(),
+  })
+  .refine((data) => Object.keys(data).length > 0, { message: "At least one field is required" });
 
 const bulkEditSentencesSchema = z.object({
   ids: z.array(z.string().uuid()).min(1).max(BULK_IDS_MAX),
@@ -1319,19 +1352,15 @@ async function applyCreateScene(body: z.infer<typeof createSceneSchema>, actor: 
 }
 
 async function applyCreateSentence(body: z.infer<typeof createSentenceSchema>, actor: { id: string; role: string }, createdBy: string | null) {
-  // Scoped to the same sourceLanguage -- identical text in two different
-  // languages (or a coincidental Urdu/Persian match, which share a script)
-  // isn't a real duplicate.
+  // The category must exist (a volunteer's queued create is replayed later, so it is re-checked here too).
+  await requireActiveSentenceCategory(body.categoryId);
+
+  // The English text identifies a sentence: the same English sentence (any case) is the same sentence,
+  // whatever its Urdu/Persian wording, so it isn't added twice.
   const [duplicate] = await db
     .select()
     .from(sentences)
-    .where(
-      and(
-        sql`lower(${sentences.englishText}) = lower(${body.englishText})`,
-        eq(sentences.sourceLanguage, body.sourceLanguage),
-        isNull(sentences.deletedAt),
-      ),
-    )
+    .where(and(sql`lower(${sentences.englishText}) = lower(${body.englishText})`, isNull(sentences.deletedAt)))
     .limit(1);
   if (duplicate) {
     return duplicate;
@@ -1339,7 +1368,14 @@ async function applyCreateSentence(body: z.infer<typeof createSentenceSchema>, a
 
   const [sentence] = await db
     .insert(sentences)
-    .values({ englishText: body.englishText, categoryId: body.categoryId ?? null, sourceLanguage: body.sourceLanguage, createdBy })
+    .values({
+      englishText: body.englishText,
+      urduText: body.urduText,
+      persianText: body.persianText,
+      sentenceCategoryId: body.categoryId,
+      sortOrder: await nextSentenceSortOrder(body.categoryId),
+      createdBy,
+    })
     .returning();
 
   return sentence!;
@@ -3742,25 +3778,56 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   /* ------------------------------- Sentences ------------------------------- */
 
-  // No list endpoint exists anywhere else -- translation.routes.ts only
-  // exposes a random single sentence and get-by-id, neither of which can
-  // enumerate all sentences for an admin list view.
+  // Every sentence has a category and its English, Urdu and Persian text (one row = one sentence in all three
+  // languages). Contributors browse them by category, in order (translation.routes.ts).
+  const toAdminSentence = (
+    row: typeof sentences.$inferSelect,
+    category: { name: string | null; slug: string | null } | null,
+  ) => ({
+    id: row.id,
+    englishText: row.englishText,
+    urduText: row.urduText ?? "",
+    persianText: row.persianText ?? "",
+    sortOrder: row.sortOrder,
+    isActive: row.isActive,
+    createdBy: row.createdBy,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    category: row.sentenceCategoryId ? { id: row.sentenceCategoryId, name: category?.name ?? null, slug: category?.slug ?? null } : null,
+  });
+
   fastify.get("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request) => {
-    const { createdFrom, createdTo, mine, sourceLanguage, limit, offset } = sentencesQuerySchema.parse(request.query);
+    const { createdFrom, createdTo, mine, categoryId, search, limit, offset } = sentencesQuerySchema.parse(request.query);
 
     const conditions = [isNull(sentences.deletedAt)];
     if (createdFrom) conditions.push(gte(sentences.createdAt, new Date(createdFrom)));
     if (createdTo) conditions.push(lte(sentences.createdAt, new Date(createdTo)));
     if (mine) conditions.push(eq(sentences.createdBy, request.user!.id));
-    if (sourceLanguage) conditions.push(eq(sentences.sourceLanguage, sourceLanguage));
+    if (categoryId) conditions.push(eq(sentences.sentenceCategoryId, categoryId));
+    if (search) {
+      const pattern = containsPattern(search);
+      conditions.push(or(ilike(sentences.englishText, pattern), ilike(sentences.urduText, pattern), ilike(sentences.persianText, pattern))!);
+    }
     const whereClause = and(...conditions);
 
-    const [items, [totalRow]] = await Promise.all([
-      db.select().from(sentences).where(whereClause).orderBy(desc(sentences.createdAt)).limit(limit).offset(offset),
+    const [rows, [totalRow]] = await Promise.all([
+      db
+        .select({ sentence: sentences, categoryName: sentenceCategories.nameEnglish, categorySlug: sentenceCategories.slug })
+        .from(sentences)
+        .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
+        .where(whereClause)
+        .orderBy(asc(sentenceCategories.sortOrder), asc(sentenceCategories.nameEnglish), asc(sentences.sortOrder), asc(sentences.createdAt), asc(sentences.id))
+        .limit(limit)
+        .offset(offset),
       db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(whereClause),
     ]);
 
-    return { items, limit, offset, total: totalRow?.value ?? 0 };
+    return {
+      items: rows.map((r) => toAdminSentence(r.sentence, { name: r.categoryName, slug: r.categorySlug })),
+      limit,
+      offset,
+      total: totalRow?.value ?? 0,
+    };
   });
 
   fastify.post("/admin/sentences", { preHandler: requirePermission("sentences.manage") }, async (request, reply) => {
@@ -3774,121 +3841,95 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       reply.code(202).send({ pending: true, id: outcome.id, message: "Submitted for admin approval" });
       return;
     }
-    reply.code(201).send(outcome.result);
+    reply.code(201).send(toAdminSentence(outcome.result, null));
   });
 
-  // Shared by the CSV/JSON file endpoint and the paste-text endpoint below --
-  // both resolve down to the same { englishText, category? }[] + a single
-  // sourceLanguage for the whole batch, so the category lookup and
-  // duplicate-text check only need to exist once.
-  async function buildSentenceInserts(
-    rows: { englishText: string; category?: string }[],
-    sourceLanguage: (typeof sentenceSourceLanguage.enumValues)[number],
-    rowNumOffset: number,
-  ): Promise<{ toInsert: { rowNum: number; value: typeof sentences.$inferInsert }[]; errors: { row: number; message: string }[] }> {
-    const allCategories = await db.select({ id: categories.id, slug: categories.slug, nameEnglish: categories.nameEnglish }).from(categories);
-    const categoryByKey = new Map(
-      allCategories.flatMap((c) => [
-        [c.slug.toLowerCase(), c],
-        [c.nameEnglish.toLowerCase(), c],
-      ]),
-    );
+  // Edit one sentence: its three texts, its category, its position in the category, or hide/show it.
+  // A volunteer may only edit sentences they added themselves (see assertVolunteerOwns).
+  fastify.put("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+    const { id } = idParamSchema.parse(request.params);
+    const body = updateSentenceSchema.parse(request.body);
+    await assertVolunteerOwns(request.user!, "sentence", id);
 
-    const errors: { row: number; message: string }[] = [];
-    const toInsert: { rowNum: number; value: typeof sentences.$inferInsert }[] = [];
+    const [existing] = await db.select().from(sentences).where(and(eq(sentences.id, id), isNull(sentences.deletedAt))).limit(1);
+    if (!existing) throw new HttpError(404, "NOT_FOUND", "Sentence not found");
 
-    // Bounded to this batch's own candidate texts (via the lower(english_text)
-    // index added alongside this check) rather than pulling the whole
-    // sentences table -- with 6000+ rows and cross-region latency, that would
-    // be exactly the "never pull a large row set into Node" mistake this
-    // codebase has already been burned by once (see ARCHITECTURE.md §2.7).
-    const candidateLower = [...new Set(rows.map((r) => r.englishText.trim().toLowerCase()).filter(Boolean))];
-    const existingLower = new Set(
-      candidateLower.length
-        ? (
-            await db
-              .select({ englishText: sentences.englishText })
-              .from(sentences)
-              .where(
-                and(
-                  sql`lower(${sentences.englishText}) in ${candidateLower}`,
-                  eq(sentences.sourceLanguage, sourceLanguage),
-                  isNull(sentences.deletedAt),
-                ),
-              )
-          ).map((s) => s.englishText.toLowerCase())
-        : [],
-    );
+    const { categoryId, ...rest } = body;
+    const changes: Partial<typeof sentences.$inferInsert> = { ...rest };
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i]!;
-      const rowNum = i + rowNumOffset;
-      const englishText = row.englishText.trim();
-
-      if (!englishText) {
-        errors.push({ row: rowNum, message: "Text is required" });
-        continue;
-      }
-      let categoryId: string | null = null;
-      const categoryKey = (row.category ?? "").trim().toLowerCase();
-      if (categoryKey) {
-        const category = categoryByKey.get(categoryKey);
-        if (!category) {
-          errors.push({ row: rowNum, message: `Unknown category "${row.category}"` });
-          continue;
-        }
-        categoryId = category.id;
-      }
-
-      // Silently skip -- no error, no created count -- same convention as
-      // the concept duplicate check elsewhere in this file.
-      const lower = englishText.toLowerCase();
-      if (existingLower.has(lower)) {
-        continue;
-      }
-      existingLower.add(lower);
-
-      toInsert.push({ rowNum, value: { englishText, categoryId, sourceLanguage } });
+    if (categoryId !== undefined && categoryId !== existing.sentenceCategoryId) {
+      await requireActiveSentenceCategory(categoryId);
+      changes.sentenceCategoryId = categoryId;
+      // Moving to another category puts it at the end of that one, unless a position was given.
+      if (body.sortOrder === undefined) changes.sortOrder = await nextSentenceSortOrder(categoryId);
     }
 
-    return { toInsert, errors };
-  }
+    if (body.englishText !== undefined && body.englishText.toLowerCase() !== existing.englishText.toLowerCase()) {
+      const [clash] = await db
+        .select({ id: sentences.id })
+        .from(sentences)
+        .where(and(sql`lower(${sentences.englishText}) = lower(${body.englishText})`, isNull(sentences.deletedAt)))
+        .limit(1);
+      if (clash) throw new HttpError(409, "DUPLICATE", "Another sentence already has that English text");
+    }
 
-  // Bulk create from a CSV or JSON file. Expected row fields: englishText or
-  // text (required -- accepts either column name, since a non-English batch
-  // realistically won't be titled "englishText"), category (optional, slug
-  // or English name). Every row in one upload shares a single sourceLanguage
-  // (?sourceLanguage=urdu|persian|english on the URL, default english) --
-  // real-world imports are one file per language, not a language-per-row
-  // column, matching how this dataset actually shows up.
-  fastify.post("/admin/sentences/bulk", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
-    const { sourceLanguage } = z.object({ sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english") }).parse(request.query);
-    const rows = await readBulkRows(request);
-    const { toInsert, errors } = await buildSentenceInserts(
-      rows.map((r) => ({ englishText: r.englishText ?? r.text ?? "", category: r.category })),
-      sourceLanguage,
-      2,
-    );
-    const result: BulkResult = { created: 0, errors };
-    await insertBulkInChunks(sentences, toInsert, result);
-    return result;
+    const [updated] = await db.update(sentences).set({ ...changes, updatedAt: new Date() }).where(eq(sentences.id, id)).returning();
+
+    // Only the fields this PUT touched, under the table's own property names, so Undo restores exactly them.
+    const keys = Object.keys(changes) as (keyof typeof existing)[];
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_sentence_update",
+      resourceType: "sentence",
+      resourceId: id,
+      beforeState: Object.fromEntries(keys.map((k) => [k, existing[k]])),
+      afterState: changes,
+    });
+
+    const [category] = updated!.sentenceCategoryId
+      ? await db.select({ name: sentenceCategories.nameEnglish, slug: sentenceCategories.slug }).from(sentenceCategories).where(eq(sentenceCategories.id, updated!.sentenceCategoryId)).limit(1)
+      : [];
+    return toAdminSentence(updated!, category ?? null);
   });
 
-  // Paste-text counterpart to the file upload above -- one sentence per
-  // textarea line, no file required, same convention as concepts'/scenes'
-  // own bulk-text endpoints. Every line in one paste shares a single
-  // sourceLanguage, picked once for the whole batch (matching the file
-  // endpoint's own one-language-per-upload convention).
-  fastify.post("/admin/sentences/bulk-text", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
-    const { texts, sourceLanguage } = bulkSentenceTextSchema.parse(request.body);
-    const { toInsert, errors } = await buildSentenceInserts(
-      texts.map((englishText) => ({ englishText })),
-      sourceLanguage,
-      1,
-    );
+  // Row keys from a CSV/JSON file are whatever the author typed; accept the obvious spellings.
+  const normalizeImportRow = (row: Record<string, string>) => {
+    const byKey = new Map(Object.entries(row).map(([k, v]) => [k.toLowerCase().replace(/[^a-z]/g, ""), v]));
+    const pick = (...names: string[]) => names.map((n) => byKey.get(n)).find((v) => v !== undefined);
+    return {
+      category: pick("category", "categoryname"),
+      english: pick("english", "englishtext", "text"),
+      urdu: pick("urdu", "urdutext"),
+      persian: pick("persian", "persiantext", "farsi"),
+    };
+  };
+
+  // Bulk create from a CSV or JSON file with one row per sentence and the columns
+  // category, english, urdu, persian (header spellings like englishText are accepted too). A row missing its
+  // category or ANY of the three languages is refused and reported with its row number -- an import can never
+  // leave a sentence without its equivalents. Unknown categories are an error unless ?createCategories=true.
+  fastify.post("/admin/sentences/bulk", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
+    const { createCategories } = z.object({ createCategories: queryBoolean() }).parse(request.query);
+    const rows = await readBulkRows(request);
+    const { toInsert, errors, categoriesCreated } = await planSentenceImport(rows.map(normalizeImportRow), {
+      createCategories: createCategories ?? false,
+      rowNumOffset: 2, // +1 for 0-index, +1 for the header row
+      createdBy: null,
+    });
     const result: BulkResult = { created: 0, errors };
     await insertBulkInChunks(sentences, toInsert, result);
-    return result;
+    return { ...result, categoriesCreated };
+  });
+
+  // Paste counterpart to the file upload: the web app splits each pasted line into category / English / Urdu /
+  // Persian and sends them as items.
+  fastify.post("/admin/sentences/bulk-text", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
+    const { items, createCategories } = bulkSentenceTextSchema.parse(request.body);
+    const { toInsert, errors, categoriesCreated } = await planSentenceImport(items, { createCategories, rowNumOffset: 1, createdBy: null });
+    const result: BulkResult = { created: 0, errors };
+    await insertBulkInChunks(sentences, toInsert, result);
+    return { ...result, categoriesCreated };
   });
 
   fastify.post("/admin/sentences/bulk-delete", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
@@ -3924,27 +3965,44 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/admin/sentences/bulk-edit", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
-    const { ids, ...fields } = bulkEditSentencesSchema.parse(request.body);
+    const { ids, categoryId, isActive } = bulkEditSentencesSchema.parse(request.body);
 
-    const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
-    const rows = await db.select().from(sentences).where(inArray(sentences.id, ids));
+    const rows = await db.select().from(sentences).where(and(inArray(sentences.id, ids), isNull(sentences.deletedAt)));
     if (rows.length === 0) return { updated: 0 };
+    if (categoryId !== undefined && !(await existingSentenceCategoryIds([categoryId])).has(categoryId)) {
+      throw new HttpError(404, "NOT_FOUND", "Sentence category not found");
+    }
 
-    await db.update(sentences).set({ ...fields, updatedAt: new Date() }).where(inArray(sentences.id, rows.map((r) => r.id)));
+    // Moving sentences to a category puts them at the end of it, keeping their relative order.
+    const moving = categoryId !== undefined ? rows.filter((r) => r.sentenceCategoryId !== categoryId).sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.getTime() - b.createdAt.getTime()) : [];
+    const firstSlot = categoryId !== undefined && moving.length > 0 ? await nextSentenceSortOrder(categoryId) : 0;
+    const newOrder = new Map(moving.map((r, i) => [r.id, firstSlot + i]));
 
-    await writeAuditLogs(
-      rows.map((row) => ({
+    const audit: Parameters<typeof writeAuditLogs>[0] = [];
+    for (const row of rows) {
+      const changes: Partial<typeof sentences.$inferInsert> = {};
+      if (isActive !== undefined && isActive !== row.isActive) changes.isActive = isActive;
+      if (categoryId !== undefined && row.sentenceCategoryId !== categoryId) {
+        changes.sentenceCategoryId = categoryId;
+        changes.sortOrder = newOrder.get(row.id)!;
+      }
+      const keys = Object.keys(changes) as (keyof typeof row)[];
+      if (keys.length === 0) continue;
+
+      await db.update(sentences).set({ ...changes, updatedAt: new Date() }).where(eq(sentences.id, row.id));
+      audit.push({
         actorId: request.user!.id,
         actorRole: request.user!.role,
         action: "admin_sentence_update",
         resourceType: "sentence",
         resourceId: row.id,
-        beforeState: Object.fromEntries(fieldKeys.map((k) => [k, row[k as keyof typeof row]])),
-        afterState: fields,
-      })),
-    );
+        beforeState: Object.fromEntries(keys.map((k) => [k, row[k]])),
+        afterState: changes,
+      });
+    }
+    await writeAuditLogs(audit);
 
-    return { updated: rows.length };
+    return { updated: audit.length };
   });
 
   fastify.delete("/admin/sentences/:id", { preHandler: requirePermission("sentences.manage") }, async (request, reply) => {

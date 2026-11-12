@@ -1,14 +1,14 @@
-import { and, eq, ilike, inArray, isNull, not, sql } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
 import { containsPattern } from "../../../utils/sql-like.js";
 import { db } from "../../../db/index.js";
 import {
   audioFiles,
-  categories,
   contributions,
   gamificationConfig,
   pointsTransactions,
   publishedTranslations,
+  sentenceCategories,
   sentences,
   translations,
   userStats,
@@ -23,8 +23,6 @@ import { HttpError } from "../../../utils/http-error.js";
 
 // Module 3 translations carry NO duration limit anywhere in this file.
 // Audio can be any duration.
-
-export type SentenceSourceLanguage = (typeof sentences.$inferInsert)["sourceLanguage"];
 
 export type SubmitTranslationInput = {
   nativeText?: string | null;
@@ -54,242 +52,209 @@ async function readConfigValue(tx: Parameters<Parameters<typeof db.transaction>[
 }
 
 /**
- * Search/browse list, used both by the translate page's quick search-and-jump
- * and the Browse Sentences screen (mirroring the concept/scene modules'
- * browse-tiles-with-search pattern). Computes hasTranslated per row (has
- * this user already translated this sentence) the same way concepts/scenes
- * compute hasContributed, and pushes translated sentences to the bottom via
- * ORDER BY on that same boolean (false/untranslated sorts first).
+ * Sentences are browsed BY CATEGORY, in the order an admin gave them -- not at random. A sentence is
+ * one meaning in three languages (English, Urdu, Persian) on one row, so every read returns all three
+ * and the contributor picks which one to read; a recording of it applies to all of them.
  */
-export async function searchSentences(
-  userId: string,
-  search: string | undefined,
-  filter: "translated" | "untranslated" | undefined,
-  sourceLanguage: SentenceSourceLanguage | undefined,
-  limit: number,
-  offset: number,
-) {
-  const hasTranslatedExpr = sql<boolean>`exists (
+export type SentenceItem = {
+  id: string;
+  englishText: string;
+  urduText: string;
+  persianText: string;
+  sortOrder: number;
+  category: { id: string; name: string; slug: string } | null;
+  hasTranslated: boolean;
+};
+
+/** Has THIS user already recorded a live translation of the sentence? */
+const translatedByUser = (userId: string) => sql<boolean>`exists (
     select 1 from ${translations}
     where ${translations.sentenceId} = ${sentences.id}
       and ${translations.userId} = ${userId}
       and ${translations.deletedAt} is null
   )`;
 
-  const conditions = [eq(sentences.isActive, true), isNull(sentences.deletedAt)];
-  if (search) {
-    conditions.push(ilike(sentences.englishText, containsPattern(search)));
+const sentenceSelection = (userId: string) => ({
+  id: sentences.id,
+  englishText: sentences.englishText,
+  urduText: sentences.urduText,
+  persianText: sentences.persianText,
+  sortOrder: sentences.sortOrder,
+  categoryId: sentenceCategories.id,
+  categoryName: sentenceCategories.nameEnglish,
+  categorySlug: sentenceCategories.slug,
+  hasTranslated: translatedByUser(userId),
+});
+
+type SentenceRow = {
+  id: string;
+  englishText: string;
+  urduText: string | null;
+  persianText: string | null;
+  sortOrder: number;
+  categoryId: string | null;
+  categoryName: string | null;
+  categorySlug: string | null;
+  hasTranslated: boolean;
+};
+
+function toSentenceItem(row: SentenceRow): SentenceItem {
+  return {
+    id: row.id,
+    englishText: row.englishText,
+    urduText: row.urduText ?? "",
+    persianText: row.persianText ?? "",
+    sortOrder: row.sortOrder,
+    category: row.categoryId ? { id: row.categoryId, name: row.categoryName ?? "", slug: row.categorySlug ?? "" } : null,
+    hasTranslated: row.hasTranslated,
+  };
+}
+
+const liveSentence = and(eq(sentences.isActive, true), isNull(sentences.deletedAt));
+const inOrder = [asc(sentences.sortOrder), asc(sentences.createdAt), asc(sentences.id)] as const;
+
+/**
+ * The category tiles: every active category that has at least one active sentence, in the admin's
+ * order, with how many of its sentences this user has already translated. One grouped query -- only
+ * the small aggregated result crosses the network (this DB connection is cross-region).
+ */
+export async function getSentenceCategoryTiles(userId: string) {
+  const items = await db
+    .select({
+      id: sentenceCategories.id,
+      slug: sentenceCategories.slug,
+      name: sentenceCategories.nameEnglish,
+      sortOrder: sentenceCategories.sortOrder,
+      sentenceCount: sql<number>`count(distinct ${sentences.id})`.mapWith(Number),
+      translatedCount: sql<number>`count(distinct ${translations.id})`.mapWith(Number),
+    })
+    .from(sentenceCategories)
+    .innerJoin(sentences, and(eq(sentences.sentenceCategoryId, sentenceCategories.id), liveSentence))
+    .leftJoin(translations, and(eq(translations.sentenceId, sentences.id), eq(translations.userId, userId), isNull(translations.deletedAt)))
+    .where(eq(sentenceCategories.isActive, true))
+    .groupBy(sentenceCategories.id)
+    .orderBy(asc(sentenceCategories.sortOrder), asc(sentenceCategories.nameEnglish));
+
+  return { items };
+}
+
+/** One category's sentences, in order, with this user's progress -- optionally narrowed by a search (any language) or translated/untranslated. */
+export async function listCategorySentences(
+  userId: string,
+  categoryId: string,
+  opts: { search?: string; filter?: "translated" | "untranslated"; limit: number; offset: number },
+) {
+  const [category] = await db
+    .select({ id: sentenceCategories.id, name: sentenceCategories.nameEnglish, slug: sentenceCategories.slug })
+    .from(sentenceCategories)
+    .where(and(eq(sentenceCategories.id, categoryId), eq(sentenceCategories.isActive, true)))
+    .limit(1);
+  if (!category) throw new HttpError(404, "NOT_FOUND", "Category not found");
+
+  const conditions = [liveSentence, eq(sentences.sentenceCategoryId, categoryId)];
+  if (opts.search) {
+    const pattern = containsPattern(opts.search);
+    conditions.push(or(ilike(sentences.englishText, pattern), ilike(sentences.urduText, pattern), ilike(sentences.persianText, pattern))!);
   }
-  if (filter === "translated") {
-    conditions.push(hasTranslatedExpr);
-  } else if (filter === "untranslated") {
-    conditions.push(sql`not (${hasTranslatedExpr})`);
-  }
-  if (sourceLanguage) {
-    conditions.push(eq(sentences.sourceLanguage, sourceLanguage));
-  }
+  if (opts.filter === "translated") conditions.push(translatedByUser(userId));
+  else if (opts.filter === "untranslated") conditions.push(sql`not (${translatedByUser(userId)})`);
 
   const [rows, [totalRow]] = await Promise.all([
     db
-      .select({
-        id: sentences.id,
-        englishText: sentences.englishText,
-        sourceLanguage: sentences.sourceLanguage,
-        categoryId: categories.id,
-        categoryName: categories.nameEnglish,
-        categorySlug: categories.slug,
-        hasTranslated: hasTranslatedExpr,
-      })
+      .select(sentenceSelection(userId))
       .from(sentences)
-      .leftJoin(categories, eq(categories.id, sentences.categoryId))
+      .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
       .where(and(...conditions))
-      .orderBy(hasTranslatedExpr, sentences.englishText)
-      .limit(limit)
-      .offset(offset),
+      .orderBy(...inOrder)
+      .limit(opts.limit)
+      .offset(opts.offset),
     db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(and(...conditions)),
   ]);
 
-  const items = rows.map((row) => ({
-    id: row.id,
-    englishText: row.englishText,
-    sourceLanguage: row.sourceLanguage,
-    category: row.categoryId ? { id: row.categoryId, name: row.categoryName, slug: row.categorySlug } : null,
-    hasTranslated: row.hasTranslated,
-  }));
-
-  return { items, limit, offset, total: totalRow?.value ?? 0 };
+  return { category, items: rows.map(toSentenceItem), total: totalRow?.value ?? 0, limit: opts.limit, offset: opts.offset };
 }
 
-// Sentences are bucketed into fixed-size "groups" for the translate page's
-// tile view -- membership is a deterministic pseudo-random order (sorted by
-// md5(id), not creation order or alphabetically) computed on the fly rather
-// than stored, so it needs no migration/backfill and automatically covers
-// sentences added later. It isn't perfectly stable across an admin adding
-// or removing sentences (group boundaries can shift), but within a normal
-// session it's fixed, which is all the progress bar / tile view needs.
-const SENTENCE_GROUP_SIZE = 50;
+/**
+ * The next sentence in a category this user hasn't translated yet, in the category's order -- the
+ * replacement for the old "random sentence". With `afterSentenceId` it continues from that sentence
+ * (strictly after it in the order), so "Next" walks the category front to back; without it, it is the
+ * first untranslated one. 404 when there is nothing left (after that point).
+ */
+export async function getNextSentence(userId: string, categoryId: string, afterSentenceId?: string): Promise<SentenceItem> {
+  const conditions = [liveSentence, eq(sentences.sentenceCategoryId, categoryId), sql`not (${translatedByUser(userId)})`];
 
-// This app's DB connection crosses regions (see db/index.ts's prepare:false
-// comment) -- round trips are expensive and, worse, transferring many rows
-// scales badly (6384 rows measured at ~20s+ vs. ~200ms for 100 rows). The
-// naive version of this feature (pull every active sentence id into Node,
-// chunk into groups of 50 in JS) took 20-40s per request. Both functions
-// below instead do the bucketing AND aggregation entirely in one SQL
-// statement each, so only the small, already-aggregated result ever
-// crosses the network -- a page of groups is a handful of summary rows, and
-// a single group's detail is at most 50 rows.
-export async function getSentenceGroups(userId: string, sourceLanguage: SentenceSourceLanguage | undefined, limit: number, offset: number) {
-  // sql.raw for the enum literal is safe here -- sourceLanguage only ever
-  // reaches this function already validated against the zod enum in the
-  // route, never arbitrary user text.
-  const languageFilter = sourceLanguage ? sql`and ${sentences.sourceLanguage} = ${sourceLanguage}` : sql``;
-
-  const [groupRows, [totalRow]] = await Promise.all([
-    db.execute<{ group_index: number; sentence_count: number; translated_count: number }>(sql`
-      with ordered as (
-        select id, (row_number() over (order by md5(id::text)) - 1) as rn
-        from ${sentences}
-        where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
-      ),
-      grouped as (
-        select (rn / ${SENTENCE_GROUP_SIZE})::int as group_index, id
-        from ordered
-      )
-      select
-        g.group_index,
-        count(*)::int as sentence_count,
-        count(t.id)::int as translated_count
-      from grouped g
-      left join ${translations} t
-        on t.sentence_id = g.id and t.user_id = ${userId} and t.deleted_at is null
-      group by g.group_index
-      order by g.group_index
-      limit ${limit} offset ${offset}
-    `),
-    db.execute<{ total_groups: number }>(sql`
-      select ceil(count(*)::numeric / ${SENTENCE_GROUP_SIZE})::int as total_groups
-      from ${sentences}
-      where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
-    `),
-  ]);
-
-  const items = groupRows.map((r) => ({
-    groupIndex: r.group_index,
-    sentenceCount: r.sentence_count,
-    translatedCount: r.translated_count,
-  }));
-
-  return { items, limit, offset, total: totalRow?.total_groups ?? 0 };
-}
-
-export async function getSentenceGroupDetail(userId: string, groupIndex: number, sourceLanguage: SentenceSourceLanguage | undefined) {
-  const languageFilter = sourceLanguage ? sql`and ${sentences.sourceLanguage} = ${sourceLanguage}` : sql``;
-
-  const [[totalRow], rows] = await Promise.all([
-    db.execute<{ total_groups: number }>(sql`
-      select ceil(count(*)::numeric / ${SENTENCE_GROUP_SIZE})::int as total_groups
-      from ${sentences}
-      where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
-    `),
-    db.execute<{
-      id: string;
-      english_text: string;
-      source_language: string;
-      category_id: string | null;
-      category_name: string | null;
-      category_slug: string | null;
-      has_translated: boolean;
-    }>(sql`
-      with ordered as (
-        select id from ${sentences}
-        where ${sentences.isActive} = true and ${sentences.deletedAt} is null ${languageFilter}
-        order by md5(id::text)
-        offset ${groupIndex * SENTENCE_GROUP_SIZE} limit ${SENTENCE_GROUP_SIZE}
-      )
-      select
-        s.id,
-        s.english_text,
-        s.source_language,
-        c.id as category_id,
-        c.name_english as category_name,
-        c.slug as category_slug,
-        exists (
-          select 1 from ${translations} t
-          where t.sentence_id = s.id and t.user_id = ${userId} and t.deleted_at is null
-        ) as has_translated
-      from ordered o
-      join ${sentences} s on s.id = o.id
-      left join ${categories} c on c.id = s.category_id
-    `),
-  ]);
-
-  const totalGroups = totalRow?.total_groups ?? 0;
-  if (groupIndex < 0 || groupIndex >= totalGroups) {
-    throw new HttpError(404, "NOT_FOUND", "Sentence group not found");
+  if (afterSentenceId) {
+    const [after] = await db
+      .select({ id: sentences.id })
+      .from(sentences)
+      .where(and(eq(sentences.id, afterSentenceId), eq(sentences.sentenceCategoryId, categoryId)))
+      .limit(1);
+    // Compared against the row itself, inside the database. Passing its created_at back as a parameter loses
+    // the microseconds (a JS Date only has milliseconds), which made "after X" include X.
+    if (after) {
+      conditions.push(
+        sql`(${sentences.sortOrder}, ${sentences.createdAt}, ${sentences.id}) > (select a.sort_order, a.created_at, a.id from ${sentences} a where a.id = ${after.id}::uuid)`,
+      );
+    }
   }
 
-  const items = rows.map((row) => ({
-    id: row.id,
-    englishText: row.english_text,
-    sourceLanguage: row.source_language as SentenceSourceLanguage,
-    category: row.category_id ? { id: row.category_id, name: row.category_name, slug: row.category_slug } : null,
-    hasTranslated: row.has_translated,
-  }));
-
-  return { groupIndex, totalGroups, items };
-}
-
-export async function getRandomSentence(userId: string, languageId: string, sourceLanguage: SentenceSourceLanguage | undefined) {
-  // The literal exclusion query given in spec only filters by user_id and
-  // module_type, which would make the languageId parameter unused. Since
-  // this is a multi-language platform (every contribution carries a
-  // language_id), a sentence a user already translated into Pashto should
-  // still be offered for Urdu -- so the exclusion is scoped per language
-  // here, deviating from the literal SQL to make languageId meaningful.
-  const translatedSentenceIds = db
-    .select({ sentenceId: translations.sentenceId })
-    .from(translations)
-    .innerJoin(contributions, eq(contributions.id, translations.contributionId))
-    .where(
-      and(
-        eq(contributions.userId, userId),
-        eq(contributions.moduleType, "TRANSLATION"),
-        eq(contributions.languageId, languageId),
-      ),
-    );
-
-  const conditions = [eq(sentences.isActive, true), isNull(sentences.deletedAt), not(inArray(sentences.id, translatedSentenceIds))];
-  if (sourceLanguage) {
-    conditions.push(eq(sentences.sourceLanguage, sourceLanguage));
-  }
-
-  const [sentence] = await db
-    .select({
-      id: sentences.id,
-      englishText: sentences.englishText,
-      sourceLanguage: sentences.sourceLanguage,
-      categoryId: categories.id,
-      categoryName: categories.nameEnglish,
-      categorySlug: categories.slug,
-    })
+  const [row] = await db
+    .select(sentenceSelection(userId))
     .from(sentences)
-    .leftJoin(categories, eq(categories.id, sentences.categoryId))
+    .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
     .where(and(...conditions))
-    .orderBy(sql`random()`)
+    .orderBy(...inOrder)
     .limit(1);
 
-  if (!sentence) {
-    throw new HttpError(404, "NO_SENTENCES_AVAILABLE", "No untranslated sentences remain for this language");
+  if (!row) {
+    throw new HttpError(
+      404,
+      "NO_SENTENCES_AVAILABLE",
+      afterSentenceId ? "No more untranslated sentences after this one in this category" : "You've translated every sentence in this category",
+    );
   }
+  return toSentenceItem(row);
+}
 
-  await db.update(sentences).set({ usageCount: sql`${sentences.usageCount} + 1` }).where(eq(sentences.id, sentence.id));
+export async function getSentenceForTranslation(userId: string, id: string): Promise<SentenceItem> {
+  const [row] = await db
+    .select(sentenceSelection(userId))
+    .from(sentences)
+    .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
+    .where(and(eq(sentences.id, id), liveSentence))
+    .limit(1);
+  // Hidden and soft-deleted sentences can't be fetched (or translated) by their id.
+  if (!row) throw new HttpError(404, "NOT_FOUND", "Sentence not found");
+  return toSentenceItem(row);
+}
 
-  return {
-    id: sentence.id,
-    englishText: sentence.englishText,
-    sourceLanguage: sentence.sourceLanguage,
-    category: sentence.categoryId ? { id: sentence.categoryId, name: sentence.categoryName, slug: sentence.categorySlug } : null,
-  };
+/** Free-text search across all categories and all three languages (the forum composer's "discuss a sentence" picker). */
+export async function searchSentences(
+  userId: string,
+  opts: { search?: string; filter?: "translated" | "untranslated"; categoryId?: string; limit: number; offset: number },
+) {
+  const conditions = [liveSentence];
+  if (opts.categoryId) conditions.push(eq(sentences.sentenceCategoryId, opts.categoryId));
+  if (opts.search) {
+    const pattern = containsPattern(opts.search);
+    conditions.push(or(ilike(sentences.englishText, pattern), ilike(sentences.urduText, pattern), ilike(sentences.persianText, pattern))!);
+  }
+  if (opts.filter === "translated") conditions.push(translatedByUser(userId));
+  else if (opts.filter === "untranslated") conditions.push(sql`not (${translatedByUser(userId)})`);
+
+  const [rows, [totalRow]] = await Promise.all([
+    db
+      .select(sentenceSelection(userId))
+      .from(sentences)
+      .leftJoin(sentenceCategories, eq(sentenceCategories.id, sentences.sentenceCategoryId))
+      .where(and(...conditions))
+      .orderBy(asc(sentenceCategories.sortOrder), asc(sentenceCategories.nameEnglish), ...inOrder)
+      .limit(opts.limit)
+      .offset(opts.offset),
+    db.select({ value: sql<number>`count(*)`.mapWith(Number) }).from(sentences).where(and(...conditions)),
+  ]);
+
+  return { items: rows.map(toSentenceItem), limit: opts.limit, offset: opts.offset, total: totalRow?.value ?? 0 };
 }
 
 export async function submitTranslation(userId: string, sentenceId: string, data: SubmitTranslationInput) {

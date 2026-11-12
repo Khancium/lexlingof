@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../../db/index.js";
@@ -141,6 +141,15 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
   fastify.post("/translation", { preHandler: [verifyToken, requireModule(3), blockIfRestricted] }, async (request, reply) => {
     const { meta, audio } = await readMultipartSubmission(request);
     const { durationMs, ...payload } = translationMetaSchema.parse(meta);
+
+    // Refuse a sentence that no longer exists (or is hidden) NOW. Without this a stale page -- e.g. one left open
+    // across the sentence purge -- got "accepted" here and the recording then failed in the background.
+    const [sentence] = await db
+      .select({ id: sentences.id })
+      .from(sentences)
+      .where(and(eq(sentences.id, payload.sentenceId), eq(sentences.isActive, true), isNull(sentences.deletedAt)))
+      .limit(1);
+    if (!sentence) throw new HttpError(404, "NOT_FOUND", "That sentence no longer exists -- pick another one");
 
     const { id } = await enqueueSubmission({
       userId: request.user!.id,

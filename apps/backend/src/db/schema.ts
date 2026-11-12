@@ -413,14 +413,44 @@ export const conceptMedia = pgTable("concept_media", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
+/**
+ * Categories for SENTENCES (greetings, introductions, work, agriculture, household...). Deliberately
+ * separate from `categories`, which belongs to concepts and carries its own history (duplicates, a
+ * 3 KB name) and tile logic. Contributors translate a category's sentences in order, not at random.
+ */
+export const sentenceCategories = pgTable("sentence_categories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slug: text("slug").notNull().unique(),
+  nameEnglish: text("name_english").notNull(),
+  /** Display order of the category tiles. */
+  sortOrder: integer("sort_order").default(0).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * One row = one sentence in ALL three languages. The English, Urdu and Persian versions are the
+ * same sentence, so a recording of it applies to every language it can be read in, and a sentence
+ * cannot exist without its equivalents (urdu_text, persian_text and sentence_category_id are NOT NULL;
+ * migration 0043 adds that after the old data is purged). The old model stored one text per row
+ * in `english_text` tagged by `source_language`, with nothing linking a sentence to its equivalents.
+ */
 export const sentences = pgTable(
   "sentences",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     englishText: text("english_text").notNull(),
-    // Default 'english' so every pre-existing row (all authored in English,
-    // before this column existed) keeps meaning what it already meant.
+    urduText: text("urdu_text").notNull(),
+    persianText: text("persian_text").notNull(),
+    sentenceCategoryId: uuid("sentence_category_id")
+      .notNull()
+      .references(() => sentenceCategories.id),
+    /** Position within its category -- contributors work through a category in this order. */
+    sortOrder: integer("sort_order").default(0).notNull(),
+    /** @deprecated Replaced by the three text columns; no longer read or written. Dropped in the contract migration. */
     sourceLanguage: sentenceSourceLanguage("source_language").default("english").notNull(),
+    /** @deprecated Replaced by sentence_category_id (concept categories no longer apply to sentences). Dropped in the contract migration. */
     categoryId: uuid("category_id").references(() => categories.id),
     isActive: boolean("is_active").default(true).notNull(),
     usageCount: integer("usage_count").default(0).notNull(),
@@ -438,6 +468,8 @@ export const sentences = pgTable(
     // duplicates from before this check existed and a unique index would
     // fail to create over those.
     index("ix_sentences_english_text_lower").using("btree", sql`lower(${t.englishText})`).where(sql`${t.deletedAt} is null`),
+    // Backs "the sentences of a category, in order" -- the contributor browse and the admin list.
+    index("ix_sentences_category_order").on(t.sentenceCategoryId, t.sortOrder).where(sql`${t.deletedAt} is null`),
   ],
 );
 
@@ -1815,8 +1847,12 @@ export const conceptMediaRelations = relations(conceptMedia, ({ one }) => ({
   concept: one(concepts, { fields: [conceptMedia.conceptId], references: [concepts.id] }),
 }));
 
+export const sentenceCategoriesRelations = relations(sentenceCategories, ({ many }) => ({
+  sentences: many(sentences),
+}));
+
 export const sentencesRelations = relations(sentences, ({ one, many }) => ({
-  category: one(categories, { fields: [sentences.categoryId], references: [categories.id] }),
+  category: one(sentenceCategories, { fields: [sentences.sentenceCategoryId], references: [sentenceCategories.id] }),
   translations: many(translations),
 }));
 
