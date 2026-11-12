@@ -167,9 +167,13 @@ Additional behaviour worth knowing (added 2026-11-11, *code-read*):
   If ffprobe fails the duration falls back to 0. TRANSCRIPTION (Module 2) audio is never
   trimmed.
 - For TRANSCRIPTION, the transcription + segments are applied **after** the submit
-  transaction commits. If that second step fails, the retry finds the contribution through
-  `sourceBufferId`, marks the buffer row `done`, and the transcription/segments are silently
-  lost (not atomic).
+  transaction commits (so not atomic with it). **Fixed 2026-11-12:** if that second step
+  fails, the retry used to find the contribution through `sourceBufferId` and mark the buffer
+  row `done`, silently losing everything the contributor typed. The retry now runs
+  `completeTranscriptionExtras()`, which idempotently adds only what is missing (the
+  transcription if none exists — `addTranscription` creates a new version and re-awards points
+  per call, so it is never called blindly — and any segment indexes not yet stored). The first
+  attempt also uses `allSettled`, so a retry never races writes still in flight.
 - **A legacy direct-submit path still exists** next to the buffer: `POST
   /contributions/word`, `/contributions/audio`, `/sentences/:id/translation`,
   `/scenes/:id/contributions`, fed by the presigned `/audio/*` flow. Mobile uses it. It skips
@@ -379,14 +383,19 @@ Key sub-features:
   itself is left untouched by reads; only the write path (`updateStreakOnContribution`)
   still corrects it, on next contribution.
 - **Badges**, **leaderboard snapshots**: supporting tables exist (`badges`, `user_badges`,
-  `leaderboard_snapshots`) — leaderboard is fed from `user_stats`. ⚠️ **Badges are never
-  actually awarded**: `evaluateAndAwardBadges()` in `gamification.service.ts` is fully
-  implemented (including the push notification) but has **zero callers** anywhere in the
-  backend — found while investigating the streak bug above, not yet fixed. Every seeded
-  badge (including the `streak_days` trigger type, which reads `currentStreak` the same way
-  this section describes) is permanently unreachable until something calls it after a
-  contribution/review completes. *(Re-confirmed 2026-11-11: still zero callers; `user_badges`
-  is never populated.)*
+  `leaderboard_snapshots`) — leaderboard is fed from `user_stats`. **Badges are now
+  awarded (fixed 2026-11-12).** `evaluateAndAwardBadges()` in `gamification.service.ts` was fully
+  implemented (including the push notification) but had **zero callers**, so no badge had
+  ever been awarded (22 are active; `user_badges` was empty). It is now triggered, via the
+  fire-and-forget `awardBadgesInBackground()` (never awaited, only logs on failure — a badge
+  problem can't slow or fail a submission), after each of the four submit paths and after a
+  review (the reviewer, for review-count badges; the contributor too on a `valid` decision).
+  It is idempotent (earned badges are skipped; inserts are `ON CONFLICT DO NOTHING`). ⚠️
+  **Expect a one-time burst:** each user's *first* trigger awards everything they already
+  qualify for — the top contributor alone would get 9 badges. The in-app notification rows are
+  one per badge, but when more than three are earned at once a **single summary push** is sent.
+  Tested for real in a rolled-back transaction (pushes off): 9 badges awarded, one notification
+  row each, a second evaluation a no-op, nothing left behind.
 - **Leaderboard** (`GET /leaderboard`, **public**, exposes `userId` + `displayName`): ranks
   from `user_stats`, default page cached 2 minutes per period (cleared on ban / bulk ban, not
   on undo). Ranks use `row_number`, so ties get arbitrary distinct ranks. **All-time** ranks
@@ -1292,9 +1301,11 @@ As of 2026-11-11 there are **58 tables and 27 enums**. Other things worth knowin
 nothing imports (dead, along with the `@supabase/ssr` / `@supabase/supabase-js` deps).
 **Mobile**: `EXPO_PUBLIC_API_URL` (fallback `http://10.0.2.2:3001`).
 
-**Seeding**: `npm run db:seed` (a plain `tsx` script, not idempotent). See §7.2 for its
-failure on a freshly migrated database; the `patch-*.ts` seed scripts have no npm script —
-run them with `tsx`. One-off data repair: `npm run db:recompute-stats` (dry run; add
+**Seeding**: `npm run db:seed` (a plain `tsx` script). Its first three sections (feature flags,
+gamification config, permissions + role grants) are now insert-or-skip, so they work on a
+database that has already been migrated (fixed 2026-11-12); the later sections (demo users,
+categories, concepts, …) are **not** idempotent, so don't re-run the whole seed against a
+populated database. The `patch-*.ts` seed scripts have no npm script — run them with `tsx`. One-off data repair: `npm run db:recompute-stats` (dry run; add
 `-- --apply` to write) — see §7.3.
 
 ---
@@ -1318,11 +1329,9 @@ run them with `tsx`. One-off data repair: `npm run db:recompute-stats` (dry run;
   since a generated column can't easily be dropped without checking for any remaining
   reader, but worth knowing this generated value is **not** the real per-contribution point
   total.
-- **`evaluateAndAwardBadges()` is fully implemented but never called** (§2.6) — no badge
-  has ever been auto-awarded in this app's lifetime. Wiring it in means deciding where to
-  call it (after each of the four submit paths, and/or after a review decision) and what the
-  frontend does with a newly-awarded badge, which is more than a one-line fix; noted here
-  rather than done as a drive-by.
+- **Badges were never awarded** — fixed 2026-11-12: `evaluateAndAwardBadges()` is now called
+  after each submit path and each review (§2.6). The frontend already lists a user's badges
+  (`badges.getForUser`); there is no special "you just earned one" UI beyond the notification.
 - `user_stats.rejectedContributions` is permanently stuck at 0 for every user — nothing in
   `reviews.service.ts`'s `invalid` decision path increments it (§2.6). Shown in the admin
   "Details" modal, so it currently always reads "0 rejected" regardless of reality.
@@ -1350,11 +1359,22 @@ before being fixed.
   `totalPoints` under-count (§2.6), the always-zero weekly/monthly leaderboards (§2.6), the
   review concurrency race and the `invalid`-decision counters (§2.4).
   **Still open:** `evaluateAndAwardBadges()` has no callers (§2.6).
-- Admin status changes (`PUT /admin/contributions/:id/status`, bulk-status) set only `status` —
-  no `verifiedAt`/`verifiedBy`/`rejectedAt`, no counter changes, no points — so admin-verified
-  items are missing from the dashboard's "verified today" and a stale `rejectionReason` is kept.
-  `DELETE /admin/contributions/:id` doesn't check `deletedAt`, so a second delete decrements
-  `user_stats` again; concept/scene/sentence bulk-delete don't filter `deletedAt` either.
+- **Admin status changes — fixed 2026-11-12** (`services/contribution-status.service.ts`).
+  `PUT /admin/contributions/:id/status` and `bulk-status` set only `status`, so admin-verified
+  items had no `verifiedAt` (and were missing from the dashboard's "verified today") and a
+  verified-then-rejected item kept its stale `verified*` fields and previous `rejectionReason`.
+  They now set `verifiedAt/By` or `rejectedAt/By` + reason for the new status and reset every
+  field that belongs to a status it no longer has; both routes also skip/404 deleted
+  contributions, and the saved undo state excludes `deletedAt` (so undoing a status change can't
+  un-delete a contribution). ⚠️ Still open: they don't adjust `user_stats` counters or award
+  the verified bonus (a product call — should an admin override pay out like a peer review?);
+  `db:recompute-stats` re-derives the pending/rejected counters.
+- **Double deletes — fixed 2026-11-12.** `DELETE /admin/contributions/:id` didn't check
+  `deletedAt`, so a second delete reversed the owner's stats again; it now 409s
+  `ALREADY_DELETED`, and the `UPDATE` itself is conditional on "not deleted yet" so two
+  simultaneous deletes can't both reverse the stats. The concept / scene / sentence
+  `bulk-delete` routes now skip already-deleted rows instead of overwriting their original
+  `deleted_at` and logging a misleading before-state.
 - **Undo fragility — fixed 2026-11-12** (`utils/audit-state.ts` + the undo handler).
   `beforeState` comes back from jsonb with timestamps as ISO *strings*, and `...before` was
   passed straight to Drizzle's `.set()`, whose timestamp mapper calls `.toISOString()` — so
@@ -1366,9 +1386,9 @@ before being fixed.
   data for good, so the old undo resurrected an empty, unusable "zombie" account).
 - Points farming: scenes have no per-user uniqueness; every `POST /:id/transcription` creates a
   new version and a new idempotency key (re-awarding points); segment arrays are unbounded.
-- Word/translation uniqueness ignores language (§3.21); buffered TRANSCRIPTION can silently lose
-  its transcription/segments (§2.3); retaking a published recording publishes unreviewed audio
-  (§3.17).
+- Word/translation uniqueness ignores language (§3.21); retaking a published recording
+  publishes unreviewed audio (§3.17). (Buffered TRANSCRIPTION losing its transcription/segments
+  on a retry is **fixed 2026-11-12**, §2.3.)
 - Account deletion (`deleteUserAccount`, five parallel un-transacted writes) scrubs `users`,
   demographics, profile, refresh tokens and device tokens only. Forum posts, suggestions,
   notifications, `terms_acceptances` and reset tokens remain, and the schema's `ON DELETE
@@ -1414,14 +1434,15 @@ before being fixed.
   §2.7.)
 
 **Seed & ops**
-- `npm run db:seed` fails on a freshly migrated database: migration `0007` already inserts
-  `points.audio.translation` and `seed.ts` inserts it again with no `ON CONFLICT`, violating
-  `uq_gamification_config_key_active` and aborting the gamification-config section after the
-  feature flags have already committed.
-- `seed.ts` doesn't include `publishing.manage` (needs `patch-publishing-permissions.ts`),
-  creates no `super_admin` (promotion is manual), and gives demo contributors no
-  demographics (so reviewer scoping returns an empty queue). Seeded level descriptions say
-  "Minimum points" but levels are driven by contribution *count*.
+- **Seed — fixed 2026-11-12.** `npm run db:seed` failed on a freshly migrated database:
+  migration `0007` already inserts `points.audio.translation` and `seed.ts` inserted it again
+  with no `ON CONFLICT`, violating `uq_gamification_config_key_active` and aborting the
+  gamification-config section after the feature flags had already committed. Those sections
+  (and permissions / role grants) are now insert-or-skip, and `publishing.manage` is in the
+  seed itself (it used to need `patch-publishing-permissions.ts`). ⚠️ Still open: the seed
+  creates no `super_admin` (promotion is manual) and gives demo contributors no demographics
+  (so reviewer scoping returns an empty queue); seeded level descriptions say "Minimum points"
+  but levels are driven by contribution *count*.
 - Admin tuning issues: `PUT /superadmin/gamification/:key` accepts any number (no
   threshold-order check) and existing users' levels aren't recomputed afterwards; categories
   cache isn't invalidated on category *create* (§2.7); `/admin/training-data/images` and
@@ -1440,23 +1461,29 @@ before being fixed.
   read-modify-write.
 
 **Web frontend**
-- A failed session restore never clears the `lexlingo_has_session` flag, so every later boot
-  re-fires a failing refresh (the console 401 §4 says was removed); `store.error` is never read.
-- Users who skip onboarding are stuck (§4.1). Volunteers have no nav link into `/admin`.
-- `NotificationBell` is mounted in both the desktop and mobile `Nav` containers (CSS hides one),
-  so notifications are polled twice every 30 s.
-- ~38 call sites still use `err instanceof Error ? err.message`, which yields axios's
-  "Request failed with status code N" — the very problem §4's `getErrorMessage()` exists to
-  avoid. Several loaders have no `.catch` (dashboard, profile, `/corpus` and `/leaderboard`
-  hang on "Loading…"), as do many admin bulk handlers and the forum reaction/poll handlers.
-- Smaller: a `<button>` nested in a `<button>` on the publishing page (invalid HTML) and an
-  undefined `text-ink-faint` token; the audio-upload form resets with no success message;
-  a profile bio can't be cleared (`undefined` is sent); the concepts page doesn't refresh after
-  adding an image so the "✓ Image" badge goes stale; the scene coverage picker loads only the
-  first 200 concepts and is add-only; admin contributions' `togglePlay` doesn't use the
-  `loadedId` pattern §4 calls established; the forum post detail counts only top-level
-  comments; `confirm`/`alert`/`prompt` are used at ~60 sites; admin Users labels "unsuspend"
-  as "Lift ban" next to "Ban (delete)"; there is no self-ban guard.
+- **Fixed 2026-11-12 (PR "Web: surface real error messages…", §7.5):**
+  - A failed session restore (refresh rejected with **401**) now clears the
+    `lexlingo_has_session` hint (`clearSessionHint()`), so later boots stop re-firing a refresh
+    that can only 401. Network errors / timeouts / 5xx deliberately don't clear it.
+  - `NotificationBell` is mounted once (it polled twice); volunteers get an "Admin" link to
+    `/admin/concepts`; the "set your language" dead end now links to `/onboarding` (still no
+    forced redirect).
+  - ~40 `err instanceof Error ? err.message` sites use `getErrorMessage()` (left alone on
+    purpose: microphone permission, canvas crop, and the helper itself); pages that hung on
+    "Loading…" or swallowed failures (dashboard, profile, `/corpus`, `/leaderboard`, forum
+    reactions/poll, feature flags, admin bulk and row actions) now show an error.
+  - Smaller: the invalid nested `<button>` and the undefined `text-ink-faint` token on the
+    publishing page; a profile bio can be cleared; the audio-upload form shows a success
+    message; the concepts page reloads after an image is added; "Lift ban" → "Lift
+    suspension".
+- **Still open:** the admin *scenes* page has the same stale "Image" badge after an image add;
+  admin contributions' `load()` and the concepts mount-time fetch have no catch; `next lint`
+  can't run (no ESLint config in `apps/web`); someone who finished onboarding but whose mother
+  tongue didn't map to a language row still sees "Complete your profile", which may not help
+  (demographics are fill-once — a product call). Also: `store.error` is still never read; the
+  scene coverage picker loads only the first 200 concepts and is add-only; admin contributions'
+  `togglePlay` doesn't use the `loadedId` pattern §4 calls established; the forum post detail
+  counts only top-level comments; `confirm`/`alert`/`prompt` are used at ~60 sites.
 
 **Dead code & config**
 - Never read: `feature_flags` (§2.7), `consents`, `data_exports`, `perks`,
@@ -1558,6 +1585,33 @@ afterwards and the few audit rows the harness inserted were deleted.
 - Account-deletion scope (forum posts, suggestions, notifications), and what to do about
   feature flags (wire them up, or delete them).
 - Whether to revive or park the mobile app (§8); a staging database; an uptime monitor.
+
+### 7.5 Batches 3 and the web fixes (2026-11-12)
+
+**Web (`apps/web`)** — shipped as its own PR, verified by `tsc --noEmit` (run by the author and
+independently re-run) and Vercel's production `next build`; **not browser-tested**. Details in
+§7.2 "Web frontend".
+
+**Data integrity (backend)** — admin status changes now record who/when and reset stale
+fields; double deletes are rejected (and concurrent ones can't both reverse stats); the
+concept / scene / sentence bulk-delete routes skip already-deleted rows; badges are finally
+awarded (§2.6); a buffered TRANSCRIPTION retry no longer loses its transcription/segments
+(§2.3); the seed works on an already-migrated database (§6.1). No migration, no data change.
+Verified against the live database: the status-field helper; already-deleted contributions
+and sentences through the real routes (409 / 404 / `updated: 0` / `deleted: 0`, rows and the
+owner's `user_stats` untouched); the badge function for real in a rolled-back transaction with
+pushes off; and the seed's `ON CONFLICT` behaviour against the real unique index.
+
+⚠️ **Not covered by a live test:** `completeTranscriptionExtras()` (the buffered-transcription
+retry) — exercising it needs a real in-flight buffered upload, so it is verified by review and
+typecheck only; and the admin status-change *routes* end to end (they'd have to change real
+contributions), so only their field logic and their deleted-row guards were exercised.
+
+**Still deliberately left** (needs a decision — see §7.4): volunteer permissions beyond
+destructive deletes; retake of a published recording; points-farming rules; Terms text;
+account-deletion scope; feature flags (wire up or remove); mobile; whether admin status
+overrides should also pay the verified bonus / adjust counters; a staging database; an uptime
+monitor.
 
 ---
 
