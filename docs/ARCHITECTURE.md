@@ -1884,16 +1884,23 @@ from R2, and the raw audio still queued in the database are written and checked 
 tables and aborts if anything changed since the backup. R2 objects are removed after the commit;
 failures are listed in the backup folder. `--skip-audio-backup` / `--skip-r2` exist for rehearsals.
 
-**Cutover runbook — in this order, and not before Railway can deploy the backend:**
-1. `npm run db:migrate` for `0042` only is safe at any time (additive). Do not apply `0043` yet.
-2. Run the purge dry run against production and read it. Then run it with `--execute`.
-3. `npm run db:migrate` (applies `0043`).
-4. Deploy the backend (confirm `/api/v1/health` `version`), then merge the web change.
-5. Import the new sentences from the admin Sentences page (paste or CSV).
-Why not purge first: the live backend serves the old Translate module, so purging early leaves it empty
-until the new backend deploys; and merging the web change before the backend deploys would point the new
-Translate page at endpoints the old backend does not have. Anything contributors record between now and
-the purge is deleted by it.
+**Cutover — status as of 2026-11-12 17:06 UTC:**
+1. ✅ **Purge executed on production** (dry run first; then `--execute --backup-dir
+   C:\Users\Dynabook\lexlingo-backups\sentence-purge-2026-11-12 --confirm 7068`, 5.3 MB: every affected row as
+   JSON plus 122 of the 124 audio objects — the other 2 were already gone from R2). Removed 7,068 sentence rows
+   (769 of them live), 97 translations and contributions, 96 queued submissions, 124 audio files and their
+   objects. Checked afterwards, read-only: all of those are 0; the ledger has 260 rows summing to 3,750,
+   equal to the sum of every user's `total_points` (no user differs from their ledger); 97 ledger rows are
+   unlinked, not deleted; all 147 word contributions are untouched; one `admin_sentence_purge` audit row.
+2. ⏳ `npm run db:migrate` — applies `0042` then `0043` (the guard passes because `sentences` is empty; if an
+   admin added a sentence through the old page in the meantime it stops with a clear message — re-run the
+   purge). **Not done:** the auto-mode classifier refuses production migrations, so the owner runs this.
+3. ⏳ Merge PR #9 *after* step 2 — the new backend selects columns that don't exist until `0042` is applied.
+   Railway deploys the backend and Vercel the web; check `/api/v1/health` `version`.
+4. ⏳ Import the new sentences from the admin Sentences page (paste or CSV).
+Until step 3 the live Translate module is simply empty (it was always going to be, between purge and
+deploy), and the live admin "Add sentence" still writes the old shape — which `0043` would then refuse.
+Railway is deploying again as of this date (`/api/v1/health` reported `049b599`, main's head, i.e. batches 3–5).
 
 **Verification — all done against a local Postgres built from every migration (Docker), never
 production**, because the auto-mode classifier refused a production migration and a staging database does
