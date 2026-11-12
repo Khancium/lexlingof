@@ -21,7 +21,7 @@ import { awardBadgesInBackground } from "../../gamification/gamification.service
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 
-// Module 3 translations carry NO 3-second limit anywhere in this file.
+// Module 3 translations carry NO duration limit anywhere in this file.
 // Audio can be any duration.
 
 export type SentenceSourceLanguage = (typeof sentences.$inferInsert)["sourceLanguage"];

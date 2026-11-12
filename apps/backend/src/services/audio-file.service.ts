@@ -83,7 +83,7 @@ type ContributionModuleType = (typeof contributionModule.enumValues)[number];
  * audio_files, skipping the presigned-URL reserve/PUT/confirm round trips
  * entirely -- used by the submission-buffer worker, which already holds the
  * bytes server-side. Performs the same validation the old presigned flow's
- * two endpoints did (allowed mime type, per-module size cap, WORD's 5-second
+ * two endpoints did (allowed mime type, per-module size cap, WORD's 10-second
  * duration cap) so buffered submissions can't bypass either check.
  */
 export async function storeAudioBuffer(params: {
