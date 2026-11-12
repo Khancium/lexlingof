@@ -20,7 +20,7 @@ const CARDS: { href: string; color: string; icon: string; title: string; descrip
     color: "border-l-emerald-600",
     icon: "🌐",
     title: "Translate Sentences",
-    description: "Translate and record English sentences",
+    description: "Translate and record sentences, topic by topic",
   },
   {
     href: "/contribute/scene",
