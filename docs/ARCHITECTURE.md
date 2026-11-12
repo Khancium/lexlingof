@@ -34,8 +34,8 @@ Last updated: 2026-11-11.
   presigned URLs); images (concept/scene/avatar) → **Supabase Storage**.
 - **Push notifications**: Firebase Cloud Messaging (`firebase-admin`), gated by both a
   server-config check (`FIREBASE_PROJECT_ID` set) and a per-user preference.
-- **Migrations**: Drizzle Kit, hand-reviewed SQL files in `database/migrations/` (41 as of
-  this writing, `0000`-`0040`), applied via `npm run db:migrate` — **no separate dev database**; all work
+- **Migrations**: Drizzle Kit, hand-reviewed SQL files in `database/migrations/` (42 as of
+  this writing, `0000`-`0041`), applied via `npm run db:migrate` — **no separate dev database**; all work
   happens against the same Supabase Postgres instance with careful test-data cleanup.
 
 ---
@@ -1328,7 +1328,7 @@ agents' reading and should be reproduced — ideally against the live system, no
 before being fixed.
 
 **Data integrity & correctness**
-- **Fixed 2026-11-12 (batch 1 — see §7.3 for what still has to be deployed/run):** the
+- **Fixed and shipped 2026-11-12 (batch 1 — see §7.3):** the
   `totalPoints` under-count (§2.6), the always-zero weekly/monthly leaderboards (§2.6), the
   review concurrency race and the `invalid`-decision counters (§2.4).
   **Still open:** `evaluateAndAwardBadges()` has no callers (§2.6).
@@ -1435,10 +1435,11 @@ before being fixed.
   `storage.service.ts` image comments (JPEG / 1:1), `store.ts` ("sessionStorage"), and
   `ConfirmDialog`'s "first custom modal".
 
-### 7.3 Batch 1 — what's done, and what still has to be run (2026-11-12)
+### 7.3 Batch 1 — shipped 2026-11-12
 
-**Status:** the code changes are in the working tree and typecheck clean. **Nothing has been
-committed, deployed or migrated, and no production data has been written.**
+**Status: shipped.** Merged to `main` as PR #2 (rebase merge), deployed by Railway, migration
+`0041` applied, and the `user_stats` repair applied. Details of what was run and checked are
+below.
 
 What changed: `services/points.service.ts` (`awardPointsOnce`, `pointsInLastDays`) wired into
 every award path; the review lock + per-decision counters in `reviews.service.ts`; the
@@ -1448,16 +1449,30 @@ leaderboard, `/users/me`, `/users/me/stats` and the admin report; DB pool timeou
 migration history in line with production's RLS — a no-op there); and the
 `database/scripts/recompute-user-stats.ts` repair script.
 
-**Shipping order** (the order matters):
-1. **Commit and deploy the backend** (push to `main` → Railway).
-2. **`npm run db:migrate --workspace=apps/backend`** — applies only `0041` (verified against the
-   migrations table: 41 applied, `0041` the sole pending entry). Enabling RLS on tables that
-   already have it is a no-op; this just records the migration.
-3. **`npm run db:recompute-stats --workspace=apps/backend`** (a dry run that prints what would
-   change), then again with `-- --apply`. Only **after** step 1 — run before it, the still-old
-   code keeps under-counting and the totals drift again at once. A dry run on 2026-11-12 found
-   10 of 44 users needing change: net +2,270 points, 4 `pending` and 2 `rejected` counters.
-4. **Point an uptime monitor at `GET /api/v1/health`** (not `/health`).
+**What was run, in order** (the order mattered — the repair only after the fixed code was live):
+1. **PR #2 merged → Railway deploy.** Confirmed live when `GET /api/v1/health` began returning
+   `db: "ok"`, about 11 minutes after the merge.
+2. **`npm run db:migrate`** — applied only `0041` (migrations table: 42 recorded, nothing
+   pending; RLS still 58 of 58). Effectively a no-op, since production already had RLS.
+3. **`npm run db:recompute-stats`**: dry run, then `-- --apply` — updated **10** `user_stats` rows
+   (net +2,270 points; 4 `pending` and 2 `rejected` counters). The before-values were saved
+   first, in the git-ignored `apps/backend/data/backups/`
+   (`user_stats_before_recompute_2026-11-12.json` and `revert_user_stats_2026-11-12.sql`;
+   reverting overwrites any activity those users had since). A second dry run found 0 users to
+   change.
+4. **Not done: point an uptime monitor at `GET /api/v1/health`** (not `/health`) — that needs an
+   external monitoring account.
+
+**Effect on the leaderboard:** the all-time top entries changed from 770 / 620 / 30 to
+1,835 / 1,570 / 80, and the first two users swapped places — the user previously second had
+never had their translation / scene / audio points counted.
+
+**Verified after shipping, against the live system:** the deployed `/api/v1/health` reports
+`db: "ok"`; the deployed all-time, weekly and monthly leaderboards return 200 with every row
+equal to the points ledger; 0 of 44 users have a stored `total_points` that differs from the
+ledger; and `/users/me` and `/users/me/stats` (the same route code, run against the repaired
+database) report `totalPoints` equal to the ledger with non-negative pending/rejected counts.
+The authenticated endpoints on the *deployed* service were not hit (no credentials to do so).
 
 **How it was verified** (throwaway harness, since deleted; run against the real database with
 nothing left behind): watchdog decision logic with fakes (wedged → exit once; database-down →
@@ -1467,8 +1482,7 @@ replay, inside a rolled-back transaction; leaderboard (weekly/monthly) rows equa
 7/30-day sums; `/users/me`, `/users/me/stats` and the admin report match the ledger; and `FOR
 UPDATE` through the Supavisor pooler really blocks a second reviewer (waited ~2.7 s).
 
-**Not tested — do this after deploying, with throwaway accounts (the repo's convention, since
-there is no staging database):** the review `valid`/`invalid` counter changes end to end (the
+**Still not tested (no staging database; the repo's convention is throwaway accounts):** the review `valid`/`invalid` counter changes end to end (the
 lock and the helper were tested in isolation, not a full review by a second user); the
 watchdog's real `process.exit` path (only its decision logic was tested); and a weekly
 leaderboard with non-zero data (there was no activity in the last 7 days; the monthly board had
