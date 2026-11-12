@@ -72,10 +72,12 @@ export default function AudioUploadPage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [justSubmitted, setJustSubmitted] = useState(false);
 
   function handleFileSelected(selected: File | undefined | null) {
     if (!selected) return;
     setSubmitError(null);
+    setJustSubmitted(false);
     if (selected.size > MAX_FILE_SIZE_BYTES) {
       setSubmitError("File exceeds the 100MB limit");
       return;
@@ -102,6 +104,7 @@ export default function AudioUploadPage() {
     if (!file || !languageId) return;
     setIsSubmitting(true);
     setSubmitError(null);
+    setJustSubmitted(false);
     try {
       const durationMs = await getAudioFileDurationMs(file);
       const validSegments = segments.filter((s) => s.startMs !== "" && s.endMs !== "");
@@ -155,6 +158,7 @@ export default function AudioUploadPage() {
       setDetailsOpen(false);
       setSegmentsOpen(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      setJustSubmitted(true);
     } catch (err) {
       setSubmitError(getErrorMessage(err, "Failed to upload audio"));
     } finally {
@@ -344,6 +348,7 @@ export default function AudioUploadPage() {
         </p>
       ) : null}
       {submitError ? <p className="text-center text-red-600">{submitError}</p> : null}
+      {justSubmitted && !submitError ? <p className="text-center font-semibold text-emerald-600">✓ Audio submitted</p> : null}
 
       <button
         onClick={handleSubmit}
