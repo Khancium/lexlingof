@@ -198,6 +198,10 @@ async function pollsByPost(postIds: string[], userId: string) {
 }
 
 export async function votePoll(postId: string, userId: string, optionId: string): Promise<void> {
+  // A deleted post's poll is gone too -- voting used to keep working on it.
+  const [post] = await db.select({ id: forumPosts.id }).from(forumPosts).where(and(eq(forumPosts.id, postId), isNull(forumPosts.deletedAt))).limit(1);
+  if (!post) throw new HttpError(404, "NOT_FOUND", "Post not found");
+
   const [option] = await db
     .select({ id: forumPollOptions.id })
     .from(forumPollOptions)
@@ -386,9 +390,29 @@ export async function getPost(id: string, userId: string) {
 
 /** Author can delete their own; a moderator (users.manage) can delete anyone's -- the route checks that, this just applies it. */
 export async function deletePost(id: string): Promise<void> {
-  const result = await db.update(forumPosts).set({ deletedAt: new Date() }).where(eq(forumPosts.id, id)).returning({ id: forumPosts.id });
-  if (result.length === 0) {
+  const [existing] = await db
+    .select({ imageStorageKey: forumPosts.imageStorageKey })
+    .from(forumPosts)
+    .where(and(eq(forumPosts.id, id), isNull(forumPosts.deletedAt)))
+    .limit(1);
+  if (!existing) {
     throw new HttpError(404, "NOT_FOUND", "Post not found");
+  }
+
+  await db
+    .update(forumPosts)
+    .set({ deletedAt: new Date(), imageUrl: null, imageStorageKey: null })
+    .where(and(eq(forumPosts.id, id), isNull(forumPosts.deletedAt)));
+
+  // The post's picture used to stay in the public storage bucket, reachable by its URL, long
+  // after the post was deleted (the key was stored but never used). Best-effort: the post is
+  // already gone, so a storage hiccup is logged, not surfaced.
+  if (existing.imageStorageKey) {
+    try {
+      await storageService.deleteImage(existing.imageStorageKey);
+    } catch (err) {
+      console.error(`[forum] post ${id} was deleted but its image could not be removed from storage:`, err);
+    }
   }
 }
 

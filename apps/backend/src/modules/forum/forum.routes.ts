@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 
-import { hasPermission, verifyToken } from "../../middleware/auth.js";
+import { blockIfRestricted, hasPermission, verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 import {
   createComment,
@@ -95,7 +95,9 @@ export default async function forumRoutes(fastify: FastifyInstance) {
     return listPosts(request.user!.id, limit, offset);
   });
 
-  fastify.post("/posts", { preHandler: verifyToken }, async (request, reply) => {
+  // Restricted users are blocked from creating new content (posts and comments) just as they
+  // are from submitting contributions; reading, reacting and deleting their own still work.
+  fastify.post("/posts", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { body, conceptId, sentenceId, pollOptions, image } = await readPostSubmission(request);
     const post = await createPost(request.user!.id, { body, conceptId, sentenceId, pollOptions, image });
     reply.code(201).send(post);
@@ -122,7 +124,7 @@ export default async function forumRoutes(fastify: FastifyInstance) {
     return { id, deleted: true };
   });
 
-  fastify.post("/posts/:id/comments", { preHandler: verifyToken }, async (request, reply) => {
+  fastify.post("/posts/:id/comments", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = createCommentSchema.parse(request.body);
     const comment = await createComment(request.user!.id, id, body);

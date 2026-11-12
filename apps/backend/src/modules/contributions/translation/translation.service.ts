@@ -1,5 +1,6 @@
 import { and, eq, ilike, inArray, isNull, not, sql } from "drizzle-orm";
 
+import { containsPattern } from "../../../utils/sql-like.js";
 import { db } from "../../../db/index.js";
 import {
   audioFiles,
@@ -76,7 +77,7 @@ export async function searchSentences(
 
   const conditions = [eq(sentences.isActive, true), isNull(sentences.deletedAt)];
   if (search) {
-    conditions.push(ilike(sentences.englishText, `%${search}%`));
+    conditions.push(ilike(sentences.englishText, containsPattern(search)));
   }
   if (filter === "translated") {
     conditions.push(hasTranslatedExpr);

@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, ilike, inArray, isNull, sql } from "drizzle-orm";
 
+import { containsPattern } from "../../utils/sql-like.js";
 import { db } from "../../db/index.js";
 import {
   audioFiles,
@@ -111,7 +112,7 @@ export type PublicDictionaryEntry = {
 
 export async function getPublicDictionary(params: { search?: string; categoryId?: string; limit: number; offset: number } & LocationFilter) {
   const conditions = [sql`${concepts.deletedAt} is null`, eq(concepts.isActive, true)];
-  if (params.search) conditions.push(ilike(concepts.labelEnglish, `%${params.search}%`));
+  if (params.search) conditions.push(ilike(concepts.labelEnglish, containsPattern(params.search)));
   if (params.categoryId) conditions.push(eq(concepts.categoryId, params.categoryId));
   // Only concepts with at least one published recording -- matching the
   // tribe/city/village filter too, when one is set, so a word with published
@@ -326,7 +327,7 @@ export async function getPublicLanguageLearning(
   params: { search?: string; categoryId?: string; limit: number; offset: number } & LocationFilter,
 ) {
   const conditions = [sql`${sentences.deletedAt} is null`, eq(sentences.isActive, true)];
-  if (params.search) conditions.push(ilike(sentences.englishText, `%${params.search}%`));
+  if (params.search) conditions.push(ilike(sentences.englishText, containsPattern(params.search)));
   if (params.categoryId) conditions.push(eq(sentences.categoryId, params.categoryId));
   conditions.push(inArray(sentences.id, sentenceIdsWithPublishedTranslation(params)));
   const whereClause = and(...conditions);

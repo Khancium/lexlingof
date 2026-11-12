@@ -1,5 +1,6 @@
 import { and, eq, gte, ilike, isNull, lte, ne, sql } from "drizzle-orm";
 
+import { containsPattern } from "../../../utils/sql-like.js";
 import { db } from "../../../db/index.js";
 import {
   contributions,
@@ -89,7 +90,7 @@ export async function getScenes(
 ) {
   const { search, createdFrom, createdTo, categoryId, hasImage, mine, includeHidden } = filters;
   const conditions = includeHidden ? [isNull(scenes.deletedAt)] : [eq(scenes.isActive, true), isNull(scenes.deletedAt)];
-  if (search) conditions.push(ilike(scenes.title, `%${search}%`));
+  if (search) conditions.push(ilike(scenes.title, containsPattern(search)));
   if (mine) conditions.push(eq(scenes.createdBy, mine));
   if (createdFrom) conditions.push(gte(scenes.createdAt, new Date(createdFrom)));
   if (createdTo) conditions.push(lte(scenes.createdAt, new Date(createdTo)));

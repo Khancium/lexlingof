@@ -6,6 +6,7 @@ import { parse as csvParse } from "csv-parse/sync";
 import { ZipArchive } from "archiver";
 import { z } from "zod";
 
+import { containsPattern } from "../../utils/sql-like.js";
 import { db } from "../../db/index.js";
 import {
   audioFiles,
@@ -55,9 +56,10 @@ import { deleteUserAccount } from "../../services/account.service.js";
 import { invalidateLeaderboardCache } from "../gamification/gamification.routes.js";
 import { authService } from "../auth/auth.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
-import { invalidateLevelThresholdsCache, levelUpdateExpr } from "../../services/level.service.js";
+import { validateConfigValue } from "../../services/gamification-config.service.js";
+import { getLevelThresholds, invalidateLevelThresholdsCache, levelUpdateExpr, recomputeAllUserLevels } from "../../services/level.service.js";
 import { invalidateCategoriesCache } from "../categories/categories.routes.js";
-import { gateVolunteerAction, getPendingChangeById, requirePendingRow, markApproved, markRejected, listPendingChanges, countPendingByVolunteer, setAutoApprove, isAutoApproved } from "../../services/pending-changes.service.js";
+import { claimPendingChange, countPendingByVolunteer, finishApproval, gateVolunteerAction, getPendingChangeById, isAutoApproved, isUniqueViolation, listPendingChanges, markRejected, releasePendingChange, setAutoApprove } from "../../services/pending-changes.service.js";
 import { storageService } from "../../services/storage.service.js";
 import { contributionStatusFields } from "../../services/contribution-status.service.js";
 import { assertCanGrantAdminTo, assertCanModerateAll, assertCanModerateUser } from "../../services/moderation-guards.service.js";
@@ -417,9 +419,14 @@ async function permanentlyDeleteContent(kind: ContentKind, id: string): Promise<
         // contributor data and are meaningless once the concept is gone.
         // Inside the transaction so a blocked delete rolls these back too.
         await tx.delete(sceneConcepts).where(eq(sceneConcepts.conceptId, id));
+        // A user suggestion ("suggest a better image") can point at the concept. That FK has
+        // no cascade either, so it blocked the delete -- and was then misreported as "has
+        // contributor recordings (0)". The feedback itself is worth keeping, so just detach it.
+        await tx.update(suggestions).set({ conceptId: null }).where(eq(suggestions.conceptId, id));
         // concept_media rows cascade with the concept row itself.
         await tx.delete(concepts).where(eq(concepts.id, id));
       } else if (kind === "scene") {
+        await tx.update(suggestions).set({ sceneId: null }).where(eq(suggestions.sceneId, id));
         // scene_media (and its scene_image_keywords) plus scene_concepts all
         // cascade with the scene row.
         await tx.delete(scenes).where(eq(scenes.id, id));
@@ -588,12 +595,19 @@ async function readBulkRows(request: FastifyRequest): Promise<Record<string, str
   if (isJson) {
     let parsed: unknown;
     try {
-      parsed = JSON.parse(buffer.toString("utf-8"));
+      // A UTF-8 BOM (Notepad and Excel add one) makes JSON.parse fail outright.
+      parsed = JSON.parse(buffer.toString("utf-8").replace(/^﻿/, ""));
     } catch {
       throw new HttpError(400, "INVALID_FILE", "File is not valid JSON");
     }
     if (!Array.isArray(parsed)) {
       throw new HttpError(400, "INVALID_FILE", "JSON file must contain an array of row objects");
+    }
+    // A null / number / nested array in the list used to crash Object.entries() and surface as
+    // a 500 instead of a clear message.
+    const badIndex = parsed.findIndex((row) => row === null || typeof row !== "object" || Array.isArray(row));
+    if (badIndex !== -1) {
+      throw new HttpError(400, "INVALID_FILE", `Row ${badIndex + 1} of the JSON array isn't an object -- every row must be an object like {"labelEnglish": "..."}`);
     }
     return parsed.map((row) =>
       Object.fromEntries(Object.entries(row as Record<string, unknown>).map(([k, v]) => [k, v == null ? "" : String(v)])),
@@ -601,13 +615,45 @@ async function readBulkRows(request: FastifyRequest): Promise<Record<string, str
   }
 
   try {
-    return csvParse(buffer, { columns: true, skip_empty_lines: true, trim: true }) as Record<string, string>[];
+    // bom: true strips the UTF-8 byte-order mark. A CSV saved from Excel as "CSV UTF-8" starts
+    // with one, which otherwise got glued onto the first column's name, so that header never
+    // matched and every row was rejected.
+    return csvParse(buffer, { columns: true, skip_empty_lines: true, trim: true, bom: true }) as Record<string, string>[];
   } catch {
     throw new HttpError(400, "INVALID_FILE", "File is not valid CSV");
   }
 }
 
 type BulkResult = { created: number; errors: { row: number; message: string }[] };
+
+/**
+ * Runs `fn` over `items` with at most `size` in flight at a time and returns the outcomes in
+ * input order, like Promise.allSettled but bounded. The bulk image-by-URL routes used a bare
+ * Promise.allSettled over up to 200 items -- 200 simultaneous downloads of up to 10 MB each,
+ * triggered by a single request (and reachable by volunteers).
+ */
+async function settleInBatches<T, R>(items: readonly T[], size: number, fn: (item: T, index: number) => Promise<R>): Promise<PromiseSettledResult<R>[]> {
+  const out: PromiseSettledResult<R>[] = [];
+  for (let i = 0; i < items.length; i += size) {
+    const batch = items.slice(i, i + size);
+    out.push(...(await Promise.allSettled(batch.map((item, j) => fn(item, i + j)))));
+  }
+  return out;
+}
+
+/** The message to show for a failed item: our own HttpError text, but never a raw driver/library message. */
+function safeFailureMessage(reason: unknown): string {
+  return reason instanceof HttpError ? reason.message : "Failed";
+}
+
+/** A short, safe, human reason for a failed row insert (see insertBulkInChunks). */
+function describeInsertError(err: unknown): string {
+  if (isUniqueViolation(err)) return "Already exists (duplicate)";
+  const code = err instanceof Error ? (err.cause as { code?: string } | undefined)?.code : undefined;
+  if (code === "23503") return "Refers to something that doesn't exist";
+  if (code === "23502" || code === "23514" || code === "22P02" || code === "22001") return "A value is missing or isn't valid for this field";
+  return "Could not insert this row";
+}
 
 /**
  * CSV bulk-import rows were previously inserted one `await db.insert(...)`
@@ -634,7 +680,9 @@ async function insertBulkInChunks<V extends Record<string, unknown>>(
           await db.insert(table).values(value);
           result.created++;
         } catch (err) {
-          result.errors.push({ row: rowNum, message: err instanceof Error ? err.message : "Insert failed" });
+          // Never echo err.message: for a Drizzle query failure that is the whole failed SQL
+          // statement plus its parameters.
+          result.errors.push({ row: rowNum, message: describeInsertError(err) });
         }
       }
     }
@@ -875,7 +923,7 @@ type UsersQuery = z.infer<typeof usersQuerySchema>;
 function buildUserConditions(q: UsersQuery) {
   const conditions: SQL[] = [isNull(users.deletedAt)];
   if (q.role?.length) conditions.push(inArray(users.role, q.role));
-  if (q.search) conditions.push(or(ilike(users.displayName, `%${q.search}%`), ilike(users.email, `%${q.search}%`))!);
+  if (q.search) conditions.push(or(ilike(users.displayName, containsPattern(q.search)), ilike(users.email, containsPattern(q.search)))!);
 
   if (q.status?.length) {
     const statusParts: SQL[] = [];
@@ -891,10 +939,10 @@ function buildUserConditions(q: UsersQuery) {
   if (q.sub_tribe_id?.length) conditions.push(inArray(contributorDemographics.subTribeId, q.sub_tribe_id));
   if (q.village_id?.length) conditions.push(inArray(contributorDemographics.villageId, q.village_id));
   if (q.quarter_id?.length) conditions.push(inArray(contributorDemographics.quarterId, q.quarter_id));
-  if (q.country) conditions.push(ilike(contributorDemographics.country, `%${q.country}%`));
-  if (q.city) conditions.push(ilike(contributorDemographics.city, `%${q.city}%`));
-  if (q.mother_tongue) conditions.push(ilike(contributorDemographics.motherTongue, `%${q.mother_tongue}%`));
-  if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
+  if (q.country) conditions.push(ilike(contributorDemographics.country, containsPattern(q.country)));
+  if (q.city) conditions.push(ilike(contributorDemographics.city, containsPattern(q.city)));
+  if (q.mother_tongue) conditions.push(ilike(contributorDemographics.motherTongue, containsPattern(q.mother_tongue)));
+  if (q.profession) conditions.push(ilike(contributorDemographics.profession, containsPattern(q.profession)));
   if (q.min_age !== undefined) conditions.push(gte(contributorDemographics.age, q.min_age));
   if (q.max_age !== undefined) conditions.push(lte(contributorDemographics.age, q.max_age));
 
@@ -1046,10 +1094,15 @@ const bulkWikimediaAutofillSchema = z.object({
   ids: z.array(z.string().uuid()).max(200).optional(),
 });
 
-const bulkIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1) });
+// Every bulk-id array is capped. Unbounded, a huge selection both ran a long un-batched
+// loop and built an audit-log INSERT with one row per id -- past ~9,300 rows that statement
+// exceeds Postgres's 65,535-parameter limit and fails AFTER the mutation was already applied.
+// 1000 matches the largest page size the admin lists offer.
+const BULK_IDS_MAX = 1000;
+const bulkIdsSchema = z.object({ ids: z.array(z.string().uuid()).min(1).max(BULK_IDS_MAX) });
 
 const bulkEditConceptsSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1),
+  ids: z.array(z.string().uuid()).min(1).max(BULK_IDS_MAX),
   categoryId: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
 }).refine((data) => data.categoryId !== undefined || data.isActive !== undefined, {
@@ -1089,7 +1142,7 @@ const updateSceneSchema = z
   .refine((data) => Object.keys(data).length > 0, { message: "At least one field is required" });
 
 const bulkEditScenesSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1),
+  ids: z.array(z.string().uuid()).min(1).max(BULK_IDS_MAX),
   difficulty: z.enum(sceneDifficulty.enumValues).optional(),
   isActive: z.boolean().optional(),
 }).refine((data) => data.difficulty !== undefined || data.isActive !== undefined, {
@@ -1130,7 +1183,7 @@ const createSentenceSchema = z.object({
 });
 
 const bulkEditSentencesSchema = z.object({
-  ids: z.array(z.string().uuid()).min(1),
+  ids: z.array(z.string().uuid()).min(1).max(BULK_IDS_MAX),
   categoryId: z.string().uuid().optional(),
   isActive: z.boolean().optional(),
 }).refine((data) => data.categoryId !== undefined || data.isActive !== undefined, {
@@ -1171,6 +1224,10 @@ async function applyCreateCategory(body: z.infer<typeof createCategorySchema>, a
     .insert(categories)
     .values({ slug, nameEnglish: body.nameEnglish, icon: body.icon ?? null, sortOrder: body.sortOrder ?? 0 })
     .returning();
+
+  // GET /categories is cached for 30 minutes; without this a brand-new category was
+  // missing from it -- including from the admin's own category pickers -- until the cache expired.
+  invalidateCategoriesCache();
 
   await writeAuditLog({
     actorId: actor.id,
@@ -1504,7 +1561,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (q.language_id) conditions.push(inArray(contributions.languageId, q.language_id));
     if (q.dialect_id) conditions.push(inArray(contributions.dialectId, q.dialect_id));
     if (q.user_id) conditions.push(eq(contributions.userId, q.user_id));
-    if (q.search) conditions.push(or(ilike(users.displayName, `%${q.search}%`), ilike(users.email, `%${q.search}%`))!);
+    if (q.search) conditions.push(or(ilike(users.displayName, containsPattern(q.search)), ilike(users.email, containsPattern(q.search)))!);
     if (q.tribe_id) conditions.push(inArray(contributorDemographics.tribeId, q.tribe_id));
     if (q.sub_tribe_id) conditions.push(inArray(contributorDemographics.subTribeId, q.sub_tribe_id));
     if (q.country) conditions.push(eq(contributorDemographics.country, q.country));
@@ -1513,7 +1570,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (q.quarter_id) conditions.push(inArray(contributorDemographics.quarterId, q.quarter_id));
     if (q.gender) conditions.push(inArray(contributorDemographics.gender, q.gender));
     if (q.education_level) conditions.push(inArray(contributorDemographics.educationLevel, q.education_level));
-    if (q.profession) conditions.push(ilike(contributorDemographics.profession, `%${q.profession}%`));
+    if (q.profession) conditions.push(ilike(contributorDemographics.profession, containsPattern(q.profession)));
     const whereClause = and(...conditions);
 
     // Demographics-based filters (and the search-by-contributor box) need
@@ -1676,7 +1733,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // audit log entry -- same as if an admin had clicked each row by hand.
   fastify.post("/admin/contributions/bulk-status", { preHandler: requirePermission("contributions.manage") }, async (request) => {
     const { ids, status, reason } = z
-      .object({ ids: z.array(z.string().uuid()).min(1), status: z.enum(contributionStatus.enumValues), reason: z.string().optional() })
+      .object({ ids: z.array(z.string().uuid()).min(1).max(BULK_IDS_MAX), status: z.enum(contributionStatus.enumValues), reason: z.string().optional() })
       .parse(request.body);
 
     const rows = await db
@@ -2520,6 +2577,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     // multi-row INSERT (insertBulkInChunks) doesn't return per-row ids to
     // key one against, unlike the single-category route above.
     await insertBulkInChunks(categories, toInsert, result);
+    if (result.created > 0) invalidateCategoriesCache();
     return result;
   });
 
@@ -2732,10 +2790,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/concepts/media/bulk-url", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const { items } = bulkConceptImageUrlSchema.parse(request.body);
 
-    const results = await Promise.allSettled(items.map((item) => addConceptImageFromUrl(item.conceptId, item.imageUrl)));
-    const errors = results.flatMap((r, i) =>
-      r.status === "rejected" ? [{ row: i + 1, message: r.reason instanceof Error ? r.reason.message : "Failed" }] : [],
-    );
+    const results = await settleInBatches(items, 5, (item) => addConceptImageFromUrl(item.conceptId, item.imageUrl));
+    const errors = results.flatMap((r, i) => (r.status === "rejected" ? [{ row: i + 1, message: safeFailureMessage(r.reason) }] : []));
 
     return { created: results.length - errors.length, errors };
   });
@@ -3291,10 +3347,8 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes/media/bulk-url", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { items } = bulkSceneImageUrlSchema.parse(request.body);
 
-    const results = await Promise.allSettled(items.map((item) => addSceneImageFromUrl(item.sceneId, item.imageUrl)));
-    const errors = results.flatMap((r, i) =>
-      r.status === "rejected" ? [{ row: i + 1, message: r.reason instanceof Error ? r.reason.message : "Failed" }] : [],
-    );
+    const results = await settleInBatches(items, 5, (item) => addSceneImageFromUrl(item.sceneId, item.imageUrl));
+    const errors = results.flatMap((r, i) => (r.status === "rejected" ? [{ row: i + 1, message: safeFailureMessage(r.reason) }] : []));
 
     return { created: results.length - errors.length, errors };
   });
@@ -3905,7 +3959,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         db
           .select({ day: sql<string>`date(${contributions.submittedAt})`, count: sql<number>`count(*)`.mapWith(Number) })
           .from(contributions)
-          .where(gte(contributions.submittedAt, thirtyDaysAgo))
+          .where(and(gte(contributions.submittedAt, thirtyDaysAgo), isNull(contributions.deletedAt)))
           .groupBy(sql`date(${contributions.submittedAt})`)
           .orderBy(sql`date(${contributions.submittedAt})`),
         db
@@ -3917,12 +3971,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           })
           .from(userStats)
           .innerJoin(users, eq(users.id, userStats.userId))
+          // Banned / deleted accounts don't belong on a "top contributors" card.
+          .where(isNull(users.deletedAt))
           .orderBy(desc(userStats.verifiedContributions))
           .limit(10),
         db
           .select({ value: sql<number>`count(*)`.mapWith(Number) })
           .from(contributions)
-          .where(eq(contributions.status, "pending")),
+          .where(and(eq(contributions.status, "pending"), isNull(contributions.deletedAt))),
         db
           .select({
             totalBytes: sql<number>`coalesce(sum(${audioFiles.fileSizeBytes}), 0)`.mapWith(Number),
@@ -3937,11 +3993,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         db
           .select({ value: sql<number>`count(*)`.mapWith(Number) })
           .from(contributions)
-          .where(gte(contributions.submittedAt, todayStart)),
+          .where(and(gte(contributions.submittedAt, todayStart), isNull(contributions.deletedAt))),
         db
           .select({ value: sql<number>`count(*)`.mapWith(Number) })
           .from(contributions)
-          .where(and(eq(contributions.status, "verified"), gte(contributions.verifiedAt, todayStart))),
+          .where(and(eq(contributions.status, "verified"), gte(contributions.verifiedAt, todayStart), isNull(contributions.deletedAt))),
       ]);
 
     return {
@@ -4013,6 +4069,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       throw new HttpError(404, "NOT_FOUND", "Config key not found");
     }
 
+    // Whole, non-negative numbers for points/levels/limits; level thresholds must stay in order.
+    // (Read the thresholds fresh -- the cache may be up to 5 minutes behind a previous edit.)
+    if (key.startsWith("levels.")) invalidateLevelThresholdsCache();
+    const invalid = validateConfigValue(key, body.value, key.startsWith("levels.") ? await getLevelThresholds() : undefined);
+    if (invalid) {
+      throw new HttpError(400, "INVALID_CONFIG_VALUE", invalid);
+    }
+
     const [updated] = await db
       .update(gamificationConfig)
       .set({ configValue: { value: body.value }, updatedBy: request.user!.id, updatedAt: new Date() })
@@ -4021,9 +4085,12 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
     // Without this, a level threshold edit wouldn't take effect anywhere
     // (backend leveling logic or the frontend's progress-bar display) until
-    // the 5-minute cache TTL happened to expire on its own.
+    // the 5-minute cache TTL happened to expire on its own. Stored levels are
+    // re-derived straight away too, rather than drifting until each user next submits.
+    let usersRelevelled = 0;
     if (key.startsWith("levels.")) {
       invalidateLevelThresholdsCache();
+      usersRelevelled = await recomputeAllUserLevels();
     }
 
     const actorRole = request.user!.role;
@@ -4033,7 +4100,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       action: "superadmin_gamification_config_update",
       resourceType: "gamification_config",
       beforeState: { configKey: key, configValue: existing.configValue },
-      afterState: { configKey: key, configValue: { value: body.value } },
+      afterState: { configKey: key, configValue: { value: body.value }, ...(usersRelevelled > 0 ? { usersRelevelled } : {}) },
     });
 
     return updated;
@@ -4050,7 +4117,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const conditions = [];
     if (action) conditions.push(eq(auditLogs.action, action));
     if (resource_type) conditions.push(eq(auditLogs.resourceType, resource_type));
-    if (search) conditions.push(or(ilike(users.displayName, `%${search}%`), ilike(users.email, `%${search}%`))!);
+    if (search) conditions.push(or(ilike(users.displayName, containsPattern(search)), ilike(users.email, containsPattern(search)))!);
     const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
     const [items, [totalRow]] = await Promise.all([
@@ -4231,7 +4298,10 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           .update(gamificationConfig)
           .set({ configValue: before.configValue as Record<string, unknown>, updatedBy: request.user!.id, updatedAt: new Date() })
           .where(eq(gamificationConfig.configKey, identifier));
-        if (identifier.startsWith("levels.")) invalidateLevelThresholdsCache();
+        if (identifier.startsWith("levels.")) {
+          invalidateLevelThresholdsCache();
+          await recomputeAllUserLevels(); // same as the PUT route: keep stored levels in step with the thresholds
+        }
         break;
       case "feature_flag":
         await db
@@ -4567,7 +4637,9 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/pending-changes/:id/approve", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
-    const row = await requirePendingRow(id);
+    // Claim first (one atomic UPDATE ... WHERE status = 'pending'), apply second: two
+    // admins clicking at once can no longer both apply the same change.
+    const row = await claimPendingChange(id, request.user!.id);
 
     let resultResourceId: string | null;
     try {
@@ -4576,14 +4648,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       // Domain-level failure at approval time (duplicate now exists,
       // referenced category/concept/scene is gone, etc.) -- surfaced to the
       // admin as a normal error rather than silently marking it approved
-      // when nothing actually happened. The row stays "pending" so the
-      // admin can still reject it (or retry once the underlying issue is
-      // fixed) instead of it being stuck in limbo.
+      // when nothing actually happened. The claim is released so the row is
+      // "pending" again: the admin can still reject it (or retry once the
+      // underlying issue is fixed) instead of it being stuck in limbo.
+      await releasePendingChange(id);
       if (err instanceof HttpError) throw err;
-      throw new HttpError(500, "APPROVE_FAILED", err instanceof Error ? err.message : "Could not apply this change");
+      if (isUniqueViolation(err)) {
+        throw new HttpError(409, "DUPLICATE", "An item with the same name or slug already exists, so this change can't be applied");
+      }
+      // The raw database/driver message stays in the server log, not in the response.
+      request.log.error({ err, pendingChangeId: id }, "approving a pending change failed");
+      throw new HttpError(500, "APPROVE_FAILED", "Could not apply this change");
     }
 
-    await markApproved(id, request.user!.id, resultResourceId);
+    await finishApproval(id, resultResourceId);
 
     await writeAuditLog({
       actorId: request.user!.id,
@@ -4599,9 +4677,10 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/pending-changes/:id/reject", { preHandler: requirePermission("volunteers.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
-    await requirePendingRow(id);
     const { reason } = rejectPendingChangeSchema.parse(request.body);
 
+    // markRejected is itself conditional on "still pending", so a change approved or rejected a
+    // moment ago can't be overwritten.
     await markRejected(id, request.user!.id, reason);
 
     await writeAuditLog({
@@ -4632,9 +4711,18 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       const batch = ids.slice(i, i + PERMANENT_DELETE_CONCURRENCY);
       const outcomes = await Promise.allSettled(
         batch.map(async (id) => {
-          const row = await requirePendingRow(id);
-          const resultResourceId = await applyPendingChange(row);
-          await markApproved(id, request.user!.id, resultResourceId);
+          const row = await claimPendingChange(id, request.user!.id);
+          let resultResourceId: string | null;
+          try {
+            resultResourceId = await applyPendingChange(row);
+          } catch (err) {
+            await releasePendingChange(id); // back to "pending" so it can be retried or rejected
+            if (isUniqueViolation(err)) throw new Error("An item with the same name or slug already exists");
+            if (err instanceof HttpError) throw err;
+            request.log.error({ err, pendingChangeId: id }, "bulk-approving a pending change failed");
+            throw new Error("Could not apply this change");
+          }
+          await finishApproval(id, resultResourceId);
           return id;
         }),
       );
@@ -4669,7 +4757,6 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       const batch = ids.slice(i, i + PERMANENT_DELETE_CONCURRENCY);
       const outcomes = await Promise.allSettled(
         batch.map(async (id) => {
-          await requirePendingRow(id);
           await markRejected(id, request.user!.id, reason);
           return id;
         }),
