@@ -2,14 +2,20 @@
 --
 -- 0015 (and 0017) enabled Row Level Security on every table that existed at the
 -- time -- 46 tables. These 12 were created afterwards (forum, password reset,
--- terms acceptance, volunteer approval queue, suggestions, publishing) and were
--- never covered, so they were the only tables in the schema without it.
+-- terms acceptance, volunteer approval queue, suggestions, publishing) and no
+-- migration ever covered them.
 --
--- Same posture as 0015: RLS is enabled with NO policies. The backend connects
--- with a role that owns the tables, so it is unaffected; what this closes is
--- access through Supabase's auto-generated Data API (PostgREST) using the
--- public anon/authenticated keys, which would otherwise be able to read or
--- write these tables -- including password_reset_tokens (token hashes).
+-- As of 2026-11-12 the production database ALREADY has RLS enabled on all 12
+-- (checked directly: 58 of 58 public tables) -- it was turned on outside the
+-- migration history, most likely from the Supabase dashboard. So against
+-- production this migration is a no-op; it exists so the migration history
+-- matches reality, and a database built purely from migrations (e.g. a future
+-- staging database) gets the same protection instead of silently lacking it.
+--
+-- Same posture as 0015: RLS enabled with NO policies. The backend connects as a
+-- role that bypasses RLS, so it is unaffected; what this protects against is
+-- access through Supabase's auto-generated Data API (PostgREST) with the public
+-- anon/authenticated keys -- including password_reset_tokens (token hashes).
 --
 -- ENABLE ROW LEVEL SECURITY is idempotent, so re-running this is harmless.
 ALTER TABLE "public"."forum_posts" ENABLE ROW LEVEL SECURITY;
