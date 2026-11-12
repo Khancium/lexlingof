@@ -1,5 +1,5 @@
 import { and, asc, db, eq, inArray, sql } from "../db/index.js";
-import { contributions, notifications, pendingSubmissions, pointsTransactions } from "../db/schema.js";
+import { contributions, notifications, pendingSubmissions, pointsTransactions, transcriptionSegments, transcriptions } from "../db/schema.js";
 import { storeAudioBuffer } from "./audio-file.service.js";
 import { writeAuditLog } from "./audit-log.service.js";
 import { submitWordRecording, type SubmitWordRecordingInput } from "../modules/contributions/word/word.service.js";
@@ -180,6 +180,13 @@ async function processOne(row: PendingRow): Promise<void> {
     // just finalize instead.
     const already = await findContributionForBuffer(row.id);
     if (already) {
+      // The contribution exists, but for a TRANSCRIPTION its transcription and segments
+      // are applied in a SECOND step after the submit commits. If that step failed
+      // (or the process died) the retry used to land here and mark the row done,
+      // silently dropping everything the contributor typed. Finish whatever is missing.
+      if (row.moduleType === "TRANSCRIPTION") {
+        await completeTranscriptionExtras(row, already.contributionId);
+      }
       await markDone(row.id, already);
       return;
     }
@@ -211,17 +218,19 @@ async function processOne(row: PendingRow): Promise<void> {
         const r = await submitAudioUpload(row.userId, { ...rest, audioFileId, sourceBufferId: row.id });
         let total = r.pointsAwarded;
 
-        const [transcriptionResult, segmentResults] = await Promise.all([
-          transcription ? addTranscription(row.userId, r.audioUploadId, transcription) : Promise.resolve(null),
-          segments?.length
-            ? Promise.all(
-                segments.map((s, i) => addSegment(row.userId, r.audioUploadId, { ...s, segmentIndex: i })),
-              )
-            : Promise.resolve([]),
-        ]);
-
-        if (transcriptionResult) total += transcriptionResult.pointsAwarded ?? 0;
-        for (const sr of segmentResults) total += sr.pointsAwarded ?? 0;
+        // allSettled (not Promise.all): Promise.all rejects at the first failure while the
+        // other writes are still in flight, so a retry seconds later could race them and
+        // add a duplicate transcription. Letting every task finish first means the retry
+        // (completeTranscriptionExtras) always sees a settled state.
+        const tasks: Promise<{ pointsAwarded?: number }>[] = [];
+        if (transcription) tasks.push(addTranscription(row.userId, r.audioUploadId, transcription));
+        (segments ?? []).forEach((s, i) => tasks.push(addSegment(row.userId, r.audioUploadId, { ...s, segmentIndex: i })));
+        const settled = await Promise.allSettled(tasks);
+        const failure = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
+        if (failure) throw failure.reason;
+        for (const s of settled) {
+          if (s.status === "fulfilled") total += s.value.pointsAwarded ?? 0;
+        }
 
         result = { contributionId: r.contributionId, pointsAwarded: total };
         break;
@@ -297,6 +306,46 @@ const MODULE_LABEL: Record<ModuleType, string> = {
   TRANSLATION: "Translation",
   SCENE: "Scene",
 };
+
+/**
+ * Idempotently applies the parts of a buffered TRANSCRIPTION that come after the
+ * contribution itself: the transcription text and the time segments. Only adds what is
+ * missing, so it is safe whether the first attempt applied none, some or all of it.
+ * (addTranscription creates a new *version* each call and awards points per version, so
+ * it must never be called blindly on a retry.)
+ */
+async function completeTranscriptionExtras(row: PendingRow, contributionId: string): Promise<void> {
+  const [contribution] = await db
+    .select({ audioUploadId: contributions.audioUploadId })
+    .from(contributions)
+    .where(eq(contributions.id, contributionId))
+    .limit(1);
+  const audioUploadId = contribution?.audioUploadId;
+  if (!audioUploadId) return;
+
+  const { transcription, segments } = row.payload as AudioUploadPayload;
+
+  if (transcription) {
+    const [existing] = await db
+      .select({ id: transcriptions.id })
+      .from(transcriptions)
+      .where(eq(transcriptions.audioUploadId, audioUploadId))
+      .limit(1);
+    if (!existing) await addTranscription(row.userId, audioUploadId, transcription);
+  }
+
+  if (segments?.length) {
+    const haveRows = await db
+      .select({ segmentIndex: transcriptionSegments.segmentIndex })
+      .from(transcriptionSegments)
+      .where(eq(transcriptionSegments.audioUploadId, audioUploadId));
+    const have = new Set(haveRows.map((r) => r.segmentIndex));
+    const missing = segments.map((s, i) => ({ s, i })).filter(({ i }) => !have.has(i));
+    const settled = await Promise.allSettled(missing.map(({ s, i }) => addSegment(row.userId, audioUploadId, { ...s, segmentIndex: i })));
+    const failure = settled.find((x): x is PromiseRejectedResult => x.status === "rejected");
+    if (failure) throw failure.reason;
+  }
+}
 
 async function markDone(bufferId: string, result: { contributionId: string; pointsAwarded: number }): Promise<void> {
   await db
