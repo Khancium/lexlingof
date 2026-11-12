@@ -235,18 +235,14 @@ async function processOne(row: PendingRow): Promise<void> {
         const r = await submitAudioUpload(row.userId, { ...rest, audioFileId, sourceBufferId: row.id });
         let total = r.pointsAwarded;
 
-        // allSettled (not Promise.all): Promise.all rejects at the first failure while the
-        // other writes are still in flight, so a retry seconds later could race them and
-        // add a duplicate transcription. Letting every task finish first means the retry
-        // (completeTranscriptionExtras) always sees a settled state.
-        const tasks: Promise<{ pointsAwarded?: number }>[] = [];
-        if (transcription) tasks.push(addTranscription(row.userId, r.audioUploadId, transcription));
-        (segments ?? []).forEach((s, i) => tasks.push(addSegment(row.userId, r.audioUploadId, { ...s, segmentIndex: i })));
-        const settled = await Promise.allSettled(tasks);
-        const failure = settled.find((s): s is PromiseRejectedResult => s.status === "rejected");
-        if (failure) throw failure.reason;
-        for (const s of settled) {
-          if (s.status === "fulfilled") total += s.value.pointsAwarded ?? 0;
+        // One at a time, stopping at the first failure. This used to fire every write at once
+        // (allSettled), which was safe for a retry but, now that segments are serialized per
+        // upload, would park one pooled connection per segment while they queued -- and a
+        // sequential run can't leave writes in flight for a retry (completeTranscriptionExtras)
+        // to race.
+        if (transcription) total += (await addTranscription(row.userId, r.audioUploadId, transcription)).pointsAwarded;
+        for (const [i, seg] of (segments ?? []).entries()) {
+          total += (await addSegment(row.userId, r.audioUploadId, { ...seg, segmentIndex: i })).pointsAwarded;
         }
 
         result = { contributionId: r.contributionId, pointsAwarded: total };
@@ -358,9 +354,8 @@ async function completeTranscriptionExtras(row: PendingRow, contributionId: stri
       .where(eq(transcriptionSegments.audioUploadId, audioUploadId));
     const have = new Set(haveRows.map((r) => r.segmentIndex));
     const missing = segments.map((s, i) => ({ s, i })).filter(({ i }) => !have.has(i));
-    const settled = await Promise.allSettled(missing.map(({ s, i }) => addSegment(row.userId, audioUploadId, { ...s, segmentIndex: i })));
-    const failure = settled.find((x): x is PromiseRejectedResult => x.status === "rejected");
-    if (failure) throw failure.reason;
+    // Sequential for the same reason as in the first attempt above.
+    for (const { s: seg, i } of missing) await addSegment(row.userId, audioUploadId, { ...seg, segmentIndex: i });
   }
 }
 

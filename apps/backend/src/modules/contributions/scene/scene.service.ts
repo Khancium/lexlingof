@@ -1,4 +1,4 @@
-import { and, eq, gte, ilike, isNull, lte, ne, sql } from "drizzle-orm";
+import { and, eq, gte, ilike, isNull, lte, ne, notInArray, sql } from "drizzle-orm";
 
 import { containsPattern } from "../../../utils/sql-like.js";
 import { db } from "../../../db/index.js";
@@ -17,6 +17,7 @@ import { updateStreakOnContribution } from "../../../services/streak.service.js"
 import { awardBadgesInBackground } from "../../gamification/gamification.service.js";
 import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
+import { withKeyedLock } from "../../../utils/keyed-lock.js";
 
 // scene_concepts is admin-only annotation data (which concepts are visible in
 // a scene image) and must never be queried, joined, or returned from this
@@ -227,7 +228,29 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
   }
   const previousLevel = levelRow[0]?.level ?? "BRONZE";
 
-  const result = await db.transaction(async (tx) => {
+  // Serialized per user+scene so two overlapping submissions can't both see "no earlier one".
+  const result = await withKeyedLock(`scene:${userId}:${sceneId}`, () => db.transaction(async (tx) => {
+    // Only a user's FIRST description of a scene earns submission points. Every submission used to
+    // pay in full -- base, long-description and daily bonuses -- so describing the same scene over
+    // and over was an unlimited points source. Later ones are still accepted and reviewed (they
+    // count as contributions like any other, which keeps the counters equal to the number of rows),
+    // they just don't pay. An earlier one that was rejected, withdrawn or deleted doesn't count, so
+    // a contributor whose first attempt was bad can still earn on a good one.
+    const [earlier] = await tx
+      .select({ id: contributions.id })
+      .from(contributions)
+      .innerJoin(sceneContributions, eq(sceneContributions.id, contributions.sceneContributionId))
+      .where(
+        and(
+          eq(contributions.userId, userId),
+          eq(sceneContributions.sceneId, sceneId),
+          isNull(contributions.deletedAt),
+          notInArray(contributions.status, ["rejected", "withdrawn"]),
+        ),
+      )
+      .limit(1);
+    const isRepeat = !!earlier;
+
     // a. Insert scene_contributions (no duration check).
     const [sceneContribution] = await tx
       .insert(sceneContributions)
@@ -268,12 +291,14 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
     // d. Points -- base is always read; the three bonuses are independent
     // config lookups gated by different conditions, so all of the ones that
     // apply are fetched together instead of as sequential round trips.
-    const [base, longBonus, dailyBonus, expertBonus] = await Promise.all([
-      readConfigValue(tx, "points.scene.base"),
-      data.durationMs > LONG_DESCRIPTION_THRESHOLD_MS ? readConfigValue(tx, "points.scene.long_bonus") : Promise.resolve(0),
-      scene.isDaily ? readConfigValue(tx, "points.scene.daily_bonus") : Promise.resolve(0),
-      scene.difficulty === "expert" ? readConfigValue(tx, "points.scene.expert_bonus") : Promise.resolve(0),
-    ]);
+    const [base, longBonus, dailyBonus, expertBonus]: [number, number, number, number] = isRepeat
+      ? [0, 0, 0, 0]
+      : await Promise.all([
+          readConfigValue(tx, "points.scene.base"),
+          data.durationMs > LONG_DESCRIPTION_THRESHOLD_MS ? readConfigValue(tx, "points.scene.long_bonus") : Promise.resolve(0),
+          scene.isDaily ? readConfigValue(tx, "points.scene.daily_bonus") : Promise.resolve(0),
+          scene.difficulty === "expert" ? readConfigValue(tx, "points.scene.expert_bonus") : Promise.resolve(0),
+        ]);
 
     const bonusBreakdown = { base, longBonus, dailyBonus, expertBonus };
     const pointsAwarded = base + longBonus + dailyBonus + expertBonus;
@@ -286,17 +311,20 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
     // contribution id is brand new, so the ledger insert can't conflict) --
     // it was previously missing, so the leaderboard never saw scene points.
     const [, [updatedStats]] = await Promise.all([
-      tx
-        .insert(pointsTransactions)
-        .values({
-          userId,
-          contributionId: contribution.id,
-          points: pointsAwarded,
-          reason: "SCENE_SUBMITTED",
-          moduleType: "SCENE",
-          idempotencyKey: `${contribution.id}:SCENE_SUBMITTED`,
-        })
-        .onConflictDoNothing(),
+      // A repeat description earns nothing, so there is no ledger row to write for it.
+      pointsAwarded > 0
+        ? tx
+            .insert(pointsTransactions)
+            .values({
+              userId,
+              contributionId: contribution.id,
+              points: pointsAwarded,
+              reason: "SCENE_SUBMITTED",
+              moduleType: "SCENE",
+              idempotencyKey: `${contribution.id}:SCENE_SUBMITTED`,
+            })
+            .onConflictDoNothing()
+        : Promise.resolve(),
       tx
         .update(userStats)
         .set({
@@ -326,9 +354,10 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
       sceneContributionId: sceneContribution.id,
       pointsAwarded,
       bonusBreakdown,
+      alreadyDescribed: isRepeat,
       newLevel: updatedStats.level,
     };
-  });
+  }));
 
   // Push notification is best-effort external I/O -- sent after the
   // transaction has committed, never inside it, and swallowed on failure so
@@ -349,7 +378,7 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
     action: "contribution_submitted",
     resourceType: "contribution",
     resourceId: result.contributionId,
-    afterState: { moduleType: "SCENE", sceneId },
+    afterState: { moduleType: "SCENE", sceneId, ...(result.alreadyDescribed ? { repeatSubmission: true } : {}) },
   });
 
   return {
@@ -357,5 +386,7 @@ export async function submitSceneContribution(userId: string, sceneId: string, d
     sceneContributionId: result.sceneContributionId,
     pointsAwarded: result.pointsAwarded,
     bonusBreakdown: result.bonusBreakdown,
+    // true when this wasn't the user's first description of this scene, so it earned nothing
+    alreadyDescribed: result.alreadyDescribed,
   };
 }
