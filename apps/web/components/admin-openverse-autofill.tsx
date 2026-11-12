@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BulkUploadResult } from "@/lib/api";
+import { getErrorMessage, type BulkUploadResult } from "@/lib/api";
 
 /**
  * One-click bulk fill: searches the given provider (Openverse or Wikimedia
@@ -40,7 +40,7 @@ export function AdminOpenverseAutofill({
       setResult(res);
       if (res.created > 0) onDone?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Auto-fill failed");
+      setError(getErrorMessage(err, "Auto-fill failed"));
     } finally {
       setIsSubmitting(false);
     }

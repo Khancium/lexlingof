@@ -120,7 +120,7 @@ export default function AdminConceptsPage() {
       setConcepts(res.items);
       setTotal(res.total);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load concepts");
+      setLoadError(getErrorMessage(err, "Failed to load concepts"));
     } finally {
       setLoading(false);
     }
@@ -165,7 +165,7 @@ export default function AdminConceptsPage() {
         await load({ silent: true });
       }
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create concept");
+      setCreateError(getErrorMessage(err, "Failed to create concept"));
     } finally {
       setIsCreating(false);
     }
@@ -198,7 +198,7 @@ export default function AdminConceptsPage() {
       const result = await api.admin.uploadConceptMedia(conceptId, file);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image uploaded" });
     } catch (err) {
-      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Upload failed", error: true });
+      setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Upload failed"), error: true });
     } finally {
       setUploadingId(null);
     }
@@ -211,7 +211,7 @@ export default function AdminConceptsPage() {
       const result = await api.admin.addConceptMediaOpenverse(conceptId, image);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added from Openverse" });
     } catch (err) {
-      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Failed to add image"), error: true });
       throw err;
     } finally {
       setUploadingId(null);
@@ -225,7 +225,7 @@ export default function AdminConceptsPage() {
       const result = await api.admin.addConceptMediaWikimedia(conceptId, image);
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added from Wikimedia Commons" });
     } catch (err) {
-      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Failed to add image"), error: true });
       throw err;
     } finally {
       setUploadingId(null);
@@ -248,7 +248,7 @@ export default function AdminConceptsPage() {
       setUploadMessage({ id: conceptId, text: "pending" in result ? result.message : "Image added" });
       setUrlEntryId(null);
     } catch (err) {
-      setUploadMessage({ id: conceptId, text: err instanceof Error ? err.message : "Failed to add image", error: true });
+      setUploadMessage({ id: conceptId, text: getErrorMessage(err, "Failed to add image"), error: true });
     } finally {
       setUploadingId(null);
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type AdminSentence, type Category, type SentenceSourceLanguage } from "@/lib/api";
+import { api, getErrorMessage, type AdminSentence, type Category, type SentenceSourceLanguage } from "@/lib/api";
 import { useAuthStore } from "@/lib/store";
 import { AdminBulkUpload } from "@/components/admin-bulk-upload";
 import { AdminBulkTextCreate } from "@/components/admin-bulk-text-create";
@@ -80,7 +80,7 @@ export default function AdminSentencesPage() {
       setSentences(res.items);
       setTotal(res.total);
     } catch (err) {
-      setLoadError(err instanceof Error ? err.message : "Failed to load sentences");
+      setLoadError(getErrorMessage(err, "Failed to load sentences"));
     } finally {
       setLoading(false);
     }
@@ -114,7 +114,7 @@ export default function AdminSentencesPage() {
         await load({ silent: true });
       }
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Failed to create sentence");
+      setCreateError(getErrorMessage(err, "Failed to create sentence"));
     } finally {
       setIsCreating(false);
     }

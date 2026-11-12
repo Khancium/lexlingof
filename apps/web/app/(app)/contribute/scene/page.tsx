@@ -64,7 +64,7 @@ function ScenePageInner() {
         if (requestId === scenesRequestId.current) setScenes(userId ? seededShuffle(res.items, userId) : res.items);
       })
       .catch((err) => {
-        if (requestId === scenesRequestId.current) setScenesError(err instanceof Error ? err.message : "Failed to load scenes");
+        if (requestId === scenesRequestId.current) setScenesError(getErrorMessage(err, "Failed to load scenes"));
       })
       .finally(() => {
         if (requestId === scenesRequestId.current) setLoadingScenes(false);
@@ -98,7 +98,7 @@ function ScenePageInner() {
     api.scenes
       .getById(deepLinkSceneId)
       .then((s) => openScene(s))
-      .catch((err) => setSceneError(err instanceof Error ? err.message : "Failed to load scene"))
+      .catch((err) => setSceneError(getErrorMessage(err, "Failed to load scene")))
       .finally(() => setLoadingScene(false));
     // Only ever run once, for the initial deep link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -112,7 +112,7 @@ function ScenePageInner() {
     try {
       setScene(await api.scenes.getRandom(excludeId));
     } catch (err) {
-      setSceneError(err instanceof Error ? err.message : "No scenes available");
+      setSceneError(getErrorMessage(err, "No scenes available"));
     } finally {
       setLoadingScene(false);
     }
