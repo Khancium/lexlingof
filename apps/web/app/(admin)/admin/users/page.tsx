@@ -844,7 +844,7 @@ export default function AdminUsersPage() {
                             disabled={isBusy}
                             className="rounded-full bg-surface-card px-3 py-1 text-xs font-semibold text-ink hover:bg-border disabled:opacity-50"
                           >
-                            Lift ban
+                            Lift suspension
                           </button>
                         ) : (
                           <button
