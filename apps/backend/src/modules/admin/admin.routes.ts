@@ -816,6 +816,25 @@ const idParamSchema = z.object({ id: z.string().uuid() });
 
 type ModerationActor = { id: string; role: (typeof userRole.enumValues)[number] };
 
+/**
+ * A volunteer may change an existing concept/scene (edit it, replace or remove its images) only if
+ * they added it themselves -- the same rule their delete already followed. Before, a volunteer held
+ * the full `*.manage` codes and could edit ANY concept or scene, or delete or re-crop its images,
+ * with no review, because the approval queue only covers creating and deleting. Admins and
+ * super_admins are unaffected.
+ */
+async function assertVolunteerOwns(actor: { id: string; role: string }, kind: "concept" | "scene", id: string): Promise<void> {
+  if (actor.role !== "volunteer") return;
+  const [row] =
+    kind === "concept"
+      ? await db.select({ createdBy: concepts.createdBy }).from(concepts).where(eq(concepts.id, id)).limit(1)
+      : await db.select({ createdBy: scenes.createdBy }).from(scenes).where(eq(scenes.id, id)).limit(1);
+  if (!row) throw new HttpError(404, "NOT_FOUND", kind === "concept" ? "Concept not found" : "Scene not found");
+  if (row.createdBy !== actor.id) {
+    throw new HttpError(403, "FORBIDDEN", `Volunteers can only change ${kind}s they added themselves`);
+  }
+}
+
 /** 404s on an unknown user, 403s if `actor` isn't allowed to moderate them (see moderation-guards.service.ts). */
 async function guardModerationTarget(actor: ModerationActor, targetId: string): Promise<void> {
   const [target] = await db.select({ id: users.id, role: users.role }).from(users).where(eq(users.id, targetId)).limit(1);
@@ -2550,7 +2569,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // existing category (or a duplicate earlier in the same paste) is a
   // per-row error rather than failing the whole batch, same convention as
   // every other bulk-* route in this file.
-  fastify.post("/admin/categories/bulk-text", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/categories/bulk-text", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { names } = bulkCategoryTextSchema.parse(request.body);
 
     const existingSlugs = new Set(
@@ -2602,7 +2621,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // labelEnglish (required), description (optional). Rows that fail
   // validation are skipped and reported back individually rather than
   // failing the whole batch.
-  fastify.post("/admin/concepts/bulk", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/bulk", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const rows = await readBulkRows(request);
     const { toInsert, errors } = await buildConceptInserts(rows, 2); // +1 for 0-index, +1 for the header row
     const result: BulkResult = { created: 0, errors };
@@ -2615,7 +2634,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // category" lines straight into a textarea instead of preparing a file --
   // parsed client-side into a structured array, so this shares the exact
   // same row-building/category-matching logic as the file-based route.
-  fastify.post("/admin/concepts/bulk-text", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/bulk-text", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { items } = bulkConceptTextSchema.parse(request.body);
     const { toInsert, errors } = await buildConceptInserts(items, 1);
     const result: BulkResult = { created: 0, errors };
@@ -2627,6 +2646,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.put("/admin/concepts/:id", { preHandler: requirePermission("concepts.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const body = updateConceptSchema.parse(request.body);
+    await assertVolunteerOwns(request.user!, "concept", id);
 
     const [existing] = await db.select().from(concepts).where(eq(concepts.id, id)).limit(1);
     if (!existing) {
@@ -2682,7 +2702,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return { deleted: rows.length };
   });
 
-  fastify.post("/admin/concepts/bulk-edit", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/bulk-edit", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { ids, ...fields } = bulkEditConceptsSchema.parse(request.body);
 
     const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
@@ -2787,7 +2807,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // row so images can be assigned in bulk without touching each concept
   // individually. Each item is independent -- one bad URL doesn't block the
   // rest.
-  fastify.post("/admin/concepts/media/bulk-url", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/media/bulk-url", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { items } = bulkConceptImageUrlSchema.parse(request.body);
 
     const results = await settleInBatches(items, 5, (item) => addConceptImageFromUrl(item.conceptId, item.imageUrl));
@@ -2811,6 +2831,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     async (request) => {
       const { id } = idParamSchema.parse(request.params);
       const { mediaId } = mediaIdParamSchema.parse(request.params);
+      await assertVolunteerOwns(request.user!, "concept", id);
 
       const [media] = await db
         .select({ id: conceptMedia.id, storageKey: conceptMedia.storageKey, isPrimary: conceptMedia.isPrimary })
@@ -2862,7 +2883,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // separate source-specific paths. Meant for the bulk-selection bar: filter
   // by category/date, select rows, clear their images in one action instead
   // of opening each concept's image manager individually.
-  fastify.post("/admin/concepts/media/bulk-delete", { preHandler: requirePermission("concepts.manage") }, async (request) => {
+  fastify.post("/admin/concepts/media/bulk-delete", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
     const media = await db
@@ -2903,6 +2924,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     async (request, reply) => {
       const { id } = idParamSchema.parse(request.params);
       const { mediaId } = mediaIdParamSchema.parse(request.params);
+      await assertVolunteerOwns(request.user!, "concept", id);
 
       const [existing] = await db
         .select({ id: conceptMedia.id, storageKey: conceptMedia.storageKey })
@@ -3000,7 +3022,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // the CSV/JSON bulk-create and bulk-url endpoints.
   fastify.post(
     "/admin/concepts/media/openverse-autofill",
-    { preHandler: requirePermission("concepts.manage") },
+    { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] },
     async (request) => {
       const { ids } = bulkOpenverseAutofillSchema.parse(request.body);
       const targets = await conceptsWithoutImage(ids);
@@ -3033,7 +3055,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // Same idea as the Openverse autofill above, searching Wikimedia Commons instead.
   fastify.post(
     "/admin/concepts/media/wikimedia-autofill",
-    { preHandler: requirePermission("concepts.manage") },
+    { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] },
     async (request) => {
       const { ids } = bulkWikimediaAutofillSchema.parse(request.body);
       const targets = await conceptsWithoutImage(ids);
@@ -3085,7 +3107,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // defaults to "medium"), estimatedDurationSeconds (optional). Images
   // still have to be uploaded individually afterward via the media endpoint
   // -- bulk row data can't carry a file per row.
-  fastify.post("/admin/scenes/bulk", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/bulk", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const rows = await readBulkRows(request);
     const result: BulkResult = { created: 0, errors: [] };
     const toInsert: { rowNum: number; value: typeof scenes.$inferInsert }[] = [];
@@ -3161,7 +3183,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // active slugs and against earlier lines in the same paste, appending
   // -2/-3/... on collision, since two "Market Day" pastes shouldn't fight
   // over the bare "market-day" slug).
-  fastify.post("/admin/scenes/bulk-text", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/bulk-text", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { titles } = bulkSceneTextSchema.parse(request.body);
 
     const existingScenes = await db.select({ slug: scenes.slug, title: scenes.title }).from(scenes).where(isNull(scenes.deletedAt));
@@ -3201,6 +3223,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.put("/admin/scenes/:id", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const body = updateSceneSchema.parse(request.body);
+    await assertVolunteerOwns(request.user!, "scene", id);
 
     const [existing] = await db.select().from(scenes).where(eq(scenes.id, id)).limit(1);
     if (!existing) {
@@ -3255,7 +3278,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return runBulkPermanentDelete(request, "scene", ids);
   });
 
-  fastify.post("/admin/scenes/bulk-edit", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/bulk-edit", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { ids, ...fields } = bulkEditScenesSchema.parse(request.body);
 
     const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
@@ -3344,7 +3367,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // Bulk variant: a JSON array of {sceneId, imageUrl} pairs. Each item is
   // independent -- one bad URL doesn't block the rest.
-  fastify.post("/admin/scenes/media/bulk-url", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/media/bulk-url", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { items } = bulkSceneImageUrlSchema.parse(request.body);
 
     const results = await settleInBatches(items, 5, (item) => addSceneImageFromUrl(item.sceneId, item.imageUrl));
@@ -3386,7 +3409,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // Same bulk auto-fill idea as concepts, searching Openverse by scene title.
   fastify.post(
     "/admin/scenes/media/openverse-autofill",
-    { preHandler: requirePermission("scenes.manage") },
+    { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] },
     async (request) => {
       const { ids } = bulkOpenverseAutofillSchema.parse(request.body);
       const targets = await scenesWithoutImage(ids);
@@ -3419,7 +3442,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // Same idea, searching Wikimedia Commons by scene title.
   fastify.post(
     "/admin/scenes/media/wikimedia-autofill",
-    { preHandler: requirePermission("scenes.manage") },
+    { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] },
     async (request) => {
       const { ids } = bulkWikimediaAutofillSchema.parse(request.body);
       const targets = await scenesWithoutImage(ids);
@@ -3461,6 +3484,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.delete("/admin/scenes/:id/media/:mediaId", { preHandler: requirePermission("scenes.manage") }, async (request) => {
     const { id } = idParamSchema.parse(request.params);
     const { mediaId } = mediaIdParamSchema.parse(request.params);
+    await assertVolunteerOwns(request.user!, "scene", id);
 
     const [media] = await db
       .select({ id: sceneMedia.id, storageKey: sceneMedia.storageKey, isPrimary: sceneMedia.isPrimary })
@@ -3498,7 +3522,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   // Same as the concepts bulk-delete above -- clears every image (any
   // source) on every given scene id, meant for the bulk-selection bar.
-  fastify.post("/admin/scenes/media/bulk-delete", { preHandler: requirePermission("scenes.manage") }, async (request) => {
+  fastify.post("/admin/scenes/media/bulk-delete", { preHandler: [requirePermission("scenes.manage"), forbidVolunteers] }, async (request) => {
     const { ids } = bulkIdsSchema.parse(request.body);
 
     const media = await db
@@ -3526,6 +3550,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.put("/admin/scenes/:id/media/:mediaId/crop", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const { mediaId } = mediaIdParamSchema.parse(request.params);
+    await assertVolunteerOwns(request.user!, "scene", id);
 
     const [existing] = await db
       .select({ id: sceneMedia.id, storageKey: sceneMedia.storageKey })
@@ -3568,10 +3593,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { mediaId } = mediaIdParamSchema.parse(request.params);
     const body = addSceneImageKeywordSchema.parse(request.body);
 
-    const [media] = await db.select({ id: sceneMedia.id }).from(sceneMedia).where(eq(sceneMedia.id, mediaId)).limit(1);
+    const [media] = await db.select({ id: sceneMedia.id, sceneId: sceneMedia.sceneId }).from(sceneMedia).where(eq(sceneMedia.id, mediaId)).limit(1);
     if (!media) {
       throw new HttpError(404, "NOT_FOUND", "Scene image not found");
     }
+    await assertVolunteerOwns(request.user!, "scene", media.sceneId);
 
     const [keyword] = await db
       .insert(sceneImageKeywords)
@@ -3613,6 +3639,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/scenes/:id/keywords", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = addSceneImageKeywordSchema.parse(request.body);
+    await assertVolunteerOwns(request.user!, "scene", id);
 
     const [media] = await db
       .select({ id: sceneMedia.id })
@@ -3638,6 +3665,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.delete("/admin/scenes/:id/keywords/:keywordId", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const { id, keywordId } = sceneKeywordParamSchema.parse(request.params);
+    await assertVolunteerOwns(request.user!, "scene", id);
 
     const deleted = await db
       .delete(sceneImageKeywords)
@@ -3666,6 +3694,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
 
   fastify.post("/admin/scene-concepts", { preHandler: requirePermission("scenes.manage") }, async (request, reply) => {
     const body = createSceneConceptSchema.parse(request.body);
+    await assertVolunteerOwns(request.user!, "scene", body.sceneId);
 
     const [sceneConcept] = await db
       .insert(sceneConcepts)
@@ -3689,10 +3718,15 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { id } = idParamSchema.parse(request.params);
     const body = annotateSceneConceptSchema.parse(request.body);
 
-    const [existing] = await db.select({ id: sceneConcepts.id }).from(sceneConcepts).where(eq(sceneConcepts.id, id)).limit(1);
+    const [existing] = await db
+      .select({ id: sceneConcepts.id, sceneId: sceneConcepts.sceneId })
+      .from(sceneConcepts)
+      .where(eq(sceneConcepts.id, id))
+      .limit(1);
     if (!existing) {
       throw new HttpError(404, "NOT_FOUND", "Scene concept not found");
     }
+    await assertVolunteerOwns(request.user!, "scene", existing.sceneId);
 
     // annotated_presence is set ONLY here, by a human annotator acting
     // through this endpoint -- never inferred automatically or from audio.
@@ -3826,7 +3860,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // (?sourceLanguage=urdu|persian|english on the URL, default english) --
   // real-world imports are one file per language, not a language-per-row
   // column, matching how this dataset actually shows up.
-  fastify.post("/admin/sentences/bulk", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.post("/admin/sentences/bulk", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { sourceLanguage } = z.object({ sourceLanguage: z.enum(["english", "urdu", "persian"]).default("english") }).parse(request.query);
     const rows = await readBulkRows(request);
     const { toInsert, errors } = await buildSentenceInserts(
@@ -3844,7 +3878,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // own bulk-text endpoints. Every line in one paste shares a single
   // sourceLanguage, picked once for the whole batch (matching the file
   // endpoint's own one-language-per-upload convention).
-  fastify.post("/admin/sentences/bulk-text", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.post("/admin/sentences/bulk-text", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { texts, sourceLanguage } = bulkSentenceTextSchema.parse(request.body);
     const { toInsert, errors } = await buildSentenceInserts(
       texts.map((englishText) => ({ englishText })),
@@ -3888,7 +3922,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return runBulkPermanentDelete(request, "sentence", ids);
   });
 
-  fastify.post("/admin/sentences/bulk-edit", { preHandler: requirePermission("sentences.manage") }, async (request) => {
+  fastify.post("/admin/sentences/bulk-edit", { preHandler: [requirePermission("sentences.manage"), forbidVolunteers] }, async (request) => {
     const { ids, ...fields } = bulkEditSentencesSchema.parse(request.body);
 
     const fieldKeys = Object.keys(fields) as (keyof typeof fields)[];
@@ -4179,6 +4213,13 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   fastify.post("/admin/undo/:resourceType/:identifier", { preHandler: verifyToken }, async (request) => {
     const { resourceType, identifier } = undoParamSchema.parse(request.params);
     const role = request.user!.role;
+
+    // A volunteer holds the concepts/scenes/sentences .manage codes, which is what Undo's
+    // per-resource permission check looks at -- so they could revert ANY logged change to those
+    // (including an admin's), with no review. Undo is admin-only.
+    if (role === "volunteer") {
+      throw new HttpError(403, "FORBIDDEN", "Volunteers can't undo changes -- ask an admin");
+    }
 
     const isKeyed = resourceType === "gamification_config" || resourceType === "feature_flag";
     const keyField = resourceType === "gamification_config" ? "configKey" : "flagKey";
