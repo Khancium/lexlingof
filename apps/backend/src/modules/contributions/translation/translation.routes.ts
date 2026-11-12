@@ -6,6 +6,7 @@ import { db } from "../../../db/index.js";
 import { categories, sentences } from "../../../db/schema.js";
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
+import { requireModule } from "../../../services/feature-flags.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { getRandomSentence, getSentenceGroupDetail, getSentenceGroups, searchSentences, submitTranslation } from "./translation.service.js";
 
@@ -62,7 +63,7 @@ export default async function translationRoutes(fastify: FastifyInstance) {
     return getSentenceGroupDetail(request.user!.id, groupIndex, sourceLanguage);
   });
 
-  fastify.get("/sentences/random", { preHandler: verifyToken }, async (request) => {
+  fastify.get("/sentences/random", { preHandler: [verifyToken, requireModule(3)] }, async (request) => {
     const { languageId, sourceLanguage } = randomQuerySchema.parse(request.query);
     return getRandomSentence(request.user!.id, languageId, sourceLanguage);
   });
@@ -102,7 +103,7 @@ export default async function translationRoutes(fastify: FastifyInstance) {
     };
   });
 
-  fastify.post("/sentences/:id/translation", { preHandler: [verifyToken, blockIfRestricted] }, async (request, reply) => {
+  fastify.post("/sentences/:id/translation", { preHandler: [verifyToken, requireModule(3), blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = submitTranslationSchema.parse(request.body);
     if (body.audioFileId) await assertOwnsAudioFile(request.user!.id, body.audioFileId);

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { contributionModule } from "../../db/schema.js";
 import { requireReviewerEligibility, verifyToken } from "../../middleware/auth.js";
+import { requireFeature } from "../../services/feature-flags.service.js";
 import { getQueue, submitReview } from "./reviews.service.js";
 
 const queueQuerySchema = z.object({ moduleType: z.enum(contributionModule.enumValues).optional() });
@@ -15,7 +16,7 @@ const submitReviewSchema = z.object({
 });
 
 export default async function reviewsRoutes(fastify: FastifyInstance) {
-  const reviewerOnly = [verifyToken, requireReviewerEligibility()];
+  const reviewerOnly = [verifyToken, requireFeature("community_review_enabled"), requireReviewerEligibility()];
 
   fastify.get("/queue", { preHandler: reviewerOnly }, async (request) => {
     const { moduleType } = queueQuerySchema.parse(request.query);

@@ -53,6 +53,7 @@ import { forbidVolunteers, hasPermission, invalidateUserCache, requirePermission
 import { buildAttribution, searchOpenverseImages } from "../../services/openverse.service.js";
 import { searchWikimediaImages } from "../../services/wikimedia.service.js";
 import { deleteUserAccount } from "../../services/account.service.js";
+import { invalidateFeatureFlagCache } from "../../services/feature-flags.service.js";
 import { invalidateLeaderboardCache } from "../gamification/gamification.routes.js";
 import { authService } from "../auth/auth.service.js";
 import { writeAuditLog, writeAuditLogs } from "../../services/audit-log.service.js";
@@ -4349,6 +4350,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
           .update(featureFlags)
           .set({ isEnabled: before.isEnabled as boolean, updatedBy: request.user!.id, updatedAt: new Date() })
           .where(eq(featureFlags.flagKey, identifier));
+        invalidateFeatureFlagCache();
         break;
       default:
         throw new HttpError(400, "NOT_REVERTIBLE", `"${resourceType}" has no undo support`);
@@ -4454,6 +4456,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       .set({ isEnabled: body.isEnabled, updatedBy: request.user!.id, updatedAt: new Date() })
       .where(eq(featureFlags.flagKey, key))
       .returning();
+    invalidateFeatureFlagCache();
 
     const actorRole = request.user!.role;
     await writeAuditLog({
