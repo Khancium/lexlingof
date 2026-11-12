@@ -222,7 +222,7 @@ function RecordingRow({
             {recording.village ? <MetaBadge label={recording.village} /> : null}
           </>
         ) : (
-          <span className="text-[11px] italic text-ink-faint">Location not shared</span>
+          <span className="text-[11px] italic text-ink-muted">Location not shared</span>
         )}
         {hasGrammar ? (
           <>
@@ -576,34 +576,46 @@ export default function AdminPublishingPage() {
             const isExpanded = expandedId === id;
             return (
               <div key={id} className="card-duo rounded-2xl bg-surface p-4 shadow-sm">
-                <button type="button" onClick={() => toggleExpand(id)} className="flex w-full items-center justify-between gap-3 text-left">
-                  <div className="min-w-0">
+                {/* Two sibling toggle buttons (title / badges) with the Unpublish
+                   button between them -- a <button> can't be nested inside
+                   another <button>, and the whole row must still expand on click. */}
+                <div className="flex w-full items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={() => toggleExpand(id)}
+                    aria-expanded={isExpanded}
+                    className="min-w-0 flex-1 text-left"
+                  >
                     <p className="truncate font-semibold text-ink">{label}</p>
                     <p className="text-xs text-ink-muted">{category ?? "Uncategorized"}</p>
-                  </div>
+                  </button>
                   <div className="flex shrink-0 items-center gap-2">
                     {item.publishedCount > 0 ? (
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleUnpublishAll(id);
-                        }}
+                        onClick={() => handleUnpublishAll(id)}
                         disabled={unpublishingId === id}
                         className="rounded-full bg-red-600/10 px-2.5 py-1 text-xs font-semibold text-red-700 hover:bg-red-600/20 disabled:opacity-50"
                       >
                         {unpublishingId === id ? "..." : "Unpublish all"}
                       </button>
                     ) : null}
-                    <span className="rounded-full bg-brand-light px-2.5 py-1 text-xs font-semibold text-brand-dark">
-                      {item.publishedCount} published
-                    </span>
-                    <span className="rounded-full bg-surface-card px-2.5 py-1 text-xs font-medium text-ink-muted ring-1 ring-border">
-                      {item.eligibleCount} verified
-                    </span>
-                    <span className={`text-ink-muted transition-transform ${isExpanded ? "rotate-180" : ""}`}>▾</span>
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(id)}
+                      tabIndex={-1}
+                      className="flex items-center gap-2"
+                    >
+                      <span className="rounded-full bg-brand-light px-2.5 py-1 text-xs font-semibold text-brand-dark">
+                        {item.publishedCount} published
+                      </span>
+                      <span className="rounded-full bg-surface-card px-2.5 py-1 text-xs font-medium text-ink-muted ring-1 ring-border">
+                        {item.eligibleCount} verified
+                      </span>
+                      <span className={`text-ink-muted transition-transform ${isExpanded ? "rotate-180" : ""}`}>▾</span>
+                    </button>
                   </div>
-                </button>
+                </div>
 
                 {isExpanded ? (
                   <div className="mt-4 space-y-2 border-t border-border pt-4">
