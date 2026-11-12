@@ -1,7 +1,15 @@
 import { eq } from "drizzle-orm";
 
 import { db } from "../db/index.js";
-import { contributorDemographics, contributorProfiles, deviceTokens, refreshTokens, users } from "../db/schema.js";
+import {
+  contributorDemographics,
+  contributorProfiles,
+  deviceTokens,
+  notifications,
+  passwordResetTokens,
+  refreshTokens,
+  users,
+} from "../db/schema.js";
 import { invalidateUserCache } from "../middleware/auth.js";
 import { writeAuditLog } from "./audit-log.service.js";
 
@@ -43,6 +51,11 @@ export async function deleteUserAccount(userId: string): Promise<void> {
     db.delete(contributorProfiles).where(eq(contributorProfiles.userId, userId)),
     db.delete(refreshTokens).where(eq(refreshTokens.userId, userId)),
     db.delete(deviceTokens).where(eq(deviceTokens.userId, userId)),
+    // Their FKs cascade, but only on a hard delete -- and this is a soft one, so both used to
+    // outlive the account: a pending reset link that still worked for a deleted/banned user, and
+    // an inbox of their notifications (titles, level-ups, review outcomes) kept for no reason.
+    db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, userId)),
+    db.delete(notifications).where(eq(notifications.userId, userId)),
   ]);
 
   invalidateUserCache(userId);
