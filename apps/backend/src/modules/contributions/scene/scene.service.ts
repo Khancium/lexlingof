@@ -24,7 +24,7 @@ import { withKeyedLock } from "../../../utils/keyed-lock.js";
 // a scene image) and must never be queried, joined, or returned from this
 // file -- contributors and the daily/random/list endpoints never see it.
 
-// Module 4 scene descriptions carry NO 3-second limit anywhere in this file.
+// Module 4 scene descriptions carry NO duration limit anywhere in this file.
 // Descriptions can run to 5 minutes (300000ms) or longer.
 
 export type SubmitSceneContributionInput = {

@@ -20,7 +20,7 @@ import { sendLevelUpNotification } from "../../notifications/push.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { withKeyedLock } from "../../../utils/keyed-lock.js";
 
-// Module 2 audio uploads carry NO 3-second limit anywhere in this file.
+// Module 2 audio uploads carry NO duration limit anywhere in this file.
 // Audio can be any duration -- seconds or hours.
 
 export type SubmitAudioUploadInput = {
