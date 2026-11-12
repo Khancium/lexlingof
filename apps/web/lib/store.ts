@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import axios from "axios";
-import { api, ensureAccessToken, hasStoredRefreshToken, type UserProfile } from "./api";
+import { api, clearSessionHint, ensureAccessToken, hasStoredRefreshToken, type UserProfile } from "./api";
 
 type AuthState = {
   user: UserProfile | null;
@@ -48,6 +48,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       // that's an expected state on a public page, not an app error to
       // surface. Anything else (network failure, 500) is a real error.
       const isUnauthorized = axios.isAxiosError(err) && err.response?.status === 401;
+      // The refresh was definitively rejected, so the session hint is stale --
+      // clear it or every later boot re-fires a refresh that can only 401.
+      // Network errors / timeouts / 5xx are deliberately NOT cleared: the
+      // session may still be perfectly valid and restorable on the next boot.
+      if (isUnauthorized) clearSessionHint();
       set({
         user: null,
         isLoading: false,
