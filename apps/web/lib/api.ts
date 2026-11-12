@@ -57,6 +57,11 @@ function setSessionHint(present: boolean): void {
   }
 }
 
+/** Drops the "a session might exist" hint -- for when a restore attempt definitively failed, so later boots stop re-firing a refresh that can only 401. */
+export function clearSessionHint(): void {
+  setSessionHint(false);
+}
+
 // Only redirects when a session actually existed and its refresh failed
 // (e.g. an expired/revoked refresh token) -- NOT when there was simply never
 // a session to begin with (loadUser() skips calling getMe() at all in that
