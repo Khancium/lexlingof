@@ -59,7 +59,7 @@ internal paths already self-namespace.
 | `languages` | Public active-languages + dialects list (60-min in-memory cache, no invalidation hook) |
 | `contributions/word` | Module 1: record a word for a concept (up to 3 synonyms/slots per concept) |
 | `contributions/audio` | Module 2: freeform audio upload + transcription + segments |
-| `contributions/translation` | Module 3: translate an English sentence, incl. the sentence-grouping/tile feature |
+| `contributions/translation` | Module 3: record a translation of a sentence, browsed by category in order (§3.1) |
 | `contributions/scene` | Module 4: describe a scene image aloud |
 | `contributions/buffer` | The DB-buffered submission pipeline shared by all four modules (§2.3) |
 | `reviews` | Peer review queue + decision submission (§2.4) |
@@ -398,8 +398,8 @@ Key sub-features:
   20 + long-description 10 + daily 5 + expert 20, verified 10; audio upload 10, native text
   10, romanization 5, IPA 10, English translation 10, segment 5; review award 5). Hardcoded
   rather than configurable: the 3-synonym cap, the 10 s word-recording limit (also a DB
-  `CHECK`), the 500 KB word file cap, the 100 MB default upload cap, the 50-sentence group
-  size, and the 60 s "long description" threshold. Seeded-but-unused keys:
+  `CHECK`), the 500 KB word file cap, the 100 MB default upload cap, and the 60 s "long
+  description" threshold. Seeded-but-unused keys:
   `points.word.synonym_bonus`, `levels.bronze.min`, and the three `modules.*` keys
   (`modules.word.max_duration_ms = 3000` contradicts the real 10000).
 - **Streaks** (`services/streak.service.ts`): `updateStreakOnContribution` bumps
@@ -568,27 +568,43 @@ Key sub-features:
 
 ## 3. Notable Feature Deep-Dives
 
-### 3.1 Sentence grouping (translate module)
+### 3.1 Sentences: categories, three languages, in order (translate module)
 
-Sentences are bucketed into fixed groups of **at most 50**, shown as tiles on the main
-translate page, each with a progress bar (translated / total for the current user).
-Group membership is a **deterministic pseudo-random order** — sorted by `md5(id)`, not
-creation order or alphabetically — computed on the fly rather than stored, so it needs no
-migration/backfill and automatically covers sentences added later (at the cost of group
-boundaries potentially shifting slightly if sentences are added/removed between requests;
-acceptable for a progress-bar UI, not a strict invariant).
+*Rebuilt 2026-11-12 (§7.8). The old model — random sentences and md5-ordered "groups of 50" over
+one-language-per-row text — is gone.*
 
-"Translate Randomly" exists at both levels: the top-level button is a true random pick
-across every sentence (backend `ORDER BY random()`); the inside-a-group version picks
-client-side from that group's already-fetched ≤50 items (preferring an untranslated one)
-rather than another round trip. Opening a group shows its sentences in a **per-user
-shuffled order** (`seededShuffle`, same utility used for concept-category and scene
-ordering elsewhere), so browsing order is stable per user but differs between users.
+**A sentence is one row in English, Urdu and Persian**, in a category, at a position:
+`sentences(english_text, urdu_text, persian_text, sentence_category_id, sort_order, ...)`, with
+`urdu_text`, `persian_text` and `sentence_category_id` NOT NULL (migration `0043`), so the database
+itself guarantees a sentence cannot exist without its equivalents or its category. The English text
+identifies the sentence: the same English sentence (any case) is never added twice. Categories live in
+their own table, `sentence_categories` (slug, name, `sort_order`, `is_active`), separate from the
+concept `categories`.
 
-Both `GET /sentence-groups` (paginated tile list) and `GET /sentence-groups/:groupIndex`
-(one group's detail) do their bucketing **entirely in one SQL statement** each — see the
-§2.7 note on why a naive "fetch every sentence id into Node" version of this had to be
-rewritten.
+**Contributor flow** (`translation.routes.ts`, all behind the `module_3_enabled` flag):
+- `GET /sentence-categories` — the tiles: every active category that has an active sentence, in the
+  admin's order, with `sentenceCount` and this user's `translatedCount` (one grouped query).
+- `GET /sentence-categories/:id/sentences?search&filter&limit&offset` — that category's sentences in
+  order (`sort_order, created_at, id`) with each sentence's three texts and `hasTranslated`. Search
+  matches any of the three languages; `filter` is `translated` / `untranslated`. A hidden category is 404.
+- `GET /sentences/next?categoryId&after` — the next sentence the user has not translated, in the
+  category's order; with `after=<sentenceId>` it continues strictly after that sentence (compared inside
+  the database — passing `created_at` back through JS loses microseconds and made "after X" return X).
+  404 `NO_SENTENCES_AVAILABLE` when nothing is left. This replaces the random pick.
+- `GET /sentences/:id` (a hidden/deleted sentence is 404) and `GET /sentences?search&categoryId&filter`
+  (any language, any category — the forum composer's picker).
+- Removed: `GET /sentences/random` and `GET /sentence-groups[/:groupIndex]`.
+- Both translation submit routes (the buffered one and the direct one) refuse a sentence that no longer
+  exists or is hidden with a 404 "That sentence no longer exists", instead of accepting it and failing
+  in the background — this matters right after a purge, for pages left open.
+
+**The web page** (`/contribute/translate`): tiles → the category's sentences (numbered, searchable,
+paged by the server) → the recorder. A "Read sentences in English / اردو / فارسی" switch picks which
+language to read (remembered in `localStorage`); the other two are shown underneath so the meaning is
+never in doubt, and the recording applies to all three. "Continue" and "Next" walk the category in
+order and say so when it is finished; "Previous" goes back; `?sentenceId=` deep links open that
+sentence inside its own category. Right-to-left rows flip (number and text start on the right).
+Verified in a real browser (§7.8).
 
 ### 3.2 Admin "reverse changes" (undo)
 
@@ -1180,18 +1196,38 @@ change or new index was needed.
 - Uniqueness for words and translations is **language-agnostic**, so a second-language
   submission silently overrides the first, and `language_id` isn't updated on override.
 
-### 3.22 Sentence source language and paste-text sentence upload
+### 3.22 Importing and editing sentences (superseded the source-language model)
 
-- `sentences.source_language` (`sentence_source_language` enum: `english | urdu | persian`,
-  default `english`, `0031`) lets the corpus hold Urdu and Persian prompts. The translate page
-  has a source-language filter and renders such sentences with `dir="rtl"`. ⚠️ The column that
-  stores the prompt is still named `english_text` (and its FTS index uses the `'english'`
-  config), so the name is now misleading.
-- `POST /admin/sentences/bulk` (file) takes `?sourceLanguage=`; `POST
-  /admin/sentences/bulk-text` (paste, one sentence per line — commit `57a2793`) takes the
-  same. The admin Sentences page has one shared "bulk upload language" selector for both.
-  Both reuse the silent case-insensitive de-dupe from §3.11. There is no PUT to edit a
-  sentence's text.
+*The `source_language` column and its per-upload language selector (`0031`, commit `57a2793`) are
+replaced by §3.1; the column stays, unused, until the post-deploy cleanup migration.*
+
+- **Admin API** (`admin.routes.ts` + `sentence-categories.routes.ts`, permission `sentences.manage`):
+  - Categories: `GET/POST /admin/sentence-categories`, `PUT/DELETE /admin/sentence-categories/:id`.
+    Reading is open to anyone who can manage sentences (a volunteer needs the list to add one);
+    create/rename/reorder/hide/delete are admin-only. A name that already exists (any case) returns the
+    existing category. Deleting is refused (409) while any sentence — even a hidden or deleted one — uses it.
+    A rename keeps the slug.
+  - Sentences: `POST /admin/sentences` needs a category and all three texts (400 otherwise; 404 for an
+    unknown category); `PUT /admin/sentences/:id` (new) edits any of them, the category, the position or
+    visibility — moving to another category appends at its end unless a position is given; a volunteer may
+    edit only their own (§3.16); every edit is audit-logged under the table's own property names so **Undo**
+    restores it (tested: an edit-then-move is undone back to the previous category and position);
+    `bulk-edit` moves sentences to the end of the target category, keeping their relative order.
+  - **Import** — one row per sentence, `category, english, urdu, persian`: `POST /admin/sentences/bulk`
+    (CSV/JSON; BOM and quoted commas handled; headers `English`/`englishText`/`text`, `Urdu`/`urduText`,
+    `Persian`/`persianText`/`farsi` accepted) and `POST /admin/sentences/bulk-text` (`items: [...]`, the web
+    page splits pasted lines on a tab or `|`). A row missing its category or **any** language is refused
+    and reported with its row number, so an import can never leave a sentence without its equivalents.
+    An unknown category is an error unless `createCategories` is set, in which case each missing category
+    is created once (case-insensitively) — only for rows that are otherwise valid. English duplicates are
+    skipped silently (§3.11); new sentences are numbered after the category's existing ones in file order.
+    Both are admin-only and return `{ created, errors, categoriesCreated }`.
+- **Public feed** (§3.17): `/public/language-learning` keeps `sentence` (English) and `category` and adds
+  `texts: { english, urdu, persian }`; `categoryId` now filters by *sentence* category and
+  `/public/language-learning/filters` lists the sentence categories that have something published.
+  The admin Publishing sentence list shows the category and all three texts.
+- **Seed**: no demo sentences any more; it seeds the sentence categories (Greetings, Salutations,
+  Introduction, Work, Agriculture, Husbandry, Household).
 
 ---
 
@@ -1297,7 +1333,7 @@ restatement of every column.)
 |---|---|
 | Identity & access | `users`, `refresh_tokens`, `password_reset_tokens`, `terms_acceptances`, `device_tokens`, `permissions`, `role_permissions`, `user_additional_permissions` (never read) |
 | Demographics & geography | `contributor_demographics`, `contributor_profiles`, `tribes`, `sub_tribes`, `villages`, `quarters` |
-| Content taxonomy | `languages`, `dialects`, `categories`, `concepts`, `concept_media`, `sentences`, `scenes`, `scene_media`, `scene_image_keywords`, `scene_concepts` |
+| Content taxonomy | `languages`, `dialects`, `categories`, `concepts`, `concept_media`, `sentence_categories`, `sentences`, `scenes`, `scene_media`, `scene_image_keywords`, `scene_concepts` |
 | Contributions (per module) | `word_recordings` (Module 1), `audio_uploads` + `transcriptions` + `transcription_segments` (Module 2), `translations` (Module 3), `scene_contributions` (Module 4), plus the umbrella `contributions` table every module row is linked from |
 | Submission pipeline | `pending_submissions` |
 | Media | `audio_files` (shared by every module; carries the crude review-tally counters, §2.4) |
@@ -1561,8 +1597,7 @@ before being fixed.
   `suggestions` that reference the concept/scene (it was reporting that FK as `HAS_CONTRIBUTIONS`
   with a count of 0); every bulk-id array is capped at 1000 (an audit insert past ~9,300 rows
   exceeded Postgres's parameter limit *after* the mutation had applied); the concepts list has a
-  stable `ORDER BY` (creation order). ⚠️ Still open: `GET /sentences/random` writes `usage_count`
-  on a GET.
+  stable `ORDER BY` (creation order). (`GET /sentences/random`, which wrote `usage_count` on a GET, was removed in §7.8.)
 - Notifications: `GET /notifications` mutates `sent → delivered`; there is no unread count or
   mark-all-read; push honours only the global `pushNotificationsEnabled` preference.
   Streaks are computed in UTC, and parallel buffer rows for one user can race on the streak
@@ -1815,6 +1850,89 @@ deploying when this was written — check the Deployments tab and compare `/api/
 loophole and the repeat-scene verified bonus (§7.2); whether admin status overrides should pay
 the verified bonus / adjust counters; revive-or-park for mobile.
 
+### 7.8 Sentence redesign — categorised, three-language sentences (2026-11-12)
+
+**Asked for:** remove all sentences and rebuild them so that (1) they are browsed by category
+(greetings, introduction, work, agriculture, husbandry, household...) instead of at random, and
+(2) every sentence has its exact equivalents in the other languages, mapped together in the database.
+Behaviour is in §3.1 and §3.22; this section is the decisions, the cutover and what was checked.
+
+**Decisions** (each chosen by the owner): hard-delete the old sentences **including** the recorded
+translations and their audio in R2; **keep the points** those recordings earned; store the three
+languages as **three required columns** on the sentence row (a separate per-language table would make
+adding a fourth language easier but would leave completeness to application code); sentence categories
+in a **new table**, not the shared concept `categories` (which is messy: duplicates, a 3 KB name).
+
+**What the purge removes** (measured on production, read-only, before building anything): 7,068
+sentences (6,623 English, 244 Urdu, 201 Persian — only 10 had a category and none linked to an
+equivalent); 97 recordings by 8 translators (1 verified, none published); 124 audio files; 96 queued
+submissions (some hold raw audio inside the database); 1,945 ledger points; 6,502 audit rows. Kept:
+the ledger rows and every user's `total_points`, badges, the audit history, forum posts (their sentence
+link is cleared). Contribution counters and levels are adjusted for what disappears.
+
+**Migrations** — `0042` (expand: `sentence_categories`, the new columns, nullable, RLS on) and `0043`
+(contract: the three columns NOT NULL). `0043` has a guard that stops with a readable message while
+any sentence exists. The old `source_language` and `category_id` columns are **kept, unused**, until the
+new backend is live — the backend currently deployed still reads them; drop them in a later migration.
+
+**Purge script** — `npm run db:purge-sentences --workspace=apps/backend`
+(`database/scripts/purge-sentences.ts`). A dry run (the default) reports what exists and then runs the
+real delete sequence inside a transaction it rolls back, so it proves the foreign-key order against the
+actual data. `--execute` needs `--backup-dir <new folder>` (every affected row as JSON, every audio object
+from R2, and the raw audio still queued in the database are written and checked first) and
+`--confirm <sentence count>` (stops if the count changed). The delete takes a write lock on the affected
+tables and aborts if anything changed since the backup. R2 objects are removed after the commit;
+failures are listed in the backup folder. `--skip-audio-backup` / `--skip-r2` exist for rehearsals.
+
+**Cutover runbook — in this order, and not before Railway can deploy the backend:**
+1. `npm run db:migrate` for `0042` only is safe at any time (additive). Do not apply `0043` yet.
+2. Run the purge dry run against production and read it. Then run it with `--execute`.
+3. `npm run db:migrate` (applies `0043`).
+4. Deploy the backend (confirm `/api/v1/health` `version`), then merge the web change.
+5. Import the new sentences from the admin Sentences page (paste or CSV).
+Why not purge first: the live backend serves the old Translate module, so purging early leaves it empty
+until the new backend deploys; and merging the web change before the backend deploys would point the new
+Translate page at endpoints the old backend does not have. Anything contributors record between now and
+the purge is deleted by it.
+
+**Verification — all done against a local Postgres built from every migration (Docker), never
+production**, because the auto-mode classifier refused a production migration and a staging database does
+not exist:
+- *New model* — 76 checks through the real routes: the NOT NULL guarantees and the `0043` guard; category
+  create (silent duplicate), reorder, rename, delete rules and volunteer/contributor permissions;
+  sentence create/validation (each missing language, blank text, unknown/missing category), positions,
+  duplicate English; list/search in all three languages; edit, duplicate-rename 409, move, audit entries and
+  **Undo**; volunteer queue → approval → ownership; paste and CSV import (BOM, quoted commas, header
+  spellings, row numbers, `createCategories`); the contributor tiles, category list, `next` (never the same
+  sentence twice, end-of-category 404), translate/progress/filters; hidden things unreachable; removed
+  endpoints gone; the public feed (`texts`, category filter, Persian search, filter options); stale-client
+  404s. It found a real bug (the microsecond timestamp round trip in `next`).
+- *The purge* — rehearsed on production-shaped data (7,098 sentences, 97 recordings by 8 translators, 124
+  audio files, 96 queued submissions, ledger rows, a badge, a review, published rows, forum citations and
+  unrelated word recordings): dry run changed nothing; missing/wrong flags are refused; the real run kept
+  every ledger row and point total, cleared the links, left every contributor's counters equal to a recount,
+  backed up real R2 objects and the database-held audio and deleted them, and `0043` then applied; run again
+  on new-model rows it worked too.
+- *The web UI* — 31 assertions plus 4 layout measurements in real Chrome (Playwright) against the local stack, as admin, contributor and
+  volunteer: categories, the three-language form and its validation, paste import with errors and
+  `create categories`, search in Urdu, filter, in-place edit, tiles with progress, ordered lists, the language
+  switch and its persistence, right-to-left layout (measured, and found and fixed two layout bugs),
+  continue/next/previous/end-of-category, deep link and back, no horizontal scroll at phone width, and the
+  volunteer's reduced view. `tsc` and `next build` are clean.
+
+⚠️ **Not covered:** a real microphone recording and submission through the browser (no audio device; the
+submit path was covered through the API); running `0042`/the purge against production itself (blocked, see
+above — the dry run on production is the first thing to do); a second instance of the backend (the new
+`next`/import logic doesn't depend on process memory, but this was not exercised).
+
+⚠️ **The mobile app is not updated.** Its Module 3 screen calls `/sentences/random` and
+`/sentence-groups`, which no longer exist, so it breaks when this deploys (mobile is the already-drifted,
+parked app — §8).
+
+**Still open:** drop the deprecated columns after the deploy; the admin Publishing page doesn't offer a
+category filter for sentences; contributors read from a fixed list of three languages (adding a fourth means a
+migration and an API/UI change).
+
 ---
 
 ## 8. Mobile App (`apps/mobile`)
@@ -1863,7 +1981,7 @@ web uses (§2.3), so it is also the only client that skips `blockIfRestricted`.
   `DELETE /users/me`; the Home "pending upload — tap to sync" banner has no `onPress`;
   ProfileMain never loads the existing biography. Absent versus web: forum, corpus page,
   contributions/failed-submissions UI, full demographics onboarding, forgot/change password,
-  avatar upload, notification inbox, suggestion box, account deletion, sentence-group browse,
+  avatar upload, notification inbox, suggestion box, account deletion, sentence browse by category,
   and all volunteer/admin tooling.
 - **Offline queue is built but dead**: `syncService.queueContribution()` is never called, no
   screen writes to WatermelonDB, every module uploads inline and just shows an error on
