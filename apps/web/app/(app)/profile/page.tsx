@@ -31,6 +31,7 @@ export default function ProfilePage() {
   const [streakStatus, setStreakStatus] = useState<StreakStatus>("active");
   const [badges, setBadges] = useState<UserBadgesResponse["earned"]>([]);
   const [demographics, setDemographics] = useState<ContributorDemographics | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [isEditingBio, setIsEditingBio] = useState(false);
   const [biography, setBiography] = useState(user?.biography ?? "");
@@ -109,12 +110,19 @@ export default function ProfilePage() {
 
   useEffect(() => {
     if (!user) return;
-    api.users.getStats().then((res) => {
-      setStats(res.stats);
-      setStreak(res.streak?.currentStreak ?? 0);
-      setStreakStatus(res.streak?.status ?? "active");
-    });
-    api.badges.getForUser(user.id).then((res) => setBadges(res.earned));
+    setLoadError(null);
+    api.users
+      .getStats()
+      .then((res) => {
+        setStats(res.stats);
+        setStreak(res.streak?.currentStreak ?? 0);
+        setStreakStatus(res.streak?.status ?? "active");
+      })
+      .catch((err) => setLoadError(getErrorMessage(err, "Failed to load your stats")));
+    api.badges
+      .getForUser(user.id)
+      .then((res) => setBadges(res.earned))
+      .catch((err) => setLoadError(getErrorMessage(err, "Failed to load your badges")));
     api.demographics.getMe().then(setDemographics).catch(() => setDemographics(null));
   }, [user]);
 
@@ -247,6 +255,7 @@ export default function ProfilePage() {
       </div>
       {isUploadingAvatar ? <p className="text-sm text-ink-muted">Uploading...</p> : null}
       {avatarError ? <p className="text-sm text-red-600">{avatarError}</p> : null}
+      {loadError ? <p className="text-sm text-red-600">{loadError}</p> : null}
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <StatCard label="Total" value={stats?.totalContributions ?? user.totalContributions} />

@@ -477,6 +477,8 @@ export default function AdminScenesPage() {
       const result = await api.admin.deleteScene(scene.id);
       if ("pending" in result) alert(result.message);
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to delete scene"));
     } finally {
       setDeletingId(null);
     }
@@ -511,6 +513,8 @@ export default function AdminScenesPage() {
       setSelected(new Set());
       setBulkDifficulty("");
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to set difficulty"));
     } finally {
       setIsBulkEditing(false);
     }
@@ -527,6 +531,8 @@ export default function AdminScenesPage() {
       setBulkActionInfo(`Removed ${result.deleted} image(s).`);
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to remove images"));
     } finally {
       setIsBulkDeletingImages(false);
     }
@@ -540,6 +546,8 @@ export default function AdminScenesPage() {
       await api.admin.bulkEditScenes({ ids: [...selected], isActive: false });
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to hide scenes"));
     } finally {
       setIsBulkHiding(false);
     }
@@ -551,6 +559,8 @@ export default function AdminScenesPage() {
       await api.admin.bulkEditScenes({ ids: [...selected], isActive: true });
       setSelected(new Set());
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to unhide scenes"));
     } finally {
       setIsBulkHiding(false);
     }
@@ -561,6 +571,8 @@ export default function AdminScenesPage() {
     try {
       await api.admin.updateScene(scene.id, { isActive: !scene.isActive });
       await load({ silent: true });
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to update scene"));
     } finally {
       setTogglingActiveId(null);
     }

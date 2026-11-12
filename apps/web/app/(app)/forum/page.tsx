@@ -72,13 +72,21 @@ function ForumPageInner() {
   }, [offset]);
 
   async function handleReact(postId: string, reactionType: Parameters<typeof api.forum.setPostReaction>[1]) {
-    await api.forum.setPostReaction(postId, reactionType);
-    load();
+    try {
+      await api.forum.setPostReaction(postId, reactionType);
+      load();
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to react"));
+    }
   }
 
   async function handleUnreact(postId: string) {
-    await api.forum.removePostReaction(postId);
-    load();
+    try {
+      await api.forum.removePostReaction(postId);
+      load();
+    } catch (err) {
+      setError(getErrorMessage(err, "Failed to remove reaction"));
+    }
   }
 
   return (

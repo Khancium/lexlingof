@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/lib/store";
-import { api, type LeaderboardRow } from "@/lib/api";
+import { api, getErrorMessage, type LeaderboardRow } from "@/lib/api";
 import { LEVEL_COLOR } from "@/lib/level";
 
 const PODIUM_STYLE: Record<1 | 2 | 3, { medal: string; height: string; ring: string; badge: string }> = {
@@ -47,12 +47,14 @@ export default function LeaderboardPage() {
   const currentUser = useAuthStore((state) => state.user);
   const [rows, setRows] = useState<LeaderboardRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.leaderboard.getGlobal({ limit: 100 }).then((res) => {
-      setRows(res);
-      setLoading(false);
-    });
+    api.leaderboard
+      .getGlobal({ limit: 100 })
+      .then(setRows)
+      .catch((err) => setError(getErrorMessage(err, "Failed to load the leaderboard")))
+      .finally(() => setLoading(false));
   }, []);
 
   const top3 = rows.slice(0, 3);
@@ -64,6 +66,8 @@ export default function LeaderboardPage() {
 
       {loading ? (
         <p className="text-ink-muted">Loading...</p>
+      ) : error ? (
+        <p className="text-red-600">{error}</p>
       ) : (
         <>
           {top3.length > 0 ? (

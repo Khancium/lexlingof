@@ -259,6 +259,8 @@ export default function AdminContributionsPage() {
     try {
       await api.admin.updateContributionStatus(id, { status: newStatus });
       setItems((prev) => prev.map((item) => (item.contributionId === id ? { ...item, status: newStatus } : item)));
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to update contribution status"));
     } finally {
       setActioningId(null);
     }
@@ -271,6 +273,8 @@ export default function AdminContributionsPage() {
       await api.admin.deleteContribution(item.contributionId);
       setItems((prev) => prev.filter((i) => i.contributionId !== item.contributionId));
       setTotal((prev) => prev - 1);
+    } catch (err) {
+      alert(getErrorMessage(err, "Failed to delete contribution"));
     } finally {
       setActioningId(null);
     }
@@ -440,9 +444,12 @@ export default function AdminContributionsPage() {
 
   async function saveRemarks(id: string) {
     setIsSavingRemarks(true);
+    setDetailError(null);
     try {
       const res = await api.admin.updateContributionRemarks(id, remarksDraft.trim());
       setItems((prev) => prev.map((i) => (i.contributionId === id ? { ...i, remarks: res.remarks } : i)));
+    } catch (err) {
+      setDetailError(getErrorMessage(err, "Failed to save remarks"));
     } finally {
       setIsSavingRemarks(false);
     }
