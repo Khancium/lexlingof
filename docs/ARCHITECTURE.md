@@ -468,7 +468,10 @@ Key sub-features:
   2. `GET /api/v1/health` is now a **readiness** check (`modules/health/health.routes.ts`): it
      runs `select 1` through the pool with a 5 s timeout and returns `503 {status:
      "degraded"}` (no error detail — it's unauthenticated) on failure. The bare `GET /health`
-     stays a cheap liveness probe. **Point uptime monitors at `/api/v1/health`.**
+     stays a cheap liveness probe. **Point uptime monitors at `/api/v1/health`.** A healthy
+     response also carries `uptimeSeconds` (resets on every restart) and `version` (the
+     deployed commit, from Railway's `RAILWAY_GIT_COMMIT_SHA`, or `null`) so a rollout can be
+     confirmed from outside — Railway doesn't report deployments to GitHub (only Vercel does).
   3. `services/db-watchdog.service.ts` probes the pool every 30 s. After 3 consecutive
      failures it opens one brand-new connection: if that **works** the database is fine and the
      pool is wedged, so the process exits and Railway restarts it with a fresh pool; if that

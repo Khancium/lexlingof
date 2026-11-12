@@ -27,6 +27,17 @@ export default async function healthRoutes(fastify: FastifyInstance, opts: Healt
       return reply.code(503).send({ status: "degraded", service: "Lexlingo API", db: "unreachable", timestamp });
     }
 
-    return { status: "ok", service: "Lexlingo API", db: "ok", dbLatencyMs: latencyMs, timestamp };
+    // uptimeSeconds resets on every (re)start and `version` is the deployed commit
+    // (Railway sets RAILWAY_GIT_COMMIT_SHA on GitHub deploys), so "has my change gone
+    // live yet?" is answerable from outside: poll until uptime drops / version moves.
+    return {
+      status: "ok",
+      service: "Lexlingo API",
+      db: "ok",
+      dbLatencyMs: latencyMs,
+      uptimeSeconds: Math.round(process.uptime()),
+      version: process.env.RAILWAY_GIT_COMMIT_SHA?.slice(0, 7) ?? null,
+      timestamp,
+    };
   });
 }
