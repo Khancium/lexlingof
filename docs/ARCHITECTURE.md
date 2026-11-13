@@ -21,7 +21,9 @@ Last updated: 2026-11-11.
 - **Monorepo**: npm workspaces + Turborepo (`apps/*`, `packages/*`).
 - **Backend** (`apps/backend`): Fastify (Node, TypeScript, ESM) + Drizzle ORM + PostgreSQL
   (Supabase-hosted). Deployed to **Railway** (`railway.json`: Railpack build, starts
-  `node apps/backend/dist/index.js`).
+  `node apps/backend/dist/index.js`). **Railway does NOT deploy automatically** — the owner deploys by hand
+  from the dashboard, so a merge to `main` does not change the backend until they do (the web, on Vercel, *does*
+  deploy on merge — see §7.8 for why that ordering matters). Confirm a rollout from `GET /api/v1/health`.
 - **Web** (`apps/web`): Next.js 15 (App Router), React 19, Tailwind 4, Zustand for client
   state, `react-hook-form` + `zod` for forms, `axios` for API calls.
 - **Mobile** (`apps/mobile`): Expo (SDK 57, dev-client only) / React Native 0.86, React
@@ -1844,9 +1846,7 @@ when it receives `FEATURE_DISABLED` or a volunteer's new 403s; and the mobile ap
 is undecided).
 
 **Still open after batch 5:** the Terms text (18+ vs 14, placeholders, licence); a staging
-database; an uptime monitor on `/api/v1/health`; Railway deployments (batch 3 onward were not
-deploying when this was written — check the Deployments tab and compare `/api/v1/health`
-`version`); the web UI hiding controls the backend now refuses; the same-audio re-upload
+database; an uptime monitor on `/api/v1/health`; the web UI hiding controls the backend now refuses; the same-audio re-upload
 loophole and the repeat-scene verified bonus (§7.2); whether admin status overrides should pay
 the verified bonus / adjust counters; revive-or-park for mobile.
 
@@ -1892,15 +1892,17 @@ failures are listed in the backup folder. `--skip-audio-backup` / `--skip-r2` ex
    objects. Checked afterwards, read-only: all of those are 0; the ledger has 260 rows summing to 3,750,
    equal to the sum of every user's `total_points` (no user differs from their ledger); 97 ledger rows are
    unlinked, not deleted; all 147 word contributions are untouched; one `admin_sentence_purge` audit row.
-2. ⏳ `npm run db:migrate` — applies `0042` then `0043` (the guard passes because `sentences` is empty; if an
-   admin added a sentence through the old page in the meantime it stops with a clear message — re-run the
-   purge). **Not done:** the auto-mode classifier refuses production migrations, so the owner runs this.
-3. ⏳ Merge PR #9 *after* step 2 — the new backend selects columns that don't exist until `0042` is applied.
-   Railway deploys the backend and Vercel the web; check `/api/v1/health` `version`.
-4. ⏳ Import the new sentences from the admin Sentences page (paste or CSV).
-Until step 3 the live Translate module is simply empty (it was always going to be, between purge and
-deploy), and the live admin "Add sentence" still writes the old shape — which `0043` would then refuse.
-Railway is deploying again as of this date (`/api/v1/health` reported `049b599`, main's head, i.e. batches 3–5).
+2. ✅ **Migrations applied on production, 2026-11-13 10:16 UTC** (`0042`, `0043`; run by the assistant on the
+   owner's instruction). Checked read-only afterwards: `sentence_categories` exists with RLS on, `urdu_text`,
+   `persian_text` and `sentence_category_id` are NOT NULL, no public table lacks RLS, `sentences` is empty.
+3. ✅ **PR #9 merged 10:17 UTC** (`f514753`) — after step 2, because the new backend selects columns that only
+   exist after `0042`. Vercel deployed the new web at once (production deployment succeeded).
+4. ⏳ **Deploy the backend on Railway by hand** (it does not deploy on merge) and confirm
+   `/api/v1/health` `version` is `f514753`. **Until this is done the live Translate page and the admin Sentences
+   page error**: the new web calls `/sentence-categories` and `/admin/sentence-categories`, which the old backend
+   answers with 404.
+5. ⏳ Import the new sentences from the admin Sentences page (paste or CSV).
+The `049b599` the health endpoint showed on 2026-11-12 was a manual deploy of batches 3–5, not an automatic one.
 
 **Verification — all done against a local Postgres built from every migration (Docker), never
 production**, because the auto-mode classifier refused a production migration and a staging database does
