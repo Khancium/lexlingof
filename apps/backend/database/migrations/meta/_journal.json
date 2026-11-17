@@ -309,6 +309,13 @@
       "when": 1794500495726,
       "tag": "0043_sentences_require_all_languages",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1794933276395,
+      "tag": "0044_publishing_curated_text",
+      "breakpoints": true
     }
   ]
 }

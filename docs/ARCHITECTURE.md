@@ -36,8 +36,8 @@ Last updated: 2026-11-11.
   presigned URLs); images (concept/scene/avatar) → **Supabase Storage**.
 - **Push notifications**: Firebase Cloud Messaging (`firebase-admin`), gated by both a
   server-config check (`FIREBASE_PROJECT_ID` set) and a per-user preference.
-- **Migrations**: Drizzle Kit, hand-reviewed SQL files in `database/migrations/` (42 as of
-  this writing, `0000`-`0041`), applied via `npm run db:migrate` — **no separate dev database**; all work
+- **Migrations**: Drizzle Kit, hand-reviewed SQL files in `database/migrations/` (45 as of
+  this writing, `0000`-`0044`), applied via `npm run db:migrate` — **no separate dev database**; all work
   happens against the same Supabase Postgres instance with careful test-data cleanup.
 
 ---
@@ -73,7 +73,7 @@ internal paths already self-namespace.
 | `health` | `GET /api/v1/health` — DB-backed readiness check (503 when the pool can't answer); the bare `GET /health` liveness route lives in `index.ts` (§2.7) |
 | `public-content` | Unauthenticated `/public/dictionary` and `/public/language-learning` feeds (§3.17) |
 | `admin` | All admin/moderation endpoints — by far the largest module (107 routes in `admin.routes.ts`, §2.5) |
-| `admin/publishing` | Curation of which recordings/translations go to the public API (11 routes, `publishing.manage`, §3.17) |
+| `admin/publishing` | Curation of which recordings/translations go to the public API (15 routes, `publishing.manage`, §3.17) |
 
 ### 2.2 Auth & permissions (`middleware/auth.ts`)
 
@@ -1091,14 +1091,37 @@ only those.
 - **Tables** (`0036`): `published_word_recordings(concept_id, word_recording_id UNIQUE,
   sort_order, published_by)` and `published_translations(sentence_id, translation_id
   UNIQUE, ...)`. Publishing a row is an `INSERT ... ON CONFLICT DO NOTHING`; unpublishing
-  deletes it. There is no approval step. `sort_order` is read but no route sets it.
+  deletes it. There is no approval step. `sort_order` is read but no route sets it. Migration
+  `0044` (additive, nullable) adds the curated export text to both tables: `native_text`,
+  `roman_text`, `ipa_text` and `text_edited_at` — see "Exported text" below.
 - **Admin UI** (`/admin/publishing`, backend `modules/admin/publishing.*`): Words and
   Sentences tabs with the same demographic filters as the contributions page; per-concept /
   per-sentence lists of current (`isCurrent`) recordings with a presigned audio URL;
   publish/unpublish one, or withdraw a whole word (`DELETE /concepts/:id/recordings`);
   bulk-tag grammar (`PUT /concepts/:id/recordings/grammar`: gender, part of speech, number).
   Commit `7b519ad` deliberately dropped the earlier "verified only" requirement — recordings
-  of **any** review status can be published.
+  of **any** review status can be published. Each recording row shows two panels side by side:
+  **what the contributor typed** (Native / Roman / IPA, plus a translation's free-text notes; only
+  the fields they filled in, or "Nothing typed -- audio only") and **the exported text** — three
+  editable boxes, Native / Roman / IPA.
+- **Exported text** (Native / Roman / IPA). A contributor's own text lives on `word_recordings`
+  (`native_word`, `romanization`, `ipa`) / `translations` and is never edited. What the public API
+  exports is decided on the publication row, by one rule in `utils/exported-text.ts` used by both
+  the admin list and the public feed: `text_edited_at` null → the contributor's text, as-is (so
+  nothing changes for anything already published); non-null → exactly the three curated columns,
+  where an empty one means "none" (an admin can drop a contributor's wrong IPA without inventing
+  one). Values are trimmed, blank → null, ≤ 2000 chars, and all three keys must be sent.
+  Routes: `PUT …/recordings/:recordingId` (or `…/translations/:translationId`) takes an **optional**
+  `{nativeText, romanization, ipa}` body, so a recording can be corrected *before* it goes live
+  (re-publishing with a body updates it, without a body leaves it alone); `PUT …/:id/text` edits a
+  published one (409 `NOT_PUBLISHED` otherwise); `DELETE …/:id/text` goes back to the contributor's
+  text. Every edit/reset is audit-logged (`published_text_edit` / `published_text_reset`, with
+  before/after). **Unpublishing, a withdraw-all, or a contributor's retake deletes the publication
+  and so discards the curated text** (the UI asks first). The feed's field names are unchanged
+  (`nativeText`, `romanization`, `ipa`), so the Pashtowal consumer needs no change.
+  **Rollout order matters:** apply `0044` before deploying the backend that reads it (it selects the
+  new columns), and deploy that backend before the web page that needs it (the page reads
+  `provided` / `exported` from the list endpoints).
 - **Public endpoints** (`modules/public-content`): `GET /public/dictionary`,
   `/public/dictionary/filters`, `/public/language-learning`, `/public/language-learning/filters`.
   The dictionary is organised by concept (recordings, primary image, up to 6 related words
