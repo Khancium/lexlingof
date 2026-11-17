@@ -14,6 +14,7 @@ import {
   type Language,
   type NamedOption,
   type PublishableRecording,
+  type PublishedText,
   type PublishingConceptItem,
   type PublishingQueryParams,
   type PublishingSentenceItem,
@@ -176,74 +177,246 @@ function GrammarBulkAssign({
   );
 }
 
-/** One contributor's recording -- audio player, metadata badges, and the publish/unpublish toggle. Shared by the words and sentences tabs. `selectable` (words only) adds a checkbox for mass grammar assignment. */
+/** What the three text boxes hold while being edited -- strings, so an empty box is "". Converted to/from the API's null-for-none at the edges. */
+type TextDraft = { nativeText: string; romanization: string; ipa: string };
+
+function toDraft(text: PublishedText): TextDraft {
+  return { nativeText: text.nativeText ?? "", romanization: text.romanization ?? "", ipa: text.ipa ?? "" };
+}
+
+function fromDraft(draft: TextDraft): PublishedText {
+  return {
+    nativeText: draft.nativeText.trim() || null,
+    romanization: draft.romanization.trim() || null,
+    ipa: draft.ipa.trim() || null,
+  };
+}
+
+function sameText(a: PublishedText, b: PublishedText): boolean {
+  return a.nativeText === b.nativeText && a.romanization === b.romanization && a.ipa === b.ipa;
+}
+
+const textFieldClass =
+  "w-full rounded-lg bg-surface-card px-2.5 py-1.5 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand disabled:opacity-60";
+
+const TEXT_FIELDS: { key: keyof TextDraft; label: string; dir: "auto" | "ltr"; placeholder: string }[] = [
+  { key: "nativeText", label: "Native", dir: "auto", placeholder: "In its own script" },
+  { key: "romanization", label: "Roman", dir: "ltr", placeholder: "Latin-script spelling" },
+  { key: "ipa", label: "IPA", dir: "ltr", placeholder: "IPA transcription" },
+];
+
+/** Read-only: exactly what the contributor typed with their recording -- only the inputs they actually filled in. */
+function ProvidedTextPanel({ provided }: { provided: PublishableRecording["provided"] }) {
+  const entries: { label: string; value: string | null; dir: "auto" | "ltr" }[] = [
+    { label: "Native", value: provided.nativeText, dir: "auto" },
+    { label: "Roman", value: provided.romanization, dir: "ltr" },
+    { label: "IPA", value: provided.ipa, dir: "ltr" },
+    { label: "Notes", value: provided.notes, dir: "auto" },
+  ];
+  const filled = entries.filter((e) => e.value && e.value.trim().length > 0);
+  return (
+    <div className="space-y-1.5 rounded-lg bg-surface p-3 ring-1 ring-border">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Typed by the contributor</p>
+      {filled.length === 0 ? (
+        <p className="text-sm italic text-ink-muted">Nothing typed -- audio only.</p>
+      ) : (
+        <dl className="space-y-1">
+          {filled.map((e) => (
+            <div key={e.label} className="flex items-baseline gap-2">
+              <dt className="w-11 shrink-0 text-xs font-semibold text-ink-muted">{e.label}</dt>
+              {/* <bdi> isolates the text's own direction without right-aligning the whole row, which would strand an RTL Native value at the far edge away from its label. */}
+              <dd className="min-w-0 flex-1 break-words text-sm text-ink">
+                <bdi dir={e.dir}>{e.value}</bdi>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The Native / Roman / IPA text the public API exports for this recording -- starts as the contributor's own
+ * and is whatever the admin types here. A blank box exports as nothing for that field (so a wrong IPA can be
+ * dropped); "Use contributor's text" goes back to exporting what they typed. For a recording that isn't
+ * published yet the boxes are edited first and saved by the Publish button, so nothing goes live uncorrected.
+ */
+function ExportTextPanel({
+  recording,
+  draft,
+  onChange,
+  dirty,
+  busy,
+  onSave,
+  onReset,
+  onCopyProvided,
+  canCopyProvided,
+}: {
+  recording: PublishableRecording;
+  draft: TextDraft;
+  onChange: (key: keyof TextDraft, value: string) => void;
+  dirty: boolean;
+  busy: boolean;
+  onSave: () => void;
+  onReset: () => void;
+  onCopyProvided: () => void;
+  canCopyProvided: boolean;
+}) {
+  return (
+    <div className="space-y-2 rounded-lg bg-surface p-3 ring-1 ring-border">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-muted">Exported to dictionary &amp; learning apps</p>
+        {recording.isPublished ? (
+          <span className="rounded-full bg-brand-light px-2 py-0.5 text-[11px] font-semibold text-brand-dark">
+            {recording.exported.isCurated ? "Edited text" : "Contributor's text"}
+          </span>
+        ) : (
+          <span className="text-[11px] italic text-ink-muted">Applied when you publish</span>
+        )}
+        {canCopyProvided ? (
+          <button type="button" onClick={onCopyProvided} disabled={busy} className="ml-auto text-xs font-semibold text-brand hover:underline disabled:opacity-50">
+            Copy from contributor
+          </button>
+        ) : null}
+      </div>
+      {TEXT_FIELDS.map((f) => (
+        <label key={f.key} className="flex items-center gap-2">
+          <span className="w-11 shrink-0 text-xs font-semibold text-ink-muted">{f.label}</span>
+          <input
+            value={draft[f.key]}
+            onChange={(e) => onChange(f.key, e.target.value)}
+            dir={f.dir}
+            maxLength={2000}
+            disabled={busy}
+            placeholder={f.placeholder}
+            className={textFieldClass}
+          />
+        </label>
+      ))}
+      {recording.isPublished ? (
+        <div className="flex flex-wrap items-center gap-3 pt-1">
+          <button
+            type="button"
+            onClick={onSave}
+            disabled={busy || !dirty}
+            className="btn-duo bg-brand px-3 py-1.5 text-xs font-semibold text-ink-inverted hover:bg-brand-dark disabled:opacity-50"
+          >
+            {busy ? "..." : "Save text"}
+          </button>
+          {recording.exported.isCurated ? (
+            <button type="button" onClick={onReset} disabled={busy} className="text-xs font-semibold text-ink-muted hover:underline disabled:opacity-50">
+              Use contributor&apos;s text
+            </button>
+          ) : null}
+          {dirty ? <span className="text-[11px] italic text-ink-muted">Unsaved changes</span> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** One contributor's recording -- audio player, metadata badges, what they typed, the editable export text, and the publish/unpublish toggle. Shared by the words and sentences tabs. `selectable` (words only) adds a checkbox for mass grammar assignment. */
 function RecordingRow({
   recording,
-  onToggle,
-  isToggling,
+  busy,
+  onPublish,
+  onUnpublish,
+  onSaveText,
+  onResetText,
   selectable,
   selected,
   onToggleSelect,
 }: {
   recording: PublishableRecording;
-  onToggle: () => void;
-  isToggling: boolean;
+  busy: boolean;
+  /** `text` is passed only when the admin changed the export text before publishing. */
+  onPublish: (text?: PublishedText) => void;
+  onUnpublish: () => void;
+  onSaveText: (text: PublishedText) => void;
+  onResetText: () => void;
   selectable?: boolean;
   selected?: boolean;
   onToggleSelect?: () => void;
 }) {
   const hasGrammar = recording.grammaticalGender || recording.partOfSpeech || recording.grammaticalNumber;
+
+  const { nativeText, romanization, ipa } = recording.exported;
+  const [draft, setDraft] = useState<TextDraft>(() => toDraft(recording.exported));
+  // Follow the server's value after a save / reset / unpublish -- but not on every render, which would wipe what is being typed.
+  useEffect(() => {
+    setDraft(toDraft({ nativeText, romanization, ipa }));
+  }, [nativeText, romanization, ipa, recording.exported.isCurated]);
+
+  const dirty = !sameText(fromDraft(draft), { nativeText, romanization, ipa });
+  const provided = recording.provided;
+  const canCopyProvided = !sameText(fromDraft(draft), { nativeText: provided.nativeText, romanization: provided.romanization, ipa: provided.ipa });
+
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl bg-surface-card p-3">
-      {selectable ? (
-        <input
-          type="checkbox"
-          checked={selected ?? false}
-          onChange={onToggleSelect}
-          className="h-4 w-4 shrink-0 rounded border-border"
-          aria-label="Select this recording for mass grammar assignment"
-        />
-      ) : null}
-      <audio controls preload="none" src={recording.audioUrl} className="h-9 w-56" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-ink">
-          {recording.nativeText || <span className="italic text-ink-muted">(no text)</span>}
-        </p>
-        <p className="truncate text-xs text-ink-muted">{recording.contributorName}</p>
-      </div>
-      <div className="flex flex-wrap gap-1.5">
-        <StatusBadge status={recording.status} />
-        {recording.language ? <MetaBadge label={recording.language} /> : null}
-        {recording.dialect ? <MetaBadge label={recording.dialect} /> : null}
-        {recording.locationShared ? (
-          <>
-            {recording.city ? <MetaBadge label={recording.city} /> : null}
-            {recording.tribe ? <MetaBadge label={recording.tribe} /> : null}
-            {recording.village ? <MetaBadge label={recording.village} /> : null}
-          </>
-        ) : (
-          <span className="text-[11px] italic text-ink-muted">Location not shared</span>
-        )}
-        {hasGrammar ? (
-          <>
-            {recording.partOfSpeech ? <MetaBadge label={prettify(recording.partOfSpeech)} /> : null}
-            {recording.grammaticalGender ? <MetaBadge label={prettify(recording.grammaticalGender)} /> : null}
-            {recording.grammaticalNumber ? <MetaBadge label={prettify(recording.grammaticalNumber)} /> : null}
-          </>
+    <div className="space-y-3 rounded-xl bg-surface-card p-3">
+      <div className="flex flex-wrap items-center gap-3">
+        {selectable ? (
+          <input
+            type="checkbox"
+            checked={selected ?? false}
+            onChange={onToggleSelect}
+            className="h-4 w-4 shrink-0 rounded border-border"
+            aria-label="Select this recording for mass grammar assignment"
+          />
         ) : null}
+        <audio controls preload="none" src={recording.audioUrl} className="h-9 w-56" />
+        <p className="min-w-[7rem] flex-1 truncate text-sm font-semibold text-ink">{recording.contributorName}</p>
+        <div className="flex flex-wrap gap-1.5">
+          <StatusBadge status={recording.status} />
+          {recording.language ? <MetaBadge label={recording.language} /> : null}
+          {recording.dialect ? <MetaBadge label={recording.dialect} /> : null}
+          {recording.locationShared ? (
+            <>
+              {recording.city ? <MetaBadge label={recording.city} /> : null}
+              {recording.tribe ? <MetaBadge label={recording.tribe} /> : null}
+              {recording.village ? <MetaBadge label={recording.village} /> : null}
+            </>
+          ) : (
+            <span className="text-[11px] italic text-ink-muted">Location not shared</span>
+          )}
+          {hasGrammar ? (
+            <>
+              {recording.partOfSpeech ? <MetaBadge label={prettify(recording.partOfSpeech)} /> : null}
+              {recording.grammaticalGender ? <MetaBadge label={prettify(recording.grammaticalGender)} /> : null}
+              {recording.grammaticalNumber ? <MetaBadge label={prettify(recording.grammaticalNumber)} /> : null}
+            </>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={recording.isPublished ? onUnpublish : () => onPublish(dirty ? fromDraft(draft) : undefined)}
+          disabled={busy}
+          className={`btn-duo px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+            recording.isPublished
+              ? "btn-duo-secondary bg-surface text-ink hover:bg-border"
+              : "bg-brand text-ink-inverted hover:bg-brand-dark"
+          }`}
+        >
+          {busy ? "..." : recording.isPublished ? "Unpublish" : "Publish"}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={isToggling}
-        className={`btn-duo px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
-          recording.isPublished
-            ? "btn-duo-secondary bg-surface text-ink hover:bg-border"
-            : "bg-brand text-ink-inverted hover:bg-brand-dark"
-        }`}
-      >
-        {isToggling ? "..." : recording.isPublished ? "Unpublish" : "Publish"}
-      </button>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        <ProvidedTextPanel provided={provided} />
+        <ExportTextPanel
+          recording={recording}
+          draft={draft}
+          onChange={(key, value) => setDraft((prev) => ({ ...prev, [key]: value }))}
+          dirty={dirty}
+          busy={busy}
+          onSave={() => onSaveText(fromDraft(draft))}
+          onReset={onResetText}
+          onCopyProvided={() =>
+            setDraft(toDraft({ nativeText: provided.nativeText, romanization: provided.romanization, ipa: provided.ipa }))
+          }
+          canCopyProvided={canCopyProvided}
+        />
+      </div>
     </div>
   );
 }
@@ -395,31 +568,74 @@ export default function AdminPublishingPage() {
     });
   }
 
-  async function handleToggle(parentId: string, recording: PublishableRecording) {
-    setTogglingId(recording.id);
+  function patchRecording(recordingId: string, patch: Partial<PublishableRecording>) {
+    setRecordings((prev) => prev.map((r) => (r.id === recordingId ? { ...r, ...patch } : r)));
+  }
+
+  /** What a recording exports once nothing has been curated -- the contributor's own text. */
+  function contributorsText(r: PublishableRecording): PublishableRecording["exported"] {
+    return { nativeText: r.provided.nativeText, romanization: r.provided.romanization, ipa: r.provided.ipa, isCurated: false };
+  }
+
+  /** Runs one action on one recording row, keeping its buttons disabled meanwhile. */
+  async function withBusy(recordingId: string, action: () => Promise<void>) {
+    setTogglingId(recordingId);
     try {
-      if (tab === "words") {
-        if (recording.isPublished) await api.publishing.unpublishRecording(parentId, recording.id);
-        else await api.publishing.publishRecording(parentId, recording.id);
-      } else {
-        if (recording.isPublished) await api.publishing.unpublishTranslation(parentId, recording.id);
-        else await api.publishing.publishTranslation(parentId, recording.id);
-      }
-      setRecordings((prev) => prev.map((r) => (r.id === recording.id ? { ...r, isPublished: !r.isPublished } : r)));
-      load();
+      await action();
     } finally {
       setTogglingId(null);
     }
   }
 
+  // `text` is set only when the admin edited the export text before publishing; otherwise the contributor's own text is exported.
+  function handlePublish(parentId: string, recording: PublishableRecording, text?: PublishedText) {
+    return withBusy(recording.id, async () => {
+      if (tab === "words") await api.publishing.publishRecording(parentId, recording.id, text);
+      else await api.publishing.publishTranslation(parentId, recording.id, text);
+      patchRecording(recording.id, { isPublished: true, exported: text ? { ...text, isCurated: true } : recording.exported });
+      load();
+    });
+  }
+
+  function handleUnpublish(parentId: string, recording: PublishableRecording) {
+    // Unpublishing deletes the publication, and the edited export text lives on it -- so ask before throwing that away.
+    if (recording.exported.isCurated && !window.confirm("Unpublishing discards the Native / Roman / IPA text you edited for this recording. Continue?")) return;
+    return withBusy(recording.id, async () => {
+      if (tab === "words") await api.publishing.unpublishRecording(parentId, recording.id);
+      else await api.publishing.unpublishTranslation(parentId, recording.id);
+      patchRecording(recording.id, { isPublished: false, exported: contributorsText(recording) });
+      load();
+    });
+  }
+
+  function handleSaveText(parentId: string, recording: PublishableRecording, text: PublishedText) {
+    return withBusy(recording.id, async () => {
+      if (tab === "words") await api.publishing.setRecordingText(parentId, recording.id, text);
+      else await api.publishing.setTranslationText(parentId, recording.id, text);
+      patchRecording(recording.id, { exported: { ...text, isCurated: true } });
+    });
+  }
+
+  function handleResetText(parentId: string, recording: PublishableRecording) {
+    return withBusy(recording.id, async () => {
+      if (tab === "words") await api.publishing.resetRecordingText(parentId, recording.id);
+      else await api.publishing.resetTranslationText(parentId, recording.id);
+      patchRecording(recording.id, { exported: contributorsText(recording) });
+    });
+  }
+
   async function handleUnpublishAll(id: string) {
     const noun = tab === "words" ? "word" : "sentence";
-    if (!window.confirm(`Withdraw every published recording for this ${noun} from the public site?`)) return;
+    const hasEdits = expandedId === id && recordings.some((r) => r.isPublished && r.exported.isCurated);
+    const warning = hasEdits ? " The Native / Roman / IPA text you edited for them is discarded too." : "";
+    if (!window.confirm(`Withdraw every published recording for this ${noun} from the public site?${warning}`)) return;
     setUnpublishingId(id);
     try {
       if (tab === "words") await api.publishing.unpublishAllRecordings(id);
       else await api.publishing.unpublishAllTranslations(id);
-      if (expandedId === id) setRecordings((prev) => prev.map((r) => ({ ...r, isPublished: false, publicationId: null })));
+      if (expandedId === id) {
+        setRecordings((prev) => prev.map((r) => ({ ...r, isPublished: false, publicationId: null, exported: contributorsText(r) })));
+      }
       load();
     } finally {
       setUnpublishingId(null);
@@ -448,7 +664,8 @@ export default function AdminPublishingPage() {
         <p className="text-sm text-ink-muted">
           Choose which verified recordings appear on the public dictionary and language-learning site. A word or sentence can have several
           published recordings at once -- publish more than one to show different dialects side by side. Only words and sentences that have
-          actually been contributed for appear below.
+          actually been contributed for appear below. Each recording shows what its contributor typed (Native, Roman, IPA) beside the same
+          three fields as exported to dictionary and language-learning apps -- what you type there replaces the contributor&apos;s text in the feed.
         </p>
       </div>
 
@@ -638,8 +855,11 @@ export default function AdminPublishingPage() {
                           <RecordingRow
                             key={r.id}
                             recording={r}
-                            isToggling={togglingId === r.id}
-                            onToggle={() => handleToggle(id, r)}
+                            busy={togglingId === r.id}
+                            onPublish={(text) => handlePublish(id, r, text)}
+                            onUnpublish={() => handleUnpublish(id, r)}
+                            onSaveText={(text) => handleSaveText(id, r, text)}
+                            onResetText={() => handleResetText(id, r)}
                             selectable={tab === "words"}
                             selected={selectedRecordingIds.has(r.id)}
                             onToggleSelect={() => toggleSelectRecording(r.id)}

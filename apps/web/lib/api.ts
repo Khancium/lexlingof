@@ -1229,12 +1229,20 @@ export type PublishingQueryParams = {
   offset?: number;
 };
 
-/** One contributor's verified recording, as shown in the curation UI -- city/tribe/village are already null here unless that contributor opted in, same privacy gate the public API applies. */
-export type PublishableRecording = {
-  id: string;
+/** The three text fields exported to dictionary / language-learning apps -- Native script, Roman (romanization) and IPA. Null = none. */
+export type PublishedText = {
   nativeText: string | null;
   romanization: string | null;
   ipa: string | null;
+};
+
+/** One contributor's recording, as shown in the curation UI -- city/tribe/village are already null here unless that contributor opted in, same privacy gate the public API applies. */
+export type PublishableRecording = {
+  id: string;
+  /** Exactly what the contributor typed (never edited). `notes` is a translation-only free-text field. */
+  provided: PublishedText & { notes: string | null };
+  /** What the public API exports for this recording: the contributor's text until an admin sets it (`isCurated`). For an unpublished recording, what would be exported if it were published now. */
+  exported: PublishedText & { isCurated: boolean };
   audioUrl: string;
   durationMs: number | null;
   contributorName: string;
@@ -1905,10 +1913,16 @@ export const api = {
       apiClient
         .get<{ items: PublishableRecording[] }>(`/api/v1/admin/publishing/concepts/${conceptId}/recordings`)
         .then((r) => r.data.items),
-    publishRecording: (conceptId: string, recordingId: string) =>
-      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
+    // `text` (optional) publishes with the admin's Native/Roman/IPA instead of the contributor's own.
+    publishRecording: (conceptId: string, recordingId: string, text?: PublishedText) =>
+      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`, text),
     unpublishRecording: (conceptId: string, recordingId: string) =>
       apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}`),
+    // Edits the exported text of an already-published recording; reset returns it to the contributor's own text.
+    setRecordingText: (conceptId: string, recordingId: string, text: PublishedText) =>
+      apiClient.put(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}/text`, text),
+    resetRecordingText: (conceptId: string, recordingId: string) =>
+      apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings/${recordingId}/text`),
     // Withdraws the whole concept from the public dictionary at once.
     unpublishAllRecordings: (conceptId: string) => apiClient.delete(`/api/v1/admin/publishing/concepts/${conceptId}/recordings`),
     // Applies to every id in recordingIds at once -- pass one for a single
@@ -1924,10 +1938,14 @@ export const api = {
       apiClient
         .get<{ items: PublishableRecording[] }>(`/api/v1/admin/publishing/sentences/${sentenceId}/translations`)
         .then((r) => r.data.items),
-    publishTranslation: (sentenceId: string, translationId: string) =>
-      apiClient.put(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`),
+    publishTranslation: (sentenceId: string, translationId: string, text?: PublishedText) =>
+      apiClient.put(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`, text),
     unpublishTranslation: (sentenceId: string, translationId: string) =>
       apiClient.delete(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}`),
+    setTranslationText: (sentenceId: string, translationId: string, text: PublishedText) =>
+      apiClient.put(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}/text`, text),
+    resetTranslationText: (sentenceId: string, translationId: string) =>
+      apiClient.delete(`/api/v1/admin/publishing/sentences/${sentenceId}/translations/${translationId}/text`),
     // Withdraws the whole sentence from the public language-learning feed at once.
     unpublishAllTranslations: (sentenceId: string) => apiClient.delete(`/api/v1/admin/publishing/sentences/${sentenceId}/translations`),
   },
