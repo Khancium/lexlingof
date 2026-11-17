@@ -130,9 +130,9 @@ function ForumPageInner() {
                     <Image
                       src={post.concept.imageUrl}
                       alt=""
-                      width={96}
-                      height={96}
-                      className="h-20 w-20 shrink-0 rounded-lg object-cover"
+                      width={128}
+                      height={72}
+                      className="aspect-video w-32 shrink-0 rounded-lg object-cover"
                     />
                   ) : null}
                   <div>

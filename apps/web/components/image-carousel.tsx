@@ -10,16 +10,18 @@ import Image from "next/image";
  * indicators and desktop arrow buttons. Renders a single plain image with no
  * chrome at all when there's only one, so nothing changes for the common
  * case.
+ *
+ * Every slide is a 16:9 box (the ratio concept images are stored at), sized
+ * by the width available -- not a fixed height, which made the visible shape
+ * depend on screen width and cut the top and bottom off a wide image.
  */
 export function ImageCarousel({
   images,
   alt,
-  heightClassName = "h-56",
   roundedClassName = "sm:rounded-2xl",
 }: {
   images: { id: string; publicUrl: string }[];
   alt: string;
-  heightClassName?: string;
   roundedClassName?: string;
 }) {
   const trackRef = useRef<HTMLDivElement>(null);
@@ -39,7 +41,7 @@ export function ImageCarousel({
 
   if (images.length === 0) {
     return (
-      <div className={`flex w-full items-center justify-center bg-surface-card text-5xl ${heightClassName} ${roundedClassName}`}>
+      <div className={`flex aspect-video w-full items-center justify-center bg-surface-card text-5xl ${roundedClassName}`}>
         🖼️
       </div>
     );
@@ -47,7 +49,7 @@ export function ImageCarousel({
 
   if (images.length === 1) {
     return (
-      <div className={`relative w-full overflow-hidden ${heightClassName} ${roundedClassName}`}>
+      <div className={`relative aspect-video w-full overflow-hidden ${roundedClassName}`}>
         <Image src={images[0]!.publicUrl} alt={alt} fill sizes="100vw" className="object-cover" priority />
       </div>
     );
@@ -62,7 +64,7 @@ export function ImageCarousel({
         style={{ scrollbarWidth: "none" }}
       >
         {images.map((image, i) => (
-          <div key={image.id} className={`relative w-full shrink-0 snap-center ${heightClassName}`}>
+          <div key={image.id} className="relative aspect-video w-full shrink-0 snap-center">
             <Image src={image.publicUrl} alt={`${alt} (${i + 1} of ${images.length})`} fill sizes="100vw" className="object-cover" priority={i === 0} />
           </div>
         ))}

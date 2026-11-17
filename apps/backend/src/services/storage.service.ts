@@ -259,18 +259,21 @@ class StorageService {
   // directly (a cache hit, an email, a native mobile client).
   private static readonly IMAGE_WEBP_QUALITY = 82;
 
-  // Concept tiles and scene images are shown at fixed aspect ratios in the
-  // contribute UI -- 16:9 for both a concept's object photo and a scene's
-  // wide establishing shot. Letting arbitrary source dimensions through (the
-  // old behavior, `fit: "inside"`, only capped the longest edge and left the
-  // ratio whatever the source was) meant the frontend's fixed-ratio image
-  // boxes either letterboxed or stretched every image that didn't already
-  // happen to match. `fit: "cover"` crops to exactly the target ratio;
-  // `position: "attention"` is sharp's saliency-based smart crop (biased
-  // toward the most visually "interesting" region) rather than a naive
-  // centre crop, so it's a reasonable unattended default -- an admin who
-  // isn't happy with where it landed can still crop manually afterward
-  // (see cropAndUploadImage below).
+  // Every concept image and every scene image is stored at exactly 16:9
+  // (1600x900), and the UI shows them in 16:9 boxes. There is no other
+  // ratio: a stored image that isn't 16:9 gets cut to fit a box that is, so
+  // what the admin saw while cropping is not what a contributor sees.
+  // `fit: "cover"` crops to exactly the target ratio; `position: "attention"`
+  // is sharp's saliency-based smart crop (biased toward the most visually
+  // "interesting" region) rather than a naive centre crop, so it's a
+  // reasonable unattended default for a plain upload or a URL/Openverse/
+  // Wikimedia import.
+  //
+  // The same function stores an admin's MANUAL crop: the browser has already
+  // cut an exact 16:9 rectangle, so `cover` has nothing left to crop and the
+  // admin's framing survives untouched. Anything that arrives with another
+  // ratio (a direct API call, a stale cached admin page) is cropped to 16:9
+  // here rather than stretched, so no path can store a different ratio.
   private static readonly CONCEPT_IMAGE_SIZE = { width: 1600, height: 900 };
   private static readonly SCENE_IMAGE_SIZE = { width: 1600, height: 900 };
 
@@ -313,85 +316,6 @@ class StorageService {
   /** 16:9 -- scene establishing shots. */
   async uploadSceneImage(fileBuffer: Buffer, filename: string) {
     return this.uploadImageWithTargetRatio(fileBuffer, filename, StorageService.SCENE_IMAGE_SIZE);
-  }
-
-  /**
-   * Manual crop: the admin has already chosen the exact rectangle (client-side,
-   * against the image's own already-CORS-friendly Supabase URL or a freshly
-   * selected local file), so this re-encodes at the target ratio's resolution
-   * without re-cropping -- `fit: "fill"` because the incoming buffer is
-   * already cropped to the right ratio by the browser's canvas; resizing
-   * again with "cover" here would silently re-crop a manually-chosen
-   * rectangle, defeating the whole point of the manual step.
-   */
-  private async uploadPrecroppedImage(
-    fileBuffer: Buffer,
-    filename: string,
-    target: { width: number; height: number },
-  ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
-    const resized = await sharp(fileBuffer)
-      .rotate()
-      .resize({ width: target.width, height: target.height, fit: "fill" })
-      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
-      .toBuffer();
-
-    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
-
-    const { data, error } = await supabase.storage
-      .from(IMAGE_BUCKET)
-      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
-
-    if (error) {
-      throw error;
-    }
-
-    const publicUrl = this.getImagePublicUrl(data.path);
-
-    return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
-  }
-
-  // Concept images support free-form cropping (any rectangle, any ratio --
-  // see ImageCropper's aspectRatio=null mode), so unlike uploadPrecroppedImage
-  // this must NOT force the result to a fixed 16:9: the incoming buffer
-  // already has whatever aspect ratio the admin chose, and `fit: "fill"`
-  // would stretch it back toward 16:9, defeating the point. This only caps
-  // the longest edge (never upscales) and keeps the admin's own ratio.
-  private static readonly CONCEPT_IMAGE_MAX_DIMENSION = 1600;
-
-  private async uploadFreeformCroppedImage(
-    fileBuffer: Buffer,
-    filename: string,
-    maxDimension: number,
-  ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
-    const resized = await sharp(fileBuffer)
-      .rotate()
-      .resize({ width: maxDimension, height: maxDimension, fit: "inside", withoutEnlargement: true })
-      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
-      .toBuffer();
-
-    const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
-
-    const { data, error } = await supabase.storage
-      .from(IMAGE_BUCKET)
-      .upload(webpFilename, resized, { contentType: "image/webp", upsert: true });
-
-    if (error) {
-      throw error;
-    }
-
-    const publicUrl = this.getImagePublicUrl(data.path);
-
-    return { path: data.path, publicUrl, mimeType: "image/webp", fileSizeBytes: resized.byteLength };
-  }
-
-  /** Store a concept image the admin already free-form cropped client-side -- see uploadFreeformCroppedImage. */
-  async uploadPrecroppedConceptImage(fileBuffer: Buffer, filename: string) {
-    return this.uploadFreeformCroppedImage(fileBuffer, filename, StorageService.CONCEPT_IMAGE_MAX_DIMENSION);
-  }
-
-  /** Store a scene image the admin already cropped client-side -- see uploadPrecroppedImage. */
-  async uploadPrecroppedSceneImage(fileBuffer: Buffer, filename: string) {
-    return this.uploadPrecroppedImage(fileBuffer, filename, StorageService.SCENE_IMAGE_SIZE);
   }
 
   /**

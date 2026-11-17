@@ -211,9 +211,11 @@ function ScenePageInner() {
                 }`}
               >
                 {s.imageUrl ? (
-                  <Image src={s.imageUrl} alt="" width={96} height={96} className="h-24 w-24 rounded-lg object-cover" />
+                  <div className="relative aspect-video w-full overflow-hidden rounded-lg">
+                    <Image src={s.imageUrl} alt="" fill sizes="(min-width: 640px) 220px, 45vw" className="object-cover" />
+                  </div>
                 ) : (
-                  <div className="flex h-24 w-24 items-center justify-center rounded-lg bg-surface-card text-3xl">🖼️</div>
+                  <div className="flex aspect-video w-full items-center justify-center rounded-lg bg-surface-card text-3xl">🖼️</div>
                 )}
                 <span className="text-sm font-semibold text-ink">{s.title}</span>
                 {s.hasContributed ? <span className="text-xs text-brand-dark">✓ Contributed</span> : null}
@@ -242,11 +244,11 @@ function ScenePageInner() {
         <>
           {/* Negative margin cancels the page shell's own px-4/sm:px-6 so
              this reaches the true viewport edge on a phone. */}
-          <div className="relative -mx-4 h-64 overflow-hidden bg-surface sm:mx-0 sm:rounded-2xl">
+          <div className="relative -mx-4 aspect-video overflow-hidden bg-surface sm:mx-0 sm:rounded-2xl">
             {scene.imageUrl ? (
               <Image src={scene.imageUrl} alt={scene.title} fill sizes="100vw" className="object-cover" priority />
             ) : (
-              <div className="flex h-64 w-full items-center justify-center text-5xl">🖼️</div>
+              <div className="flex h-full w-full items-center justify-center text-5xl">🖼️</div>
             )}
             <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-lg font-bold text-white drop-shadow">
               {scene.title}

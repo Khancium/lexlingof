@@ -173,7 +173,7 @@ export default function AdminConceptsPage() {
 
   // A picked file is cropped client-side (16:9, matching the server's own
   // auto-crop target) before it ever reaches uploadConceptMedia -- the
-  // server still center-crops on top of this as a safety net, but starting
+  // server still crops to 16:9 on top of this as a safety net, but starting
   // from an admin-chosen crop means that safety net rarely has to do
   // anything, instead of always deciding the framing unattended.
   function handleFileSelected(conceptId: string, file: File | undefined) {
@@ -904,7 +904,7 @@ export default function AdminConceptsPage() {
                     <td colSpan={8} className="px-4 py-4">
                       <AdminMediaManager
                         itemId={concept.id}
-                        aspectRatio={null}
+                        aspectRatio={16 / 9}
                         outputWidth={1600}
                         outputHeight={900}
                         getMedia={api.admin.getConceptMedia}

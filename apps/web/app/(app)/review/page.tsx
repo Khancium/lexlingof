@@ -285,7 +285,7 @@ function ReviewCard({
       </div>
 
       {item.detail.imageUrl ? (
-        <div className="relative h-40 w-full overflow-hidden rounded-lg">
+        <div className="relative mx-auto aspect-video w-full max-w-md overflow-hidden rounded-lg">
           <Image src={item.detail.imageUrl} alt="" fill sizes="100vw" className="object-cover" />
         </div>
       ) : null}
