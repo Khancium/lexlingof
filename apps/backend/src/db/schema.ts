@@ -2134,6 +2134,17 @@ export const publishedWordRecordings = pgTable(
       .notNull()
       .references(() => wordRecordings.id, { onDelete: "cascade" }),
     sortOrder: integer("sort_order").default(0).notNull(),
+    /**
+     * The Native / Roman / IPA text the public API exports for this publication, as curated by an admin in
+     * the Publishing module -- kept apart from the contributor's own input on word_recordings, which is
+     * never edited. `textEditedAt` null = never curated: the API exports the contributor's text. Non-null =
+     * the API exports exactly these three (a null one means "none"). Deleting the row (unpublish, or a
+     * retake withdrawing it) discards the curated text with it.
+     */
+    nativeText: text("native_text"),
+    romanText: text("roman_text"),
+    ipaText: text("ipa_text"),
+    textEditedAt: timestamp("text_edited_at", { withTimezone: true }),
     publishedBy: uuid("published_by")
       .notNull()
       .references(() => users.id),
@@ -2157,6 +2168,11 @@ export const publishedTranslations = pgTable(
       .notNull()
       .references(() => translations.id, { onDelete: "cascade" }),
     sortOrder: integer("sort_order").default(0).notNull(),
+    /** Curated Native / Roman / IPA export text -- same meaning as on publishedWordRecordings. */
+    nativeText: text("native_text"),
+    romanText: text("roman_text"),
+    ipaText: text("ipa_text"),
+    textEditedAt: timestamp("text_edited_at", { withTimezone: true }),
     publishedBy: uuid("published_by")
       .notNull()
       .references(() => users.id),

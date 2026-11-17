@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 
 import { requirePermission, verifyToken } from "../../middleware/auth.js";
@@ -17,12 +17,18 @@ import {
   listSentencesForPublishing,
   publishTranslation,
   publishWordRecording,
+  resetPublishedTranslationText,
+  resetPublishedWordText,
+  setPublishedTranslationText,
+  setPublishedWordText,
   setRecordingsGrammar,
   unpublishAllRecordingsForConcept,
   unpublishAllTranslationsForSentence,
   unpublishTranslation,
   unpublishWordRecording,
 } from "./publishing.service.js";
+import { writeAuditLog } from "../../services/audit-log.service.js";
+import { cleanText } from "../../utils/exported-text.js";
 
 // Same CSV-multi-value convention as admin.routes.ts's contributionsQuerySchema.
 function csvOf<T extends readonly [string, ...string[]]>(values: T) {
@@ -75,6 +81,24 @@ const recordingGrammarSchema = z.object({
   grammaticalNumber: z.enum(conceptGrammaticalNumber.enumValues).nullable().optional(),
 });
 
+// The Native / Roman / IPA text a publication exports. All three keys are required (null or "" = none)
+// so a client can never half-send it and leave the meaning of the missing field ambiguous.
+const exportedTextField = z
+  .string()
+  .max(2000)
+  .nullable()
+  .transform((v) => cleanText(v));
+const publishedTextSchema = z.object({
+  nativeText: exportedTextField,
+  romanization: exportedTextField,
+  ipa: exportedTextField,
+});
+
+/** Publish takes the text optionally: no body = export the contributor's own text. */
+function optionalPublishedText(body: unknown) {
+  return body === undefined || body === null ? undefined : publishedTextSchema.parse(body);
+}
+
 /**
  * Admin curation for the public dictionary (words) and public
  * language-learning feed (sentences) -- picking which verified contributor
@@ -95,9 +119,49 @@ export default async function publishingRoutes(fastify: FastifyInstance) {
     return { items: await getConceptRecordings(id) };
   });
 
+  // Records an admin's Native/Roman/IPA edit (before/after = what the public API exported) in the activity log.
+  function auditTextChange(
+    request: FastifyRequest,
+    action: "published_text_edit" | "published_text_reset",
+    resourceType: "word_recording" | "translation",
+    resourceId: string,
+    before: Record<string, unknown> | null,
+    after: Record<string, unknown>,
+  ) {
+    return writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action,
+      resourceType,
+      resourceId,
+      beforeState: before,
+      afterState: after,
+    });
+  }
+
+  // Optional body {nativeText, romanization, ipa}: publish with the admin's corrected text instead of the contributor's.
   fastify.put("/admin/publishing/concepts/:id/recordings/:recordingId", async (request, reply) => {
     const { id, recordingId } = recordingIdParamSchema.parse(request.params);
-    await publishWordRecording(id, recordingId, request.user!.id);
+    const text = optionalPublishedText(request.body);
+    await publishWordRecording(id, recordingId, request.user!.id, text);
+    if (text) await auditTextChange(request, "published_text_edit", "word_recording", recordingId, null, { published: true, ...text });
+    reply.code(204).send();
+  });
+
+  // Edits the Native/Roman/IPA an already-published recording exports. Blank = exports nothing for that field.
+  fastify.put("/admin/publishing/concepts/:id/recordings/:recordingId/text", async (request, reply) => {
+    const { id, recordingId } = recordingIdParamSchema.parse(request.params);
+    const text = publishedTextSchema.parse(request.body);
+    const { before, after } = await setPublishedWordText(id, recordingId, text);
+    await auditTextChange(request, "published_text_edit", "word_recording", recordingId, before, after);
+    reply.code(204).send();
+  });
+
+  // Back to exporting the contributor's own text.
+  fastify.delete("/admin/publishing/concepts/:id/recordings/:recordingId/text", async (request, reply) => {
+    const { id, recordingId } = recordingIdParamSchema.parse(request.params);
+    const { before, after } = await resetPublishedWordText(id, recordingId);
+    await auditTextChange(request, "published_text_reset", "word_recording", recordingId, before, after);
     reply.code(204).send();
   });
 
@@ -134,7 +198,24 @@ export default async function publishingRoutes(fastify: FastifyInstance) {
 
   fastify.put("/admin/publishing/sentences/:id/translations/:translationId", async (request, reply) => {
     const { id, translationId } = translationIdParamSchema.parse(request.params);
-    await publishTranslation(id, translationId, request.user!.id);
+    const text = optionalPublishedText(request.body);
+    await publishTranslation(id, translationId, request.user!.id, text);
+    if (text) await auditTextChange(request, "published_text_edit", "translation", translationId, null, { published: true, ...text });
+    reply.code(204).send();
+  });
+
+  fastify.put("/admin/publishing/sentences/:id/translations/:translationId/text", async (request, reply) => {
+    const { id, translationId } = translationIdParamSchema.parse(request.params);
+    const text = publishedTextSchema.parse(request.body);
+    const { before, after } = await setPublishedTranslationText(id, translationId, text);
+    await auditTextChange(request, "published_text_edit", "translation", translationId, before, after);
+    reply.code(204).send();
+  });
+
+  fastify.delete("/admin/publishing/sentences/:id/translations/:translationId/text", async (request, reply) => {
+    const { id, translationId } = translationIdParamSchema.parse(request.params);
+    const { before, after } = await resetPublishedTranslationText(id, translationId);
+    await auditTextChange(request, "published_text_reset", "translation", translationId, before, after);
     reply.code(204).send();
   });
 

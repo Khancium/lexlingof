@@ -25,6 +25,14 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { storageService } from "../../services/storage.service.js";
+import {
+  curatedColumns,
+  resolveExportedText,
+  uncuratedColumns,
+  type ExportedText,
+  type ProvidedText,
+  type PublishedTextInput,
+} from "../../utils/exported-text.js";
 import { HttpError } from "../../utils/http-error.js";
 
 /**
@@ -111,9 +119,14 @@ function sentenceIdsMatchingFilters(q: PublishingFilters) {
  */
 export type PublishableRecording = {
   id: string;
-  nativeText: string | null;
-  romanization: string | null;
-  ipa: string | null;
+  /** Exactly what the contributor typed -- shown for reference, never edited. `notes` is a translation-only free-text field. */
+  provided: ProvidedText & { notes: string | null };
+  /**
+   * The Native / Roman / IPA text the public API exports for this recording: the contributor's own until an
+   * admin curates it (`isCurated`), then the admin's. Meaningful for an unpublished recording too -- it is
+   * what would be exported if it were published now.
+   */
+  exported: ExportedText;
   audioUrl: string;
   durationMs: number | null;
   contributorName: string;
@@ -156,6 +169,30 @@ function applyLocationPrivacy<T extends { city: string | null; tribeName: string
     tribe: shared ? row.tribeName : null,
     village: shared ? row.villageName : null,
     locationShared: shared,
+  };
+}
+
+type TextRow = {
+  providedNative: string | null;
+  providedRoman: string | null;
+  providedIpa: string | null;
+  curatedNative: string | null;
+  curatedRoman: string | null;
+  curatedIpa: string | null;
+  textEditedAt: Date | null;
+};
+
+/** The contributor's own Native/Roman/IPA plus what the public API will export for it -- the same two blocks on every PublishableRecording, word or sentence. `notes` is a translation-only field. */
+function textFields(r: TextRow, notes: string | null): Pick<PublishableRecording, "provided" | "exported"> {
+  const provided = { nativeText: r.providedNative, romanization: r.providedRoman, ipa: r.providedIpa };
+  return {
+    provided: { ...provided, notes },
+    exported: resolveExportedText(provided, {
+      nativeText: r.curatedNative,
+      romanText: r.curatedRoman,
+      ipaText: r.curatedIpa,
+      textEditedAt: r.textEditedAt,
+    }),
   };
 }
 
@@ -222,14 +259,18 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
   const rows = await db
     .select({
       id: wordRecordings.id,
-      nativeText: wordRecordings.nativeWord,
-      romanization: wordRecordings.romanization,
-      ipa: wordRecordings.ipa,
+      providedNative: wordRecordings.nativeWord,
+      providedRoman: wordRecordings.romanization,
+      providedIpa: wordRecordings.ipa,
       audioStorageKey: audioFiles.storageKey,
       durationMs: wordRecordings.durationMs,
       status: contributions.status,
       publicationId: publishedWordRecordings.id,
       sortOrder: publishedWordRecordings.sortOrder,
+      curatedNative: publishedWordRecordings.nativeText,
+      curatedRoman: publishedWordRecordings.romanText,
+      curatedIpa: publishedWordRecordings.ipaText,
+      textEditedAt: publishedWordRecordings.textEditedAt,
       grammaticalGender: wordRecordings.grammaticalGender,
       partOfSpeech: wordRecordings.partOfSpeech,
       grammaticalNumber: wordRecordings.grammaticalNumber,
@@ -252,9 +293,7 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
   return Promise.all(
     rows.map(async (r) => ({
       id: r.id,
-      nativeText: r.nativeText,
-      romanization: r.romanization,
-      ipa: r.ipa,
+      ...textFields(r, null),
       audioUrl: await storageService.generateAudioPlayUrl(r.audioStorageKey),
       durationMs: r.durationMs,
       contributorName: r.contributorName,
@@ -272,7 +311,18 @@ export async function getConceptRecordings(conceptId: string): Promise<Publishab
   );
 }
 
-export async function publishWordRecording(conceptId: string, wordRecordingId: string, adminUserId: string): Promise<void> {
+/**
+ * Publishes one recording. With `text`, the admin's Native/Roman/IPA is saved in the same insert -- so a
+ * recording can be corrected BEFORE it goes live instead of exposing the contributor's raw text for the
+ * moment between "Publish" and "Save". Without `text` the contributor's own text is exported, as before.
+ * Publishing an already-published recording changes nothing unless `text` is given.
+ */
+export async function publishWordRecording(
+  conceptId: string,
+  wordRecordingId: string,
+  adminUserId: string,
+  text?: PublishedTextInput,
+): Promise<void> {
   const [recording] = await db
     .select({ id: wordRecordings.id })
     .from(wordRecordings)
@@ -280,10 +330,57 @@ export async function publishWordRecording(conceptId: string, wordRecordingId: s
     .limit(1);
   if (!recording) throw new HttpError(404, "NOT_FOUND", "Recording not found for this concept");
 
-  await db
-    .insert(publishedWordRecordings)
-    .values({ conceptId, wordRecordingId, publishedBy: adminUserId })
-    .onConflictDoNothing({ target: publishedWordRecordings.wordRecordingId });
+  const base = { conceptId, wordRecordingId, publishedBy: adminUserId };
+  if (text) {
+    const curated = curatedColumns(text);
+    await db
+      .insert(publishedWordRecordings)
+      .values({ ...base, ...curated })
+      .onConflictDoUpdate({ target: publishedWordRecordings.wordRecordingId, set: curated });
+  } else {
+    await db.insert(publishedWordRecordings).values(base).onConflictDoNothing({ target: publishedWordRecordings.wordRecordingId });
+  }
+}
+
+/** What a publication exported before and after a text edit/reset -- for the audit log. */
+export type PublishedTextChange = { before: ExportedText; after: ExportedText };
+
+async function loadWordPublication(conceptId: string, wordRecordingId: string) {
+  const [row] = await db
+    .select({
+      id: publishedWordRecordings.id,
+      providedNative: wordRecordings.nativeWord,
+      providedRoman: wordRecordings.romanization,
+      providedIpa: wordRecordings.ipa,
+      curatedNative: publishedWordRecordings.nativeText,
+      curatedRoman: publishedWordRecordings.romanText,
+      curatedIpa: publishedWordRecordings.ipaText,
+      textEditedAt: publishedWordRecordings.textEditedAt,
+    })
+    .from(publishedWordRecordings)
+    .innerJoin(wordRecordings, eq(wordRecordings.id, publishedWordRecordings.wordRecordingId))
+    .where(and(eq(publishedWordRecordings.wordRecordingId, wordRecordingId), eq(publishedWordRecordings.conceptId, conceptId)))
+    .limit(1);
+  if (!row) throw new HttpError(409, "NOT_PUBLISHED", "Publish this recording before editing the text it exports");
+  return row;
+}
+
+/** Sets the Native/Roman/IPA the public API exports for an already-published recording. A blank field exports as nothing (it does NOT fall back to the contributor's text -- use reset for that). */
+export async function setPublishedWordText(conceptId: string, wordRecordingId: string, text: PublishedTextInput): Promise<PublishedTextChange> {
+  const row = await loadWordPublication(conceptId, wordRecordingId);
+  const columns = curatedColumns(text);
+  await db.update(publishedWordRecordings).set(columns).where(eq(publishedWordRecordings.id, row.id));
+  const { provided, exported: before } = textFields(row, null);
+  return { before, after: resolveExportedText(provided, columns) };
+}
+
+/** Back to exporting the contributor's own text. */
+export async function resetPublishedWordText(conceptId: string, wordRecordingId: string): Promise<PublishedTextChange> {
+  const row = await loadWordPublication(conceptId, wordRecordingId);
+  const columns = uncuratedColumns();
+  await db.update(publishedWordRecordings).set(columns).where(eq(publishedWordRecordings.id, row.id));
+  const { provided, exported: before } = textFields(row, null);
+  return { before, after: resolveExportedText(provided, columns) };
 }
 
 export async function unpublishWordRecording(wordRecordingId: string): Promise<void> {
@@ -396,14 +493,19 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
   const rows = await db
     .select({
       id: translations.id,
-      nativeText: translations.nativeText,
-      romanization: translations.romanization,
-      ipa: translations.ipa,
+      providedNative: translations.nativeText,
+      providedRoman: translations.romanization,
+      providedIpa: translations.ipa,
+      notes: translations.notes,
       audioStorageKey: audioFiles.storageKey,
       durationMs: audioFiles.durationMs,
       status: contributions.status,
       publicationId: publishedTranslations.id,
       sortOrder: publishedTranslations.sortOrder,
+      curatedNative: publishedTranslations.nativeText,
+      curatedRoman: publishedTranslations.romanText,
+      curatedIpa: publishedTranslations.ipaText,
+      textEditedAt: publishedTranslations.textEditedAt,
       ...CONTRIBUTOR_SELECT,
     })
     .from(translations)
@@ -425,9 +527,7 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
   return Promise.all(
     withAudio.map(async (r) => ({
       id: r.id,
-      nativeText: r.nativeText,
-      romanization: r.romanization,
-      ipa: r.ipa,
+      ...textFields(r, r.notes),
       audioUrl: await storageService.generateAudioPlayUrl(r.audioStorageKey),
       durationMs: r.durationMs,
       contributorName: r.contributorName,
@@ -446,7 +546,13 @@ export async function getSentenceTranslations(sentenceId: string): Promise<Publi
   );
 }
 
-export async function publishTranslation(sentenceId: string, translationId: string, adminUserId: string): Promise<void> {
+/** Same contract as publishWordRecording, for a sentence translation -- `text` is the admin's Native/Roman/IPA, saved in the same insert. */
+export async function publishTranslation(
+  sentenceId: string,
+  translationId: string,
+  adminUserId: string,
+  text?: PublishedTextInput,
+): Promise<void> {
   const [translation] = await db
     .select({ id: translations.id })
     .from(translations)
@@ -454,10 +560,54 @@ export async function publishTranslation(sentenceId: string, translationId: stri
     .limit(1);
   if (!translation) throw new HttpError(404, "NOT_FOUND", "Translation not found for this sentence");
 
-  await db
-    .insert(publishedTranslations)
-    .values({ sentenceId, translationId, publishedBy: adminUserId })
-    .onConflictDoNothing({ target: publishedTranslations.translationId });
+  const base = { sentenceId, translationId, publishedBy: adminUserId };
+  if (text) {
+    const curated = curatedColumns(text);
+    await db
+      .insert(publishedTranslations)
+      .values({ ...base, ...curated })
+      .onConflictDoUpdate({ target: publishedTranslations.translationId, set: curated });
+  } else {
+    await db.insert(publishedTranslations).values(base).onConflictDoNothing({ target: publishedTranslations.translationId });
+  }
+}
+
+async function loadTranslationPublication(sentenceId: string, translationId: string) {
+  const [row] = await db
+    .select({
+      id: publishedTranslations.id,
+      providedNative: translations.nativeText,
+      providedRoman: translations.romanization,
+      providedIpa: translations.ipa,
+      curatedNative: publishedTranslations.nativeText,
+      curatedRoman: publishedTranslations.romanText,
+      curatedIpa: publishedTranslations.ipaText,
+      textEditedAt: publishedTranslations.textEditedAt,
+    })
+    .from(publishedTranslations)
+    .innerJoin(translations, eq(translations.id, publishedTranslations.translationId))
+    .where(and(eq(publishedTranslations.translationId, translationId), eq(publishedTranslations.sentenceId, sentenceId)))
+    .limit(1);
+  if (!row) throw new HttpError(409, "NOT_PUBLISHED", "Publish this translation before editing the text it exports");
+  return row;
+}
+
+/** Sets the Native/Roman/IPA the public API exports for an already-published translation. A blank field exports as nothing -- use reset to go back to the contributor's text. */
+export async function setPublishedTranslationText(sentenceId: string, translationId: string, text: PublishedTextInput): Promise<PublishedTextChange> {
+  const row = await loadTranslationPublication(sentenceId, translationId);
+  const columns = curatedColumns(text);
+  await db.update(publishedTranslations).set(columns).where(eq(publishedTranslations.id, row.id));
+  const { provided, exported: before } = textFields(row, null);
+  return { before, after: resolveExportedText(provided, columns) };
+}
+
+/** Back to exporting the contributor's own text. */
+export async function resetPublishedTranslationText(sentenceId: string, translationId: string): Promise<PublishedTextChange> {
+  const row = await loadTranslationPublication(sentenceId, translationId);
+  const columns = uncuratedColumns();
+  await db.update(publishedTranslations).set(columns).where(eq(publishedTranslations.id, row.id));
+  const { provided, exported: before } = textFields(row, null);
+  return { before, after: resolveExportedText(provided, columns) };
 }
 
 export async function unpublishTranslation(translationId: string): Promise<void> {

@@ -23,6 +23,7 @@ import {
   wordRecordings,
 } from "../../db/schema.js";
 import { storageService } from "../../services/storage.service.js";
+import { resolveExportedText } from "../../utils/exported-text.js";
 
 // Publishing is an admin allow-list keyed by recording id, so a published row
 // keeps pointing at its recording forever. Without these filters a recording
@@ -53,6 +54,27 @@ export type PublicRecording = {
 };
 
 export type PublicRelatedWord = { id: string; word: string };
+
+/**
+ * The Native / Roman / IPA a recording is exported with: the admin's curated text when one has set it in the
+ * Publishing module, otherwise the contributor's own (see utils/exported-text.ts). The field names are the
+ * feed's long-standing ones, so consumers need no change.
+ */
+function exportedTextOf(r: {
+  providedNative: string | null;
+  providedRoman: string | null;
+  providedIpa: string | null;
+  curatedNative: string | null;
+  curatedRoman: string | null;
+  curatedIpa: string | null;
+  textEditedAt: Date | null;
+}) {
+  const { nativeText, romanization, ipa } = resolveExportedText(
+    { nativeText: r.providedNative, romanization: r.providedRoman, ipa: r.providedIpa },
+    { nativeText: r.curatedNative, romanText: r.curatedRoman, ipaText: r.curatedIpa, textEditedAt: r.textEditedAt },
+  );
+  return { nativeText, romanization, ipa };
+}
 
 /** tribe/city/village are plain display-name strings here (as disclosed to the public), not internal uuids -- a visitor picks from the values getPublicDictionaryFilterOptions() returns, which are the same strings. */
 export type LocationFilter = { tribe?: string; city?: string; village?: string };
@@ -190,9 +212,13 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFi
     .select({
       conceptId: publishedWordRecordings.conceptId,
       id: wordRecordings.id,
-      nativeText: wordRecordings.nativeWord,
-      romanization: wordRecordings.romanization,
-      ipa: wordRecordings.ipa,
+      providedNative: wordRecordings.nativeWord,
+      providedRoman: wordRecordings.romanization,
+      providedIpa: wordRecordings.ipa,
+      curatedNative: publishedWordRecordings.nativeText,
+      curatedRoman: publishedWordRecordings.romanText,
+      curatedIpa: publishedWordRecordings.ipaText,
+      textEditedAt: publishedWordRecordings.textEditedAt,
       audioStorageKey: audioFiles.storageKey,
       sortOrder: publishedWordRecordings.sortOrder,
       grammaticalGender: wordRecordings.grammaticalGender,
@@ -224,9 +250,7 @@ async function getPublishedRecordingsByConcepts(conceptIds: string[], locationFi
       conceptId: r.conceptId,
       recording: {
         id: r.id,
-        nativeText: r.nativeText,
-        romanization: r.romanization,
-        ipa: r.ipa,
+        ...exportedTextOf(r),
         audioUrl: await storageService.generatePublicAudioPlayUrl(r.audioStorageKey),
         language: r.language,
         dialect: r.dialect,
@@ -406,9 +430,13 @@ async function getPublishedTranslationsBySentences(
     .select({
       sentenceId: publishedTranslations.sentenceId,
       id: translations.id,
-      nativeText: translations.nativeText,
-      romanization: translations.romanization,
-      ipa: translations.ipa,
+      providedNative: translations.nativeText,
+      providedRoman: translations.romanization,
+      providedIpa: translations.ipa,
+      curatedNative: publishedTranslations.nativeText,
+      curatedRoman: publishedTranslations.romanText,
+      curatedIpa: publishedTranslations.ipaText,
+      textEditedAt: publishedTranslations.textEditedAt,
       audioStorageKey: audioFiles.storageKey,
       sortOrder: publishedTranslations.sortOrder,
       ...CONTRIBUTOR_SELECT,
@@ -432,9 +460,7 @@ async function getPublishedTranslationsBySentences(
       sentenceId: r.sentenceId,
       translation: {
         id: r.id,
-        nativeText: r.nativeText,
-        romanization: r.romanization,
-        ipa: r.ipa,
+        ...exportedTextOf(r),
         audioUrl: r.audioStorageKey ? await storageService.generatePublicAudioPlayUrl(r.audioStorageKey) : "",
         language: r.language,
         dialect: r.dialect,
