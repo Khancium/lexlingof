@@ -136,9 +136,9 @@ export default function ForumPostPage() {
                   <Image
                     src={post.concept.imageUrl}
                     alt=""
-                    width={112}
-                    height={112}
-                    className="h-24 w-24 shrink-0 rounded-lg object-cover"
+                    width={160}
+                    height={90}
+                    className="aspect-video w-40 shrink-0 rounded-lg object-cover"
                   />
                 ) : null}
                 <div>

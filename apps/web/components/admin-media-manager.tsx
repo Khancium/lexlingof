@@ -28,7 +28,7 @@ export function AdminMediaManager({
   onChanged,
 }: {
   itemId: string;
-  aspectRatio: number | null;
+  aspectRatio: number;
   outputWidth: number;
   outputHeight: number;
   getMedia: (id: string) => Promise<MediaItem[]>;
@@ -100,9 +100,9 @@ export function AdminMediaManager({
                 // been re-hosted on Supabase Storage regardless of original
                 // source -- see the module docstring -- so next/image's
                 // allow-listed remotePatterns cover it.
-                <Image src={m.publicUrl} alt="" width={200} height={96} className="h-24 w-full object-cover" />
+                <Image src={m.publicUrl} alt="" width={320} height={180} className="aspect-video w-full object-cover" />
               ) : (
-                <div className="flex h-24 items-center justify-center bg-surface-card text-xs text-ink-muted">No preview</div>
+                <div className="flex aspect-video items-center justify-center bg-surface-card text-xs text-ink-muted">No preview</div>
               )}
               <div className="bg-surface-card p-1.5 text-[10px] text-ink-muted">
                 {m.isPrimary ? <span className="font-semibold text-brand">Primary</span> : null}

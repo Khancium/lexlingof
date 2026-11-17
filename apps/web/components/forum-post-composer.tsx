@@ -15,7 +15,7 @@ function AnchorPreview({ anchor }: { anchor: ForumAnchor }) {
       <div className="flex items-center gap-3 rounded-xl bg-surface-card p-3 text-sm">
         {anchor.concept.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- a short-lived preview, not worth next/image's overhead here
-          <img src={anchor.concept.imageUrl} alt="" className="h-20 w-20 shrink-0 rounded-lg object-cover" />
+          <img src={anchor.concept.imageUrl} alt="" className="aspect-video w-32 shrink-0 rounded-lg object-cover" />
         ) : null}
         <span className="text-ink">
           Discussing: <span className="text-base font-semibold">{anchor.concept.labelEnglish}</span>

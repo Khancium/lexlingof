@@ -939,15 +939,25 @@ vs. "created before 2020" (0, as expected) counts all matched.
 
 ### 3.15 Has-image badge, category/image-status filters, and image cropping
 
-> **Superseded in part (2026-11-11).** Concept images are no longer 1:1. Both concept and
-> scene uploads now auto-crop to **16:9 at 1600×900** (`CONCEPT_IMAGE_SIZE` /
-> `SCENE_IMAGE_SIZE` in `storage.service.ts`, still `fit: "cover"` + `position: "attention"`).
-> The concept manual cropper is now **free-form** (`aspectRatio={null}`: any rectangle, any
-> ratio) and is stored via `uploadFreeformCroppedImage` — longest edge capped at 1600,
-> `fit: "inside"`, never upscaled, admin's ratio kept — while scene crops stay fixed 16:9
-> (`fit: "fill"`). The "1:1", "1200×1200" and per-ratio statements below describe the
-> original implementation and are kept for the reasoning, not the numbers. Avatars are still
-> 1:1 / 512 px.
+> **Superseded in part (2026-11-11, again 2026-11-17).** Concept images are no longer 1:1.
+> **Every concept and scene image is 16:9 at 1600×900, with no other ratio anywhere**
+> (`CONCEPT_IMAGE_SIZE` / `SCENE_IMAGE_SIZE` in `storage.service.ts`). Plain uploads,
+> "From URL", Openverse/Wikimedia **and manual crops** all go through the one
+> `uploadConceptImage` / `uploadSceneImage` path (`fit: "cover"` + `position: "attention"`):
+> a crop that already arrives as 16:9 is left untouched, and anything else is cropped to
+> 16:9, never stretched. (For a few days the concept cropper was free-form and kept any
+> ratio — that mode is gone from the concept pages, and `uploadFreeformCroppedImage` /
+> `uploadPrecropped*` were removed.) The UI shows these images in 16:9 boxes
+> (`aspect-video`) rather than fixed-height boxes, whose shape changed with screen width and
+> cut the top and bottom off a wide image. The "1:1", "1200×1200" and per-ratio statements
+> below describe the original implementation and are kept for the reasoning, not the
+> numbers. Avatars are still 1:1 / 512 px. `ImageCropper` renders through a portal on
+> `<body>`: opened from inside the admin table's transformed card, `position: fixed` was
+> being resolved against that card and the dialog was clipped.
+>
+> Production audit 2026-11-17: all 658 stored images (638 concept, 20 scene) are exactly
+> 1600×900; the 4 that weren't (three 1200×900 free-form concept crops, one legacy
+> 1023×676 scene upload) were re-cropped, originals kept locally.
 
 - **Has-image badge**: a small "✓ IMAGE" / "NO IMAGE" tag on every concept/scene row —
   purely a frontend read of the `imageUrl` field the list endpoints already returned; no

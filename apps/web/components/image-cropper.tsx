@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 type CropBox = { x: number; y: number; width: number; height: number };
 
@@ -230,7 +231,14 @@ export function ImageCropper({
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
-  return (
+  // Rendered through a portal on <body>: the admin "Images -> Crop" button
+  // opens this from inside a table card that has a CSS transform, and a
+  // transformed ancestor turns `position: fixed` into "fixed to that card" --
+  // the dialog was clipped to the table, off-centre, and its resize handle
+  // could land off-screen. On <body> it always covers the viewport.
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onCancel}>
       <div className="card-duo w-full max-w-2xl rounded-2xl bg-surface p-5 shadow-lg" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center justify-between">
@@ -243,7 +251,7 @@ export function ImageCropper({
         <div
           ref={containerRef}
           className="relative mx-auto select-none overflow-hidden rounded-lg bg-black"
-          style={{ maxHeight: "60vh", width: "fit-content" }}
+          style={{ maxHeight: "60vh", width: "fit-content", maxWidth: "100%" }}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
@@ -256,7 +264,7 @@ export function ImageCropper({
             alt=""
             crossOrigin="anonymous"
             onLoad={handleImageLoad}
-            style={{ display: "block", maxHeight: "60vh", maxWidth: "80vw" }}
+            style={{ display: "block", maxHeight: "60vh", maxWidth: "100%" }}
             draggable={false}
           />
 
@@ -315,6 +323,7 @@ export function ImageCropper({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

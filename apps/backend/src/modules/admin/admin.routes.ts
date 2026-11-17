@@ -2952,9 +2952,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // Replaces this exact image with a manually-cropped version -- the crop
   // itself happened client-side (a canvas, against either a freshly-picked
   // local file or this same image's own already-CORS-enabled Supabase
-  // public URL), so the server's job is just to re-encode and swap it in,
-  // not to crop again. The row's id/isPrimary/source metadata are untouched;
-  // only the image itself and its storage key change.
+  // public URL), so the server's job is just to re-encode and swap it in.
+  // The crop is 16:9 like every concept image (see storage.service.ts); the
+  // server keeps that ratio even if a client sends another one. The row's
+  // id/isPrimary/source metadata are untouched; only the image itself and
+  // its storage key change.
   fastify.put(
     "/admin/concepts/:id/media/:mediaId/crop",
     { preHandler: requirePermission("concepts.manage") },
@@ -2975,7 +2977,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
       const { buffer, filename } = await readImageFile(request);
       const ext = safeExtension(filename) ?? "jpg";
       const storageFilename = `concepts/${id}/${randomUUID()}.${ext}`;
-      const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadPrecroppedConceptImage(buffer, storageFilename);
+      const { path, publicUrl, mimeType, fileSizeBytes } = await storageService.uploadConceptImage(buffer, storageFilename);
 
       const [updated] = await db
         .update(conceptMedia)
@@ -3601,7 +3603,7 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const { buffer, filename } = await readImageFile(request);
     const ext = safeExtension(filename) ?? "jpg";
     const storageFilename = `scenes/${id}/${randomUUID()}.${ext}`;
-    const { path, publicUrl, mimeType } = await storageService.uploadPrecroppedSceneImage(buffer, storageFilename);
+    const { path, publicUrl, mimeType } = await storageService.uploadSceneImage(buffer, storageFilename);
 
     const [updated] = await db
       .update(sceneMedia)

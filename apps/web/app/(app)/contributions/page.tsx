@@ -371,12 +371,12 @@ function ContributionsPageInner() {
                   <Image
                     src={item.detail.imageUrl}
                     alt=""
-                    width={56}
-                    height={56}
-                    className="h-14 w-14 flex-shrink-0 rounded-lg object-cover"
+                    width={96}
+                    height={54}
+                    className="aspect-video w-24 flex-shrink-0 rounded-lg object-cover"
                   />
                 ) : (
-                  <div className="flex h-14 w-14 flex-shrink-0 items-center justify-center rounded-lg bg-surface-card text-xl">
+                  <div className="flex aspect-video w-24 flex-shrink-0 items-center justify-center rounded-lg bg-surface-card text-xl">
                     {item.moduleType === "SCENE" ? "🖼️" : item.moduleType === "TRANSLATION" ? "🌐" : "🎙️"}
                   </div>
                 )}
