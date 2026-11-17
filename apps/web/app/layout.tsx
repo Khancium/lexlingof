@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Nunito } from "next/font/google";
 import "./globals.css";
 import AuthProvider from "@/components/providers";
+import { Analytics } from "@vercel/analytics/next";
 
 // Nunito is the closest freely-available match to Duolingo's rounded,
 // friendly "Feather Bold" branding font -- self-hosted via next/font so it
@@ -24,6 +25,7 @@ export default function RootLayout({
     <html lang="en" className={nunito.variable}>
       <body>
         <AuthProvider>{children}</AuthProvider>
+        <Analytics />
       </body>
     </html>
   );
