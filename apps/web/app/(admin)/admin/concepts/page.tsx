@@ -171,11 +171,11 @@ export default function AdminConceptsPage() {
     }
   }
 
-  // A picked file is cropped client-side (16:9, matching the server's own
-  // auto-crop target) before it ever reaches uploadConceptMedia -- the
-  // server still crops to 16:9 on top of this as a safety net, but starting
-  // from an admin-chosen crop means that safety net rarely has to do
-  // anything, instead of always deciding the framing unattended.
+  // A picked file is framed client-side (16:9, matching the server's own
+  // target) before it ever reaches uploadConceptMedia: either the whole
+  // picture fitted inside the frame (the default action) or a crop the admin
+  // chose. The server fits anything that arrives in another ratio into 16:9
+  // too, so no path cuts part of a picture off unless an admin asks for it.
   function handleFileSelected(conceptId: string, file: File | undefined) {
     if (!file) return;
     setCropTarget({ conceptId, url: URL.createObjectURL(file) });
@@ -946,7 +946,8 @@ export default function AdminConceptsPage() {
           aspectRatio={16 / 9}
           outputWidth={1600}
           outputHeight={900}
-          title="Crop image (16:9)"
+          title="Frame image (16:9)"
+          allowWholeImage
           onCancel={() => {
             URL.revokeObjectURL(cropTarget.url);
             setCropTarget(null);

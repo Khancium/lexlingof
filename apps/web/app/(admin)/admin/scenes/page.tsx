@@ -301,9 +301,10 @@ export default function AdminScenesPage() {
     }
   }
 
-  // A picked file is cropped client-side (16:9, matching the server's own
-  // auto-crop target) before it's staged into pendingUploads -- see the
-  // identical comment in the concepts admin page.
+  // A picked file is framed client-side (16:9, matching the server's own
+  // target: the whole picture fitted inside, or a crop the admin chose) before
+  // it's staged into pendingUploads -- see the identical comment in the
+  // concepts admin page.
   function selectFileForUpload(sceneId: string, file: File | undefined) {
     if (!file) return;
     setCropTarget({ sceneId, url: URL.createObjectURL(file) });
@@ -1246,7 +1247,8 @@ export default function AdminScenesPage() {
           aspectRatio={16 / 9}
           outputWidth={1600}
           outputHeight={900}
-          title="Crop image (16:9)"
+          title="Frame image (16:9)"
+          allowWholeImage
           onCancel={() => {
             URL.revokeObjectURL(cropTarget.url);
             setCropTarget(null);
