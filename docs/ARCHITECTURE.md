@@ -939,13 +939,24 @@ vs. "created before 2020" (0, as expected) counts all matched.
 
 ### 3.15 Has-image badge, category/image-status filters, and image cropping
 
-> **Superseded in part (2026-11-11, again 2026-11-17).** Concept images are no longer 1:1.
-> **Every concept and scene image is 16:9 at 1600×900, with no other ratio anywhere**
-> (`CONCEPT_IMAGE_SIZE` / `SCENE_IMAGE_SIZE` in `storage.service.ts`). Plain uploads,
-> "From URL", Openverse/Wikimedia **and manual crops** all go through the one
-> `uploadConceptImage` / `uploadSceneImage` path (`fit: "cover"` + `position: "attention"`):
-> a crop that already arrives as 16:9 is left untouched, and anything else is cropped to
-> 16:9, never stretched. (For a few days the concept cropper was free-form and kept any
+> **Superseded in part (2026-11-11, 2026-11-17, and 2026-11-19).** Concept images are no
+> longer 1:1. **Every concept and scene image is 16:9 at 1600×900, with no other ratio
+> anywhere** (`CONCEPT_IMAGE_SIZE` / `SCENE_IMAGE_SIZE` in `storage.service.ts`). Plain
+> uploads, "From URL", Openverse/Wikimedia **and manual crops** all go through the one
+> `uploadConceptImage` / `uploadSceneImage` path. **Since 2026-11-19 that path fits the whole
+> picture inside the frame instead of cropping it** (`fitInsideFrame` in
+> `utils/image-frame.ts`): the picture is scaled to just fit and centred, and the rest of the
+> 16:9 frame is filled with a soft blurred copy of the picture, so a portrait or panoramic
+> photo keeps its top, bottom and sides. A manual crop already arrives as exactly 16:9, fills
+> the frame, and is left untouched; anything else is fitted, never cropped or stretched.
+> (Before that it was `fit: "cover"` + `position: "attention"`, which cut off whatever didn't
+> fit and could not be undone, because the original is not kept — **images stored before
+> 2026-11-19 stay as cropped**; only a re-upload from the original restores the rest.) The
+> admin cropper's **"Use whole image"** button (the primary action when a file is picked)
+> builds the same fitted picture in the browser (`renderWholeImage` in
+> `image-cropper.tsx`); **"Crop to the box"** still cuts a region out on purpose. Re-cropping
+> an already-stored image (`AdminMediaManager`) offers only the crop, since a stored image
+> already is the frame. (For a few days the concept cropper was free-form and kept any
 > ratio — that mode is gone from the concept pages, and `uploadFreeformCroppedImage` /
 > `uploadPrecropped*` were removed.) The UI shows these images in 16:9 boxes
 > (`aspect-video`) rather than fixed-height boxes, whose shape changed with screen width and
@@ -975,7 +986,8 @@ vs. "created before 2020" (0, as expected) counts all matched.
   immediately after attaching a test image; a `categoryId` filter correctly matched only
   after inserting a real `scene_concepts` row pointing a scene at that category (the table
   was empty in this corpus, so a temporary row was inserted and removed to prove the join).
-- **Auto-crop, every source, every path**: `storageService.uploadConceptImage()` (1:1) and
+- **Auto-crop, every source, every path** *(historical -- see the note at the top of this
+  section: it is now "fit the whole picture", not a crop)*: `storageService.uploadConceptImage()` (1:1) and
   `uploadSceneImage()` (16:9) now both use `fit: "cover"` with `position: "attention"`
   (sharp's saliency-based smart crop) instead of the previous `fit: "inside"`, which only
   capped the longest edge and left whatever aspect ratio the source happened to have —

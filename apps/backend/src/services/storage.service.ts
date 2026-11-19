@@ -16,6 +16,7 @@ import sharp from "sharp";
 
 import type { contributionModule } from "../db/schema.js";
 import { HttpError } from "../utils/http-error.js";
+import { fitInsideFrame } from "../utils/image-frame.js";
 
 type ContributionModule = (typeof contributionModule.enumValues)[number];
 
@@ -263,17 +264,21 @@ class StorageService {
   // (1600x900), and the UI shows them in 16:9 boxes. There is no other
   // ratio: a stored image that isn't 16:9 gets cut to fit a box that is, so
   // what the admin saw while cropping is not what a contributor sees.
-  // `fit: "cover"` crops to exactly the target ratio; `position: "attention"`
-  // is sharp's saliency-based smart crop (biased toward the most visually
-  // "interesting" region) rather than a naive centre crop, so it's a
-  // reasonable unattended default for a plain upload or a URL/Openverse/
-  // Wikimedia import.
+  //
+  // The picture is FITTED into that frame, never cropped to it: the whole
+  // image is kept, scaled to just fit and centred, and the rest of the frame
+  // is filled with a soft blurred copy of the picture itself (see
+  // utils/image-frame.ts). A portrait or panoramic photo therefore keeps its
+  // top, bottom and sides instead of being cut to a strip. (Until 2026-11-19
+  // this was `fit: "cover"` with a saliency crop, which threw away whatever
+  // didn't fit and could not be undone -- the original is not kept.)
   //
   // The same function stores an admin's MANUAL crop: the browser has already
-  // cut an exact 16:9 rectangle, so `cover` has nothing left to crop and the
-  // admin's framing survives untouched. Anything that arrives with another
-  // ratio (a direct API call, a stale cached admin page) is cropped to 16:9
-  // here rather than stretched, so no path can store a different ratio.
+  // cut an exact 16:9 rectangle, which fills the frame completely, so there
+  // are no bars and the admin's framing survives untouched. Anything that
+  // arrives with another ratio (a direct API call, a stale cached admin page)
+  // is fitted, not cropped and not stretched, so no path can store a different
+  // ratio and none loses part of the picture.
   private static readonly CONCEPT_IMAGE_SIZE = { width: 1600, height: 900 };
   private static readonly SCENE_IMAGE_SIZE = { width: 1600, height: 900 };
 
@@ -282,16 +287,7 @@ class StorageService {
     filename: string,
     target: { width: number; height: number },
   ): Promise<{ path: string; publicUrl: string; mimeType: string; fileSizeBytes: number }> {
-    const resized = await sharp(fileBuffer)
-      .rotate() // apply EXIF orientation before stripping metadata below
-      .resize({
-        width: target.width,
-        height: target.height,
-        fit: "cover",
-        position: "attention",
-      })
-      .webp({ quality: StorageService.IMAGE_WEBP_QUALITY })
-      .toBuffer();
+    const resized = await fitInsideFrame(fileBuffer, target, StorageService.IMAGE_WEBP_QUALITY);
 
     const webpFilename = filename.replace(/\.[^./]+$/, "") + ".webp";
 
