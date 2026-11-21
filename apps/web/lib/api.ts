@@ -1403,12 +1403,16 @@ export const api = {
 
   categories: {
     getAll: () => apiClient.get<Category[]>("/api/v1/categories").then((r) => r.data),
-    getById: (id: string) => apiClient.get<Category>(`/api/v1/categories/${id}`).then((r) => r.data),
+    // id can originate from a URL query param a victim didn't type themselves
+    // (a shared link) -- encodeURIComponent so a crafted value like "../x"
+    // can't redirect this authenticated call to a different API path.
+    getById: (id: string) => apiClient.get<Category>(`/api/v1/categories/${encodeURIComponent(id)}`).then((r) => r.data),
   },
 
   concepts: {
     getAll: (params?: ConceptsQuery) => apiClient.get<ConceptsResponse>("/api/v1/concepts", { params }).then((r) => r.data),
-    getById: (id: string) => apiClient.get<ConceptDetail>(`/api/v1/concepts/${id}`).then((r) => r.data),
+    // Same reasoning as categories.getById above -- id can come from ?conceptId= in a shared link.
+    getById: (id: string) => apiClient.get<ConceptDetail>(`/api/v1/concepts/${encodeURIComponent(id)}`).then((r) => r.data),
     // Not in the original spec list for this file, but required for Module 1
     // ("shows current concept") -- there's no other way to pick a concept to
     // show. Backed by word.routes.ts's GET /concepts/next.
@@ -1454,7 +1458,8 @@ export const api = {
       limit?: number;
       offset?: number;
     }) => apiClient.get<SentencesResponse>("/api/v1/sentences", { params }).then((r) => r.data),
-    getSentenceById: (id: string) => apiClient.get<SentenceItem>(`/api/v1/sentences/${id}`).then((r) => r.data),
+    // Same reasoning as categories.getById above -- id can come from ?sentenceId= in a shared link.
+    getSentenceById: (id: string) => apiClient.get<SentenceItem>(`/api/v1/sentences/${encodeURIComponent(id)}`).then((r) => r.data),
     /** The category tiles (with my progress). Sentences are browsed by category, in order -- not at random. */
     getSentenceCategories: () => apiClient.get<SentenceCategoriesResponse>("/api/v1/sentence-categories").then((r) => r.data),
     getCategorySentences: (
@@ -1485,7 +1490,8 @@ export const api = {
     getDaily: () => apiClient.get<Scene>("/api/v1/scenes/daily").then((r) => r.data),
     getRandom: (excludeId?: string) =>
       apiClient.get<Scene>("/api/v1/scenes/random", { params: excludeId ? { exclude: excludeId } : undefined }).then((r) => r.data),
-    getById: (id: string) => apiClient.get<Scene>(`/api/v1/scenes/${id}`).then((r) => r.data),
+    // Same reasoning as categories.getById above -- id can come from ?sceneId= in a shared link.
+    getById: (id: string) => apiClient.get<Scene>(`/api/v1/scenes/${encodeURIComponent(id)}`).then((r) => r.data),
     submitContribution: (sceneId: string, data: SubmitSceneInput) =>
       apiClient.post<SubmitSceneResponse>(`/api/v1/scenes/${sceneId}/contributions`, data).then((r) => r.data),
   },
@@ -1525,7 +1531,8 @@ export const api = {
   forum: {
     getPosts: (params?: { limit?: number; offset?: number }) =>
       apiClient.get<ForumPostsResponse>("/api/v1/forum/posts", { params }).then((r) => r.data),
-    getPost: (id: string) => apiClient.get<ForumPostDetail>(`/api/v1/forum/posts/${id}`).then((r) => r.data),
+    // Same reasoning as categories.getById above -- id is the forum/[id] route param, directly URL-editable.
+    getPost: (id: string) => apiClient.get<ForumPostDetail>(`/api/v1/forum/posts/${encodeURIComponent(id)}`).then((r) => r.data),
     /**
      * conceptId/sentenceId attach a "discuss this" reference (set only by
      * the "Share to Forum" link on that item's own page, never picked from
@@ -1542,7 +1549,8 @@ export const api = {
       if (data.image) form.append("file", data.image);
       return apiClient.post<ForumPost>("/api/v1/forum/posts", form).then((r) => r.data);
     },
-    deletePost: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/forum/posts/${id}`).then((r) => r.data),
+    // Same reasoning as getPost above.
+    deletePost: (id: string) => apiClient.delete<{ id: string; deleted: boolean }>(`/api/v1/forum/posts/${encodeURIComponent(id)}`).then((r) => r.data),
     createComment: (postId: string, data: { body: string; parentCommentId?: string }) =>
       apiClient.post<ForumComment>(`/api/v1/forum/posts/${postId}/comments`, data).then((r) => r.data),
     deleteComment: (id: string) =>
