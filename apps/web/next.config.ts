@@ -34,7 +34,15 @@ const nextConfig: NextConfig = {
     // optimize them means even already-uploaded full-resolution originals
     // get resized/re-encoded on the fly for the small thumbnails they're
     // actually shown at, instead of shipping the original bytes.
-    remotePatterns: [{ protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" }],
+    //
+    // Pinned to this project's exact hostname, not "*.supabase.co" -- the
+    // wildcard matched every Supabase project on the internet, turning
+    // /_next/image into a free, unauthenticated image-resize proxy for
+    // anyone: an attacker could upload a large image to their own throwaway
+    // Supabase project and request it through this app's own /_next/image
+    // endpoint, at this app's expense (compute, and Vercel's own image-
+    // optimization billing), with no data exposed either way.
+    remotePatterns: [{ protocol: "https", hostname: "sjtyihpbrcrtlafxwedg.supabase.co", pathname: "/storage/v1/object/public/**" }],
   },
 
   async headers() {
