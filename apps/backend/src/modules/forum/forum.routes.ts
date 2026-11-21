@@ -70,7 +70,10 @@ async function readPostSubmission(
   const fields: Record<string, string> = {};
   let image: { buffer: Buffer; filename: string } | undefined;
 
-  for await (const part of request.parts()) {
+  // Stops busboy's stream at this route's own real limit, instead of reading
+  // every attached image fully into memory up to the shared global 110MB cap
+  // first -- same reasoning as readSuggestionSubmission in users.routes.ts.
+  for await (const part of request.parts({ limits: { fileSize: MAX_FORUM_IMAGE_BYTES + 1 } })) {
     if (part.type === "file") {
       if (!part.mimetype.startsWith("image/")) {
         throw new HttpError(400, "INVALID_FILE_TYPE", "Only image files are accepted");

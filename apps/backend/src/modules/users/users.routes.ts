@@ -184,7 +184,10 @@ async function readSuggestionSubmission(
   const fields: Record<string, string> = {};
   let image: { buffer: Buffer; filename: string } | undefined;
 
-  for await (const part of request.parts()) {
+  // Same reasoning as the avatar route above: stops busboy's stream at this
+  // route's own real limit, instead of reading every attached image fully
+  // into memory up to the shared global 110MB cap first.
+  for await (const part of request.parts({ limits: { fileSize: MAX_SUGGESTION_IMAGE_BYTES + 1 } })) {
     if (part.type === "file") {
       if (!part.mimetype.startsWith("image/")) {
         throw new HttpError(400, "INVALID_FILE_TYPE", "Only image files are accepted");
@@ -263,7 +266,11 @@ export default async function usersRoutes(fastify: FastifyInstance) {
   fastify.post("/me/avatar", { preHandler: verifyToken }, async (request) => {
     const userId = request.user!.id;
 
-    const file = await request.file();
+    // Stops busboy's stream at MAX_AVATAR_BYTES itself, rather than reading
+    // every upload fully into memory up to the shared global 110MB cap
+    // before this route ever got a chance to check its real, much smaller
+    // size limit.
+    const file = await request.file({ limits: { fileSize: MAX_AVATAR_BYTES + 1 } });
     if (!file) {
       throw new HttpError(400, "MISSING_FILE", "A multipart image file is required");
     }

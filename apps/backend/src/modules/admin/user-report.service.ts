@@ -151,9 +151,13 @@ function csvCell(value: unknown): string {
   if (value === null || value === undefined) return "";
   const text = value instanceof Date ? value.toISOString() : String(value);
   // Excel treats a leading =, +, - or @ as the start of a formula, so a name
-  // like "=cmd" would execute on open. Prefixing a single quote neutralises
-  // that without altering what the cell reads as.
-  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  // like "=cmd" would execute on open. A leading tab or carriage return is
+  // included too: some spreadsheet apps strip those from the start of a
+  // quoted cell before re-checking for a formula character, so "\t=cmd"
+  // would otherwise slip past this check only to become "=cmd" on open.
+  // Prefixing a single quote neutralises all of these without altering what
+  // the cell reads as.
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
   return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 

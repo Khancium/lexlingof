@@ -65,7 +65,17 @@ const segmentParamSchema = z.object({ id: z.string().uuid(), segId: z.string().u
 export default async function audioUploadRoutes(fastify: FastifyInstance) {
   fastify.post("/", { preHandler: [verifyToken, requireModule(2), blockIfRestricted] }, async (request, reply) => {
     const body = submitSchema.parse(request.body);
-    await assertOwnsAudioFile(request.user!.id, body.audioFileId);
+    await assertOwnsAudioFile(request.user!.id, body.audioFileId, "TRANSCRIPTION");
+
+    // Unlike word/translation, this module has no retake-in-place: every
+    // submission inserts a brand-new audio_uploads row, so there is no
+    // legitimate case where this audioFileId is already attached to one --
+    // any match here means it was already submitted once before.
+    const [existingUse] = await db.select({ id: audioUploads.id }).from(audioUploads).where(eq(audioUploads.audioFileId, body.audioFileId)).limit(1);
+    if (existingUse) {
+      throw new HttpError(409, "AUDIO_ALREADY_USED", "That audio file has already been submitted");
+    }
+
     const result = await submitAudioUpload(request.user!.id, body);
     reply.code(201).send(result);
   });

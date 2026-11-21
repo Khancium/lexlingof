@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "../../../db/index.js";
 import { concepts, pendingSubmissions, scenes, sentences } from "../../../db/schema.js";
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
+import { DEFAULT_MAX_FILE_SIZE_BYTES, WORD_MAX_FILE_SIZE_BYTES } from "../../../services/audio-file.service.js";
 import { requireModule } from "../../../services/feature-flags.service.js";
 import { HttpError } from "../../../utils/http-error.js";
 import { enqueueSubmission } from "../../../services/submission-buffer.service.js";
@@ -89,16 +90,29 @@ const sceneMetaSchema = z.object({
   clientType: z.string().optional(),
 });
 
-async function readMultipartSubmission(request: FastifyRequest): Promise<{ meta: unknown; audio: { buffer: Buffer; mimetype: string; filename: string } }> {
+async function readMultipartSubmission(
+  request: FastifyRequest,
+  maxAudioBytes: number,
+): Promise<{ meta: unknown; audio: { buffer: Buffer; mimetype: string; filename: string } }> {
   // request.file() only sees fields that arrived BEFORE the file part in the
   // stream -- if a client ever sends "file" before "meta" (field order is
   // caller-controlled, not guaranteed), file.fields.meta would silently be
   // undefined and this would 400 with MISSING_META even though meta was
   // sent. Iterating every part instead works regardless of order.
+  //
+  // maxAudioBytes stops busboy's stream at the CALLING route's own real limit
+  // (WORD_MAX_FILE_SIZE_BYTES -- about 500KB -- for /word, the much larger
+  // DEFAULT_MAX_FILE_SIZE_BYTES for the other three) instead of reading every
+  // submission fully into memory, and then into a pending_submissions row, up
+  // to the shared global 110MB cap (index.ts) -- the real per-module limit
+  // used to be enforced only later, in the background worker's call to
+  // storeAudioBuffer, by which point an oversized WORD upload had already
+  // been fully buffered and wasn't checked against its real ~500KB cap at all
+  // until long after accepting it.
   let audio: { buffer: Buffer; mimetype: string; filename: string } | undefined;
   let metaValue: string | undefined;
 
-  for await (const part of request.parts()) {
+  for await (const part of request.parts({ limits: { fileSize: maxAudioBytes + 1 } })) {
     if (part.type === "file") {
       audio = { buffer: await part.toBuffer(), mimetype: part.mimetype, filename: part.filename };
     } else if (part.fieldname === "meta") {
@@ -125,7 +139,7 @@ async function readMultipartSubmission(request: FastifyRequest): Promise<{ meta:
 
 export default async function bufferRoutes(fastify: FastifyInstance) {
   fastify.post("/word", { preHandler: [verifyToken, requireModule(1), blockIfRestricted] }, async (request, reply) => {
-    const { meta, audio } = await readMultipartSubmission(request);
+    const { meta, audio } = await readMultipartSubmission(request, WORD_MAX_FILE_SIZE_BYTES);
     const { durationMs, ...payload } = wordMetaSchema.parse(meta);
 
     const { id } = await enqueueSubmission({
@@ -139,7 +153,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/translation", { preHandler: [verifyToken, requireModule(3), blockIfRestricted] }, async (request, reply) => {
-    const { meta, audio } = await readMultipartSubmission(request);
+    const { meta, audio } = await readMultipartSubmission(request, DEFAULT_MAX_FILE_SIZE_BYTES);
     const { durationMs, ...payload } = translationMetaSchema.parse(meta);
 
     // Refuse a sentence that no longer exists (or is hidden) NOW. Without this a stale page -- e.g. one left open
@@ -162,7 +176,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/audio-upload", { preHandler: [verifyToken, requireModule(2), blockIfRestricted] }, async (request, reply) => {
-    const { meta, audio } = await readMultipartSubmission(request);
+    const { meta, audio } = await readMultipartSubmission(request, DEFAULT_MAX_FILE_SIZE_BYTES);
     const { durationMs, ...payload } = audioUploadMetaSchema.parse(meta);
 
     // Refuse an unreasonable segment list now, with a message the contributor can act on -- the
@@ -193,7 +207,7 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
   });
 
   fastify.post("/scene", { preHandler: [verifyToken, requireModule(4), blockIfRestricted] }, async (request, reply) => {
-    const { meta, audio } = await readMultipartSubmission(request);
+    const { meta, audio } = await readMultipartSubmission(request, DEFAULT_MAX_FILE_SIZE_BYTES);
     const { durationMs, ...payload } = sceneMetaSchema.parse(meta);
 
     const { id } = await enqueueSubmission({
@@ -272,7 +286,18 @@ export default async function bufferRoutes(fastify: FastifyInstance) {
         target = { id: null, label: (p.title as string | undefined)?.trim() || (p.recordingType as string | undefined) || "Audio recording" };
       }
 
-      return { ...row, target };
+      // pendingSubmissions.errorMessage is the RAW technical failure reason
+      // (a DrizzleQueryError's "Failed query: ..." text plus its .cause,
+      // including SQL and bound parameters -- see the catch block in
+      // submission-buffer.service.ts) kept for server-side debugging, not
+      // meant to ever leave the backend. It used to be returned to the
+      // owning user as-is; replaced here with the same safe, generic wording
+      // the failure notification already uses -- there's nothing the user
+      // could usefully do with the raw SQL anyway, since the only recovery
+      // this UI offers either way is "Submit Again".
+      const errorMessage = row.errorMessage ? "Something went wrong finishing this submission. Please record and submit it again." : null;
+
+      return { ...row, errorMessage, target };
     });
 
     return { items };

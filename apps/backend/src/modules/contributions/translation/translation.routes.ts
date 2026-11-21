@@ -1,9 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { db } from "../../../db/index.js";
+import { translations } from "../../../db/schema.js";
 import { blockIfRestricted, verifyToken } from "../../../middleware/auth.js";
 import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
 import { requireModule } from "../../../services/feature-flags.service.js";
+import { HttpError } from "../../../utils/http-error.js";
 import {
   getNextSentence,
   getSentenceCategoryTiles,
@@ -73,7 +77,27 @@ export default async function translationRoutes(fastify: FastifyInstance) {
   fastify.post("/sentences/:id/translation", { preHandler: [verifyToken, requireModule(3), blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = submitTranslationSchema.parse(request.body);
-    if (body.audioFileId) await assertOwnsAudioFile(request.user!.id, body.audioFileId);
+    if (body.audioFileId) await assertOwnsAudioFile(request.user!.id, body.audioFileId, "TRANSLATION");
+
+    // Same reasoning as word.routes.ts's equivalent check: a confirmed
+    // audioFileId could otherwise be POSTed to any number of OTHER sentences,
+    // each a fresh translations row paying points with no real recording
+    // beyond the first. The one legitimate case where it's already attached
+    // -- this same user resubmitting to the SAME sentence they already
+    // translated (a retake) -- is allowed through, since that's exactly what
+    // submitTranslation's own override path (keyed the same way
+    // uq_translations_user_sentence is: user + sentence) handles.
+    if (body.audioFileId) {
+      const [existingUse] = await db
+        .select({ userId: translations.userId, sentenceId: translations.sentenceId })
+        .from(translations)
+        .where(eq(translations.audioFileId, body.audioFileId))
+        .limit(1);
+      if (existingUse && (existingUse.userId !== request.user!.id || existingUse.sentenceId !== id)) {
+        throw new HttpError(409, "AUDIO_ALREADY_USED", "That audio file has already been submitted");
+      }
+    }
+
     await getSentenceForTranslation(request.user!.id, id); // 404 if the sentence is gone or hidden
     const result = await submitTranslation(request.user!.id, id, body);
     reply.code(201).send(result);

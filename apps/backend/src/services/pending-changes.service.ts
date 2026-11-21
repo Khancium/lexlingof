@@ -9,6 +9,13 @@ export type PendingAction = (typeof pendingChanges.$inferInsert)["action"];
 
 type VolunteerActor = { id: string; role: string };
 
+// A create/delete change can carry a base64-encoded image (~13 MB for a
+// 10 MB upload) in its payload. With no cap, a volunteer who never gets
+// auto-approved could queue an unbounded number of these while waiting for
+// review, bloating the database with no cost to them. Well above anything a
+// volunteer could legitimately have genuinely awaiting review at once.
+const MAX_PENDING_PER_VOLUNTEER = 50;
+
 export async function isAutoApproved(userId: string): Promise<boolean> {
   const [row] = await db.select({ autoApproveVolunteer: users.autoApproveVolunteer }).from(users).where(eq(users.id, userId)).limit(1);
   return row?.autoApproveVolunteer ?? false;
@@ -43,6 +50,18 @@ export async function gateVolunteerAction<T>(
 
   if (await isAutoApproved(actor.id)) {
     return { pending: false, result: await apply() };
+  }
+
+  const [countRow] = await db
+    .select({ count: sql<number>`count(*)`.mapWith(Number) })
+    .from(pendingChanges)
+    .where(and(eq(pendingChanges.volunteerId, actor.id), eq(pendingChanges.status, "pending")));
+  if ((countRow?.count ?? 0) >= MAX_PENDING_PER_VOLUNTEER) {
+    throw new HttpError(
+      429,
+      "TOO_MANY_PENDING_CHANGES",
+      `You already have ${MAX_PENDING_PER_VOLUNTEER} changes waiting for review -- wait for an admin to review some of them before submitting more.`,
+    );
   }
 
   const [row] = await db
