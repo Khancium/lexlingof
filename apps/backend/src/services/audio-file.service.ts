@@ -17,23 +17,51 @@ const SILENCE_TRIM_MODULES: ReadonlySet<ContributionModuleType> = new Set(["WORD
 
 /**
  * For the legacy direct-submit routes, which accept an `audioFileId` from the
- * client: the audio row must have been uploaded by the person submitting it.
+ * client: the audio row must have been uploaded by the person submitting it,
+ * for the module being submitted to, must have actually finished uploading,
+ * and must not already be attached to a contribution.
  *
- * Without this, anyone could attach someone else's audio to their own
- * contribution -- and ids are not secret (the review queue shows reviewers the
- * `audioFileId` of every contribution in it). Worse, retaking a recording
- * quarantines the old audio row and deletes its R2 object, so a reviewer could
- * attach a victim's audio as their own word recording, retake it, and destroy
- * the victim's original file.
+ * Without the ownership check, anyone could attach someone else's audio to
+ * their own contribution -- and ids are not secret (the review queue shows
+ * reviewers the `audioFileId` of every contribution in it). Worse, retaking a
+ * recording quarantines the old audio row and deletes its R2 object, so a
+ * reviewer could attach a victim's audio as their own word recording, retake
+ * it, and destroy the victim's original file.
+ *
+ * Without the other two checks here, a confirmed audioFileId could be POSTed
+ * to the wrong module's submit route, or before it was ever actually
+ * confirmed uploaded.
+ *
+ * This does NOT check whether the audio file is already attached to a
+ * contribution -- word_recordings and translations deliberately let the SAME
+ * user resubmit the SAME confirmed audioFileId to override their existing row
+ * in place (a retake), so a blanket "already attached" check here would
+ * reject that legitimate retry before it ever reached that logic. Each
+ * module's own submit route is instead responsible for ruling out reuse
+ * across a DIFFERENT target (see the module-specific checks in word.routes.ts
+ * and translation.routes.ts, and the blanket ones in audio-upload.routes.ts
+ * and scene.routes.ts, which have no retake concept at all).
  *
  * Both upload flows record the uploader (`uploaded_by`): the presigned flow in
  * audio.routes.ts and the buffered flow in storeAudioBuffer below. A missing
  * row is left for the submit service's own not-found handling.
  */
-export async function assertOwnsAudioFile(userId: string, audioFileId: string): Promise<void> {
-  const [row] = await db.select({ uploadedBy: audioFiles.uploadedBy }).from(audioFiles).where(eq(audioFiles.id, audioFileId)).limit(1);
-  if (row && row.uploadedBy !== userId) {
+export async function assertOwnsAudioFile(userId: string, audioFileId: string, expectedModule: ContributionModuleType): Promise<void> {
+  const [row] = await db
+    .select({ uploadedBy: audioFiles.uploadedBy, moduleType: audioFiles.moduleType, processingStatus: audioFiles.processingStatus })
+    .from(audioFiles)
+    .where(eq(audioFiles.id, audioFileId))
+    .limit(1);
+  if (!row) return;
+
+  if (row.uploadedBy !== userId) {
     throw new HttpError(403, "FORBIDDEN", "That audio file wasn't uploaded by you");
+  }
+  if (row.moduleType !== expectedModule) {
+    throw new HttpError(400, "AUDIO_MODULE_MISMATCH", "That audio file wasn't uploaded for this module");
+  }
+  if (row.processingStatus !== "uploaded") {
+    throw new HttpError(400, "AUDIO_NOT_READY", "That audio file hasn't finished uploading yet");
   }
 }
 

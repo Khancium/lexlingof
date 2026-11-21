@@ -110,7 +110,17 @@ async function sendReport(
 /* -------------------------------------------------------------------------- */
 
 async function readImageFile(request: FastifyRequest) {
-  const file = await request.file();
+  // Passing this module's own, much smaller limit here (rather than relying
+  // only on the buffer.byteLength check below) stops busboy's stream at
+  // MAX_IMAGE_BYTES itself -- without it, every upload (volunteers included)
+  // was read fully into memory up to the shared global 110MB cap (index.ts)
+  // before this function ever got a chance to check its size, so a handful
+  // of concurrent large uploads could exhaust the server's memory. Busboy
+  // throws its own (generically-worded) FILE_TOO_LARGE-equivalent once the
+  // stream is actually truncated; the +1 means a file of exactly
+  // MAX_IMAGE_BYTES doesn't trip that and still reaches this function's own
+  // nicer message below.
+  const file = await request.file({ limits: { fileSize: MAX_IMAGE_BYTES + 1 } });
   if (!file) {
     throw new HttpError(400, "MISSING_FILE", "A multipart image file is required");
   }
@@ -588,7 +598,10 @@ const MAX_BULK_FILE_BYTES = 5 * 1024 * 1024; // 5MB
  * regardless of which format the admin uploaded.
  */
 async function readBulkRows(request: FastifyRequest): Promise<Record<string, string>[]> {
-  const file = await request.file();
+  // Same reasoning as readImageFile's identical comment: without this, every
+  // bulk-import upload was read fully into memory up to the shared 110MB cap
+  // before this function's own, much smaller 5MB limit was ever checked.
+  const file = await request.file({ limits: { fileSize: MAX_BULK_FILE_BYTES + 1 } });
   if (!file) {
     throw new HttpError(400, "MISSING_FILE", "A CSV or JSON file is required");
   }
@@ -2406,7 +2419,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const body = adminSetCredentialsSchema.parse(request.body);
     const actor = request.user!;
 
-    const [target] = await db.select({ id: users.id, email: users.email, role: users.role }).from(users).where(eq(users.id, id)).limit(1);
+    const [target] = await db
+      .select({ id: users.id, email: users.email, role: users.role, deletedAt: users.deletedAt })
+      .from(users)
+      .where(eq(users.id, id))
+      .limit(1);
     if (!target) {
       throw new HttpError(404, "NOT_FOUND", "User not found");
     }
@@ -2416,6 +2433,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
     if (target.role === "admin" && actor.role !== "super_admin") {
       throw new HttpError(403, "FORBIDDEN", "Only a super_admin can change another admin's credentials");
+    }
+    // A deleted/banned account's email is deliberately kept on the row so it
+    // can never register again (account.service.ts). Changing the email here
+    // would free the original one up for a fresh sign-up -- the partial
+    // unique index (uq_users_email_active) only guards *active* rows -- so
+    // this would quietly undo a ban's permanence.
+    if (target.deletedAt) {
+      throw new HttpError(409, "ALREADY_DELETED", "This account has been deleted; its credentials can't be changed");
     }
 
     if (body.email && body.email.toLowerCase() !== target.email.toLowerCase()) {
@@ -4260,14 +4285,20 @@ export default async function adminRoutes(fastify: FastifyInstance) {
   // rows carry the key inside beforeState/afterState instead -- undoing
   // those looks the row up by scanning recent entries for a match on that
   // key rather than by resourceId.
-  const UNDO_PERMISSION_BY_RESOURCE: Record<string, string> = {
-    contribution: "contributions.manage",
-    concept: "concepts.manage",
-    scene: "scenes.manage",
-    sentence: "sentences.manage",
-    gamification_config: "system.manage",
-    feature_flag: "system.manage",
-  };
+  // A plain object literal would let a resourceType of "constructor" or
+  // "toString" pass the `!UNDO_PERMISSION_BY_RESOURCE[resourceType]` check
+  // below via the prototype chain (it resolves to a function, which is
+  // truthy) instead of the intended "no undo support" 400 -- a Map has no
+  // prototype-chain lookup, so an arbitrary string can only ever match a key
+  // actually set here.
+  const UNDO_PERMISSION_BY_RESOURCE = new Map<string, string>([
+    ["contribution", "contributions.manage"],
+    ["concept", "concepts.manage"],
+    ["scene", "scenes.manage"],
+    ["sentence", "sentences.manage"],
+    ["gamification_config", "system.manage"],
+    ["feature_flag", "system.manage"],
+  ]);
 
   const undoParamSchema = z.object({ resourceType: z.string().min(1), identifier: z.string().min(1) });
 
@@ -4285,6 +4316,28 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     const isKeyed = resourceType === "gamification_config" || resourceType === "feature_flag";
     const keyField = resourceType === "gamification_config" ? "configKey" : "flagKey";
 
+    // Known resource type (or "user", keyed separately below) and this role
+    // actually holds its permission -- checked BEFORE the audit-log lookup,
+    // not after, so an unauthorized caller (e.g. a contributor, who only
+    // fails this check) never learns anything from a 404-vs-400-vs-the-
+    // "Banning an account..." 400 further down -- those are an oracle for
+    // whether a given user id has prior audit history / was banned.
+    if (!isKeyed && resourceType !== "user") {
+      const permission = UNDO_PERMISSION_BY_RESOURCE.get(resourceType);
+      if (!permission) {
+        throw new HttpError(400, "NOT_REVERTIBLE", `"${resourceType}" has no undo support`);
+      }
+      if (!(await hasPermission(role, permission))) {
+        throw new HttpError(403, "FORBIDDEN", `required: ${permission}`);
+      }
+    }
+    if (isKeyed && !(await hasPermission(role, "system.manage"))) {
+      throw new HttpError(403, "FORBIDDEN", "required: system.manage");
+    }
+    // "user" is permission-checked further below, once the specific log row
+    // (and so the original action) is known -- granting admin vs. every
+    // other user action need different permissions.
+
     let log: typeof auditLogs.$inferSelect | undefined;
     if (isKeyed) {
       const candidates = await db
@@ -4295,8 +4348,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
         .limit(100);
       log = candidates.find((c) => (c.beforeState as Record<string, unknown> | null)?.[keyField] === identifier);
     } else {
-      if (resourceType !== "user" && !UNDO_PERMISSION_BY_RESOURCE[resourceType]) {
-        throw new HttpError(400, "NOT_REVERTIBLE", `"${resourceType}" has no undo support`);
+      // auditLogs.resourceId is a uuid column -- a non-UUID identifier would
+      // otherwise reach Postgres and come back as a raw 22P02 (500) instead
+      // of a clean "not found".
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(identifier)) {
+        throw new HttpError(404, "NOT_FOUND", "No logged change found to undo for this item");
       }
       [log] = await db
         .select()
@@ -4332,23 +4388,19 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     // "user" maps to two different permissions depending on which action
-    // produced this specific log row. Granting admin is super_admin-only, and
-    // so is anything else that would change a user's role, however it was
-    // logged; every other user action is users.manage.
-    const changesRole = resourceType === "user" && "role" in before;
-    const permission =
-      resourceType === "user"
-        ? originalAction === "superadmin_grant_admin" || changesRole
-          ? "system.manage"
-          : "users.manage"
-        : UNDO_PERMISSION_BY_RESOURCE[resourceType];
-    if (!permission || !(await hasPermission(role, permission))) {
-      throw new HttpError(403, "FORBIDDEN", `required: ${permission ?? "unknown"}`);
-    }
-
-    // Undo must not become a way around the moderation rules: the same
-    // who-may-moderate-whom check applies to reverting a user action.
+    // produced this specific log row -- not known until here, so (unlike every
+    // other resourceType, permission-checked up front above) it's checked
+    // now instead. Granting admin is super_admin-only, and so is anything
+    // else that would change a user's role, however it was logged; every
+    // other user action is users.manage.
     if (resourceType === "user") {
+      const changesRole = "role" in before;
+      const permission = originalAction === "superadmin_grant_admin" || changesRole ? "system.manage" : "users.manage";
+      if (!(await hasPermission(role, permission))) {
+        throw new HttpError(403, "FORBIDDEN", `required: ${permission}`);
+      }
+      // Undo must not become a way around the moderation rules: the same
+      // who-may-moderate-whom check applies to reverting a user action.
       await guardModerationTarget(request.user!, identifier);
     }
 
@@ -4557,7 +4609,14 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     }
 
     const newRole = enabled ? "volunteer" : "contributor";
-    await db.update(users).set({ role: newRole, updatedAt: new Date() }).where(eq(users.id, id));
+    // A revoke also clears auto-approve: it otherwise silently survived a
+    // revoke-then-later-regrant, so a volunteer who'd earned auto-approve
+    // once kept bypassing review indefinitely across the gap, with no admin
+    // ever having re-granted it the second time.
+    await db
+      .update(users)
+      .set(enabled ? { role: newRole, updatedAt: new Date() } : { role: newRole, autoApproveVolunteer: false, updatedAt: new Date() })
+      .where(eq(users.id, id));
     invalidateUserCache(id);
 
     await writeAuditLog({
@@ -4592,7 +4651,11 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     if (eligible.length === 0) return { updated: 0, skipped };
 
     const newRole = enabled ? "volunteer" : "contributor";
-    await db.update(users).set({ role: newRole, updatedAt: new Date() }).where(inArray(users.id, eligible.map((r) => r.id)));
+    // Same auto-approve reset as the single-item route above, and for the same reason.
+    await db
+      .update(users)
+      .set(enabled ? { role: newRole, updatedAt: new Date() } : { role: newRole, autoApproveVolunteer: false, updatedAt: new Date() })
+      .where(inArray(users.id, eligible.map((r) => r.id)));
     for (const row of eligible) invalidateUserCache(row.id);
 
     await writeAuditLogs(

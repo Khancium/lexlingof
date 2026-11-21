@@ -200,25 +200,28 @@ const submitDemographicsSchema = z.object({
     .refine((v) => calculateAge(v) >= MINIMUM_SIGNUP_AGE, `You must be at least ${MINIMUM_SIGNUP_AGE} years old to register`),
   gender: z.enum(GENDER_OPTIONS),
   motherTongue: z.enum(MOTHER_TONGUE_LANGUAGES),
-  tribe: z.string().trim().min(1),
+  tribe: z.string().trim().min(1).max(100),
   // Ordered root-to-leaf chain -- e.g. ["Yousafzai", "Akozai"] means Akozai
   // is a sub-tribe of Yousafzai. Empty/omitted means no sub-tribe at all.
-  subTribes: z.array(z.string().trim().min(1)).optional(),
-  country: z.string().trim().min(1),
-  city: z.string().trim().min(1),
-  village: z.string().trim().min(1),
-  quarter: z.string().trim().min(1).optional(),
-  dialect: z.string().trim().min(1).optional(),
+  // Capped at a depth no real tribal hierarchy approaches: each level is its
+  // own get-or-create round trip (resolveSubTribeChain), so an uncapped array
+  // let a single request drive an unbounded number of them.
+  subTribes: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
+  country: z.string().trim().min(1).max(100),
+  city: z.string().trim().min(1).max(100),
+  village: z.string().trim().min(1).max(100),
+  quarter: z.string().trim().min(1).max(100).optional(),
+  dialect: z.string().trim().min(1).max(100).optional(),
   educationLevel: z.enum(EDUCATION_LEVEL_OPTIONS).optional(),
-  profession: z.string().trim().min(1).optional(),
+  profession: z.string().trim().min(1).max(100).optional(),
 });
 
 const fillOptionalDemographicsSchema = z.object({
-  subTribes: z.array(z.string().trim().min(1)).optional(),
-  quarter: z.string().trim().min(1).optional(),
-  dialect: z.string().trim().min(1).optional(),
+  subTribes: z.array(z.string().trim().min(1).max(100)).max(10).optional(),
+  quarter: z.string().trim().min(1).max(100).optional(),
+  dialect: z.string().trim().min(1).max(100).optional(),
   educationLevel: z.enum(EDUCATION_LEVEL_OPTIONS).optional(),
-  profession: z.string().trim().min(1).optional(),
+  profession: z.string().trim().min(1).max(100).optional(),
 });
 
 /* -------------------------------------------------------------------------- */
@@ -382,6 +385,24 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
     const body = submitDemographicsSchema.parse(request.body);
     const userId = request.user!.id;
 
+    // This is the one-time signup submission -- once it succeeds, tribe,
+    // city, country and village are locked for the same reason
+    // /me/demographics/optional already locks its own fields ("provided
+    // once, not edited"). Without this, this route was a plain upsert: a
+    // contributor could change their tribe/city at will to match a specific
+    // reviewer, or an accomplice's, since peer review is scoped to exactly
+    // those two fields (reviews.service.ts's getReviewScope) -- letting two
+    // colluding accounts move in and out of the same scope to approve each
+    // other's contributions.
+    const [existing] = await db
+      .select({ userId: contributorDemographics.userId })
+      .from(contributorDemographics)
+      .where(eq(contributorDemographics.userId, userId))
+      .limit(1);
+    if (existing) {
+      throw new HttpError(409, "ALREADY_SUBMITTED", "Demographics have already been submitted and can't be changed here");
+    }
+
     // tribe->subTribe and village->quarter are the only real dependency
     // chains here (subTribe needs tribeId, quarter needs villageId) -- tribe,
     // village, and language are otherwise independent of each other, so the
@@ -416,20 +437,27 @@ export default async function demographicsRoutes(fastify: FastifyInstance) {
       updatedAt: new Date(),
     };
 
-    // The demographics upsert, the display-name update, and the
-    // contributor-profile upsert (the language picked here becomes the
-    // contributor's primary contribution language -- every module
-    // submission requires one, and asking for it again separately on a
-    // profile screen would be redundant with what was just chosen on this
-    // form) are independent of each other -- run concurrently instead of as
-    // three sequential round trips. .returning() on the demographics upsert
-    // also avoids a trailing SELECT of the row just written.
-    const [[demographicsRow]] = await Promise.all([
-      db
-        .insert(contributorDemographics)
-        .values(values)
-        .onConflictDoUpdate({ target: contributorDemographics.userId, set: values })
-        .returning(),
+    // First-write-wins: the `existing` check above is a plain read, so two
+    // concurrent submissions from the same (freshly-registered) user could
+    // both pass it before either has inserted -- onConflictDoNothing plus
+    // checking the (possibly empty) returning() is what actually makes this
+    // race-safe, the same way a unique constraint backs every other
+    // once-only write in this codebase. A lost race gets the same clean 409
+    // as the pre-check above, not a raw constraint-violation 500.
+    const [demographicsRow] = await db
+      .insert(contributorDemographics)
+      .values(values)
+      .onConflictDoNothing({ target: contributorDemographics.userId })
+      .returning();
+    if (!demographicsRow) {
+      throw new HttpError(409, "ALREADY_SUBMITTED", "Demographics have already been submitted and can't be changed here");
+    }
+
+    // These only make sense once the demographics insert above has actually
+    // won -- the display-name update and the contributor-profile upsert are
+    // independent of each other, so they still run concurrently, just after
+    // (not alongside) the insert they're conditioned on.
+    await Promise.all([
       // The signup form no longer collects a name -- this is the first real
       // name the user provides, so it becomes their display name too.
       db.update(users).set({ displayName: body.fullName, updatedAt: new Date() }).where(eq(users.id, userId)),

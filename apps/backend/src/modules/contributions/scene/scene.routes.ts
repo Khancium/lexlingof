@@ -1,9 +1,13 @@
 import type { FastifyInstance } from "fastify";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { db } from "../../../db/index.js";
+import { sceneContributions } from "../../../db/schema.js";
 import { blockIfRestricted, hasPermission, verifyToken } from "../../../middleware/auth.js";
 import { assertOwnsAudioFile } from "../../../services/audio-file.service.js";
 import { requireModule } from "../../../services/feature-flags.service.js";
+import { HttpError } from "../../../utils/http-error.js";
 import { queryBoolean } from "../../../utils/query-params.js";
 import { getDailyScene, getRandomScene, getSceneById, getScenes, submitSceneContribution } from "./scene.service.js";
 
@@ -80,7 +84,21 @@ export default async function sceneRoutes(fastify: FastifyInstance) {
   fastify.post("/:id/contributions", { preHandler: [verifyToken, requireModule(4), blockIfRestricted] }, async (request, reply) => {
     const { id } = idParamSchema.parse(request.params);
     const body = submitSchema.parse(request.body);
-    await assertOwnsAudioFile(request.user!.id, body.audioFileId);
+    await assertOwnsAudioFile(request.user!.id, body.audioFileId, "SCENE");
+
+    // Same reasoning as audio-upload.routes.ts: no retake-in-place here either
+    // (scene.service.ts always inserts a fresh scene_contributions row, even
+    // for a repeat description of the same scene), so any existing row with
+    // this audioFileId means it was already submitted once before.
+    const [existingUse] = await db
+      .select({ id: sceneContributions.id })
+      .from(sceneContributions)
+      .where(eq(sceneContributions.audioFileId, body.audioFileId))
+      .limit(1);
+    if (existingUse) {
+      throw new HttpError(409, "AUDIO_ALREADY_USED", "That audio file has already been submitted");
+    }
+
     const result = await submitSceneContribution(request.user!.id, id, body);
     reply.code(201).send(result);
   });

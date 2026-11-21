@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, ne, not, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNull, ne, not, sql } from "drizzle-orm";
 
 import { db } from "../../db/index.js";
 import {
@@ -327,12 +327,41 @@ export async function submitReview(reviewerId: string, reviewerRole: Role, data:
     // commits, then re-evaluates the WHERE against the now-decided row, finds
     // nothing, and gets the same 409 a late reviewer always got.
     const [stillPending] = await tx
-      .select({ id: contributions.id })
+      .select({ id: contributions.id, submittedAt: contributions.submittedAt })
       .from(contributions)
       .where(and(eq(contributions.id, contribution.id), eq(contributions.status, "pending")))
       .for("update");
     if (!stillPending) {
       throw new HttpError(409, "CONTRIBUTION_NOT_PENDING", "This contribution has already been reviewed");
+    }
+
+    // 3c. Same reviewer, same contribution, same pending episode: refuse. A
+    // "cannot_decide" leaves status at "pending" specifically so a DIFFERENT
+    // reviewer gets a real shot at it (see the decision switch below) -- but
+    // nothing stopped the SAME reviewer from calling this endpoint directly
+    // (bypassing the queue's own already-reviewed exclusion) over and over on
+    // the one contribution, inflating reviewsCompleted and the per-audio-file
+    // tallies with no extra points (those are already idempotency-keyed).
+    // Scoped to submittedAt rather than a blanket per-contribution check,
+    // because WORD and TRANSLATION retakes reuse the SAME contribution id and
+    // bump submittedAt (word.service.ts's overrideWordRecording) -- a review
+    // from BEFORE that bump is for a superseded version and must not block
+    // reviewing the corrected resubmission. Read from the just-locked row
+    // (not the pre-lock `contribution` above), so this can't race a
+    // concurrent retake into comparing against a stale submittedAt.
+    const [alreadyReviewed] = await tx
+      .select({ id: reviews.id })
+      .from(reviews)
+      .where(
+        and(
+          eq(reviews.contributionId, contribution.id),
+          eq(reviews.reviewerId, reviewerId),
+          gte(reviews.createdAt, stillPending.submittedAt),
+        ),
+      )
+      .limit(1);
+    if (alreadyReviewed) {
+      throw new HttpError(409, "ALREADY_REVIEWED", "You've already reviewed this contribution");
     }
 
     // 4. Status before the review (guaranteed "pending" by the lock above).

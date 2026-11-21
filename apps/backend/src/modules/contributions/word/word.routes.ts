@@ -111,7 +111,27 @@ export default async function wordRoutes(fastify: FastifyInstance) {
   // blockIfRestricted and trust whatever audioFileId the client sent.
   fastify.post("/contributions/word", { preHandler: [verifyToken, requireModule(1), blockIfRestricted] }, async (request, reply) => {
     const body = submitSchema.parse(request.body);
-    await assertOwnsAudioFile(request.user!.id, body.audioFileId);
+    await assertOwnsAudioFile(request.user!.id, body.audioFileId, "WORD");
+
+    // A confirmed audioFileId could otherwise be POSTed again to any number
+    // of OTHER concepts/synonym slots, each one a fresh word_recordings row
+    // paying points with no real recording behind it beyond the first. The
+    // one legitimate case where this audioFileId is already attached -- the
+    // SAME user resubmitting to the SAME concept+synonym slot they already
+    // recorded (a retake) -- is allowed through untouched, since that's
+    // exactly what submitWordRecording's own override path handles.
+    const [existingUse] = await db
+      .select({ userId: wordRecordings.userId, conceptId: wordRecordings.conceptId, synonymIndex: wordRecordings.synonymIndex })
+      .from(wordRecordings)
+      .where(eq(wordRecordings.audioFileId, body.audioFileId))
+      .limit(1);
+    if (
+      existingUse &&
+      (existingUse.userId !== request.user!.id || existingUse.conceptId !== body.conceptId || existingUse.synonymIndex !== body.synonymIndex)
+    ) {
+      throw new HttpError(409, "AUDIO_ALREADY_USED", "That audio file has already been submitted");
+    }
+
     const result = await submitWordRecording(request.user!.id, body);
     reply.code(201).send(result);
   });
