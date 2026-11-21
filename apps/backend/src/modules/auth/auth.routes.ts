@@ -43,6 +43,26 @@ function isMobileClient(request: FastifyRequest): boolean {
   return request.headers[MOBILE_CLIENT_HEADER] === "mobile";
 }
 
+// /refresh and /logout are the two routes that can act on the httpOnly
+// refresh-token cookie alone, with no other secret the caller has to know --
+// exactly the ambient-authority shape CORS does NOT defend: CORS only stops a
+// cross-site page's JS from READING the response, not from sending the
+// request (and having the browser attach the cookie) in the first place, so
+// a cross-site page could still silently force-logout a visitor, or,
+// combined with anything that reads the (here, unreadable) response, rotate
+// their session. This checks the Origin header the browser itself attaches
+// (not forgeable by page JS) against the same allow-list CORS already uses.
+// A request with NO Origin header (the mobile app's native networking layer,
+// which authenticates with its own body-supplied token anyway, not this
+// cookie) is left alone -- there is nothing here for it to compare against.
+const ALLOWED_ORIGINS = new Set(process.env.ALLOWED_ORIGINS?.split(",") ?? ["http://localhost:3000"]);
+function assertTrustedOrigin(request: FastifyRequest): void {
+  const origin = request.headers.origin;
+  if (origin && !ALLOWED_ORIGINS.has(origin)) {
+    throw new HttpError(403, "FORBIDDEN", "Cross-origin request refused");
+  }
+}
+
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
   newPassword: z.string().min(8),
@@ -115,6 +135,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
   const refreshSchema = z.object({ refreshToken: z.string().min(1).optional() });
 
   fastify.post("/refresh", async (request, reply) => {
+    assertTrustedOrigin(request);
     // Cookie first (the web app's only path); the body is mobile's.
     const token = request.cookies[REFRESH_COOKIE_NAME] ?? refreshSchema.parse(request.body ?? {}).refreshToken;
     if (!token) {
@@ -128,6 +149,7 @@ export default async function authRoutes(fastify: FastifyInstance) {
   const logoutSchema = z.object({ refreshToken: z.string().min(1).optional() });
 
   fastify.post("/logout", { preHandler: verifyToken }, async (request, reply) => {
+    assertTrustedOrigin(request);
     const token = request.cookies[REFRESH_COOKIE_NAME] ?? logoutSchema.parse(request.body ?? {}).refreshToken;
     if (token) {
       await authService.logout(token);

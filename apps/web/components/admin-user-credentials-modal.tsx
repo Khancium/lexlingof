@@ -70,6 +70,7 @@ export function AdminUserCredentialsModal({
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="off"
               className="w-full rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
             />
           </div>
@@ -89,6 +90,11 @@ export function AdminUserCredentialsModal({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Leave blank to keep the current password"
+              // "new-password", not "current-password" -- a browser offering to
+              // autofill the ADMIN's own saved password into another user's
+              // credentials field would silently set that user's password to
+              // the admin's own.
+              autoComplete="new-password"
               className="w-full rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border"
             />
           </div>
