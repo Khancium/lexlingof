@@ -15,12 +15,20 @@ import {
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
+import { Pagination } from "@/components/admin-pagination";
 import AudioRecorder from "@/components/audio-recorder";
 import { SuggestBetterImageButton } from "@/components/suggest-better-image-button";
 import { ImageCarousel } from "@/components/image-carousel";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Step = "categories" | "concepts" | "record";
+// Just enough to identify the open category and render its heading -- the
+// full Category object (icon/counts) only exists for the tiles step, and a
+// reload restores this from the URL alone, with no counts to show anyway.
+type ActiveCategory = { id: string; name: string } | null;
+
+const LIST_PAGE_SIZE = 50;
 
 export default function ConceptPage() {
   return (
@@ -42,16 +50,23 @@ function ConceptPageInner() {
   const userId = useAuthStore((state) => state.user?.id);
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
-  const [step, setStep] = useState<Step>("categories");
+  const [step, setStep] = useState<Step>(() => (readUrlParam("view", "categories") === "list" ? "concepts" : "categories"));
 
   const [categories, setCategories] = useState<Category[]>([]);
   const [categorySearch, setCategorySearch] = useState("");
-  const [category, setCategory] = useState<Category | null>(null);
+  const [category, setCategory] = useState<ActiveCategory>(() => {
+    const id = readUrlParam("categoryId", "");
+    return id ? { id, name: readUrlParam("categoryName", "") } : null;
+  });
   const [lastVisitedCategory, setLastVisitedCategory] = useState<Category | null>(null);
 
   const [concepts, setConcepts] = useState<ConceptListItem[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", LIST_PAGE_SIZE));
   const [loadingConcepts, setLoadingConcepts] = useState(false);
-  const [conceptSearch, setConceptSearch] = useState("");
+  const [conceptSearch, setConceptSearch] = useState(() => readUrlParam("search", ""));
+  const [debouncedConceptSearch, setDebouncedConceptSearch] = useState(() => readUrlParam("search", ""));
 
   const [concept, setConcept] = useState<ConceptDetail | null>(null);
   const [recordedSynonyms, setRecordedSynonyms] = useState<RecordedSynonyms | null>(null);
@@ -96,14 +111,33 @@ function ConceptPageInner() {
   // results for an earlier keystroke if its request happened to resolve
   // after the latest one's.
   const conceptsRequestId = useRef(0);
+  // conceptSearch and debouncedConceptSearch start equal (both read from the
+  // URL on mount) -- skip this effect's first run so it doesn't reset a
+  // just-restored offset back to 0 before anything's actually changed.
+  const isFirstSearchRun = useRef(true);
 
-  function loadConcepts(categoryId: string, search: string) {
+  // Keeps the URL in sync with the open category/search/page, so a reload
+  // (or a shared link) lands back on the same spot instead of resetting to
+  // the category tiles -- only meaningful once a category is open.
+  useUrlStateSync({
+    view: step === "concepts" ? "list" : undefined,
+    categoryId: step === "concepts" ? (category?.id ?? undefined) : undefined,
+    categoryName: step === "concepts" ? (category?.name ?? undefined) : undefined,
+    search: step === "concepts" ? debouncedConceptSearch : undefined,
+    offset: step === "concepts" ? offset : undefined,
+    limit: step === "concepts" ? limit : undefined,
+  });
+
+  function loadConcepts() {
+    if (!category) return;
     const requestId = ++conceptsRequestId.current;
     setLoadingConcepts(true);
     api.concepts
-      .getAll({ categoryId, search: search.trim() || undefined, limit: 100 })
+      .getAll({ categoryId: category.id, search: debouncedConceptSearch.trim() || undefined, limit, offset })
       .then((res) => {
-        if (requestId === conceptsRequestId.current) setConcepts(res.items);
+        if (requestId !== conceptsRequestId.current) return;
+        setConcepts(res.items);
+        setTotal(res.total);
       })
       .finally(() => {
         if (requestId === conceptsRequestId.current) setLoadingConcepts(false);
@@ -111,21 +145,32 @@ function ConceptPageInner() {
   }
 
   function openCategory(c: Category) {
-    setCategory(c);
+    setCategory({ id: c.id, name: c.nameEnglish });
     setLastVisitedCategory(c);
     setStep("concepts");
     setConceptSearch("");
-    loadConcepts(c.id, "");
+    setDebouncedConceptSearch("");
+    setOffset(0);
   }
 
-  // Re-query as the admin types, rather than filtering the already-fetched
-  // page client-side, since the backend already supports `search` and a
-  // category can hold more concepts than the 100-item page fetched above.
   useEffect(() => {
     if (step !== "concepts" || !category) return;
-    const timeout = setTimeout(() => loadConcepts(category.id, conceptSearch), 250);
-    return () => clearTimeout(timeout);
+    loadConcepts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, category, limit, offset, debouncedConceptSearch]);
+
+  // Re-query as the user types, rather than filtering the already-fetched
+  // page client-side, since a search can match concepts outside the current page.
+  useEffect(() => {
+    if (isFirstSearchRun.current) {
+      isFirstSearchRun.current = false;
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setDebouncedConceptSearch(conceptSearch);
+      setOffset(0);
+    }, 250);
+    return () => clearTimeout(timeout);
   }, [conceptSearch]);
 
   const openConcept = useCallback(async (item: ConceptListItem) => {
@@ -253,7 +298,7 @@ function ConceptPageInner() {
           </button>
         )}
         <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">
-          {step === "categories" ? "Record a Word" : category ? category.nameEnglish : "Record a Word"}
+          {step === "categories" ? "Record a Word" : category ? category.name : "Record a Word"}
         </h1>
       </div>
 
@@ -335,6 +380,17 @@ function ConceptPageInner() {
               ))}
             </div>
           )}
+          <Pagination
+            offset={offset}
+            limit={limit}
+            total={total}
+            onChange={setOffset}
+            onLimitChange={(n) => {
+              setLimit(n);
+              setOffset(0);
+            }}
+            showPageNumbers
+          />
         </>
       )}
 
