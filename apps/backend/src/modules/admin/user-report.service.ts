@@ -202,22 +202,31 @@ function sectionFields(row: UserReportRow) {
       },
       { label: "Status Reason", value: row.suspendedReason ?? row.restrictedReason },
     ] as Field[],
-    "Signup Details": [
-      { label: "Full Name", value: row.fullName },
-      { label: "Age", value: row.age },
-      { label: "Date of Birth", value: row.dateOfBirth },
-      { label: "Gender", value: row.gender },
-      { label: "Mother Tongue", value: row.motherTongue },
-      { label: "Dialect", value: row.dialect },
-      { label: "Tribe", value: row.tribeName },
-      { label: "Sub-Tribe", value: row.subTribeName },
-      { label: "Country", value: row.country },
-      { label: "City", value: row.city },
-      { label: "Village", value: row.villageName },
-      { label: "Quarter", value: row.quarterName },
-      { label: "Education", value: row.educationLevel },
-      { label: "Profession", value: row.profession },
-    ] as Field[],
+    // No contributorDemographics row at all (never submitted the onboarding
+    // form, as opposed to having answered it with some fields left blank --
+    // that row is written all-or-nothing, see demographics.routes.ts) reads
+    // back as every one of these fields being null. Collapsing that into one
+    // explanatory line instead of fourteen blank ones matches how the
+    // in-app admin user-detail modal already handles the same case.
+    "Signup Details":
+      row.fullName === null
+        ? ([{ label: "Status", value: "Has not completed the onboarding form yet" }] as Field[])
+        : ([
+            { label: "Full Name", value: row.fullName },
+            { label: "Age", value: row.age },
+            { label: "Date of Birth", value: row.dateOfBirth },
+            { label: "Gender", value: row.gender },
+            { label: "Mother Tongue", value: row.motherTongue },
+            { label: "Dialect", value: row.dialect },
+            { label: "Tribe", value: row.tribeName },
+            { label: "Sub-Tribe", value: row.subTribeName },
+            { label: "Country", value: row.country },
+            { label: "City", value: row.city },
+            { label: "Village", value: row.villageName },
+            { label: "Quarter", value: row.quarterName },
+            { label: "Education", value: row.educationLevel },
+            { label: "Profession", value: row.profession },
+          ] as Field[]),
     Activity: [
       { label: "Level", value: row.level },
       { label: "Total Points", value: row.totalPoints ?? 0 },
@@ -337,21 +346,22 @@ export function buildUsersPdf(rows: UserReportRow[], generatedBy: string): Promi
   return done;
 }
 
-/** Two-column label/value grid with a page break before any section that would otherwise be orphaned. */
+/** Two-column label/value grid with a page break before any section that would otherwise be orphaned. A single-field section (e.g. a one-line status in place of the usual grid) gets the full width instead of being squeezed into one half-width column. */
 function drawSection(doc: PDFKit.PDFDocument, title: string, fields: Field[], left: number, width: number) {
+  const colCount = fields.length === 1 ? 1 : 2;
   const rowHeight = 16;
-  const needed = 26 + Math.ceil(fields.length / 2) * rowHeight;
+  const needed = 26 + Math.ceil(fields.length / colCount) * rowHeight;
   if (doc.y + needed > doc.page.height - doc.page.margins.bottom) doc.addPage();
 
   doc.fillColor("#0f172a").font("Helvetica-Bold").fontSize(10).text(title.toUpperCase(), left, doc.y);
   doc.moveDown(0.3);
 
-  const colWidth = width / 2;
+  const colWidth = width / colCount;
   const labelWidth = 96;
   let y = doc.y;
 
   fields.forEach((field, i) => {
-    const col = i % 2;
+    const col = i % colCount;
     const x = left + col * colWidth;
     if (col === 0 && i > 0) y += rowHeight;
     doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(`${field.label}`, x, y, { width: labelWidth });
