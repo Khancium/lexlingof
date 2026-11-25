@@ -19,6 +19,7 @@ import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS } from "@/lib/demographics-cons
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
 import { AdminMultiSelect as MultiSelect } from "@/components/admin-multi-select";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 const REVIEW_DECISION_LABEL: Record<string, string> = {
   valid: "Correct",
@@ -102,12 +103,37 @@ const EMPTY_FILTERS: Filters = {
   profession: "",
 };
 
+function readUrlArray(key: string): string[] {
+  const raw = readUrlParam(key, "");
+  return raw ? raw.split(",").filter(Boolean) : [];
+}
+
+function readInitialFilters(): Filters {
+  return {
+    status: readUrlArray("status") as ContributionStatusValue[],
+    moduleType: readUrlArray("moduleType") as ModuleType[],
+    search: readUrlParam("search", ""),
+    userId: readUrlParam("userId", ""),
+    languageId: readUrlArray("languageId"),
+    dialectId: readUrlArray("dialectId"),
+    tribeId: readUrlArray("tribeId"),
+    subTribeId: readUrlArray("subTribeId"),
+    country: readUrlParam("country", ""),
+    city: readUrlParam("city", ""),
+    villageId: readUrlArray("villageId"),
+    quarterId: readUrlArray("quarterId"),
+    gender: readUrlArray("gender") as GenderOption[],
+    educationLevel: readUrlArray("educationLevel") as EducationLevel[],
+    profession: readUrlParam("profession", ""),
+  };
+}
+
 export default function AdminContributionsPage() {
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(readInitialFilters);
   const [items, setItems] = useState<AdminContributionListItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", DEFAULT_PAGE_SIZE));
   const [loading, setLoading] = useState(true);
   const [actioningId, setActioningId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -184,6 +210,26 @@ export default function AdminContributionsPage() {
     const timer = setTimeout(load, 300);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useUrlStateSync({
+    offset,
+    limit,
+    status: filters.status.join(","),
+    moduleType: filters.moduleType.join(","),
+    search: filters.search,
+    userId: filters.userId,
+    languageId: filters.languageId.join(","),
+    dialectId: filters.dialectId.join(","),
+    tribeId: filters.tribeId.join(","),
+    subTribeId: filters.subTribeId.join(","),
+    country: filters.country,
+    city: filters.city,
+    villageId: filters.villageId.join(","),
+    quarterId: filters.quarterId.join(","),
+    gender: filters.gender.join(","),
+    educationLevel: filters.educationLevel.join(","),
+    profession: filters.profession,
+  });
 
   useEffect(() => {
     api.admin.getUserOptions().then(setUsers).catch(() => setUsers([]));

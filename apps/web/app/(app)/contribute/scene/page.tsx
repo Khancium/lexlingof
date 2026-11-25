@@ -4,15 +4,20 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { api, getErrorMessage, type Scene } from "@/lib/api";
+import { api, getErrorMessage, type Category, type Scene } from "@/lib/api";
 import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { seededShuffle } from "@/lib/shuffle";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
+import { Pagination } from "@/components/admin-pagination";
 import AudioRecorder from "@/components/audio-recorder";
 import { SuggestBetterImageButton } from "@/components/suggest-better-image-button";
 
 type Recording = { file: File; durationMs: number; checksum: string };
-type Step = "browse" | "record";
+type Step = "categories" | "category" | "record";
+type ActiveCategory = { id: string; name: string } | null;
+
+const LIST_PAGE_SIZE = 24;
 
 export default function ScenePage() {
   return (
@@ -32,12 +37,28 @@ function ScenePageInner() {
   const userId = useAuthStore((state) => state.user?.id);
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
-  const [step, setStep] = useState<Step>("browse");
+  // The categories tile list. "All scenes" (no categoryId) is its own tile,
+  // not one of these -- see the categories step below.
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [loadingCategories, setLoadingCategories] = useState(true);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+
+  const [step, setStep] = useState<Step>(() => (readUrlParam("view", "categories") === "list" ? "category" : "categories"));
+  // null activeCategory while step === "category" means the "All scenes" tile was picked.
+  const [activeCategory, setActiveCategory] = useState<ActiveCategory>(() => {
+    const id = readUrlParam("categoryId", "");
+    if (!id) return null;
+    return { id, name: readUrlParam("categoryName", "") };
+  });
 
   const [scenes, setScenes] = useState<Scene[]>([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", LIST_PAGE_SIZE));
   const [loadingScenes, setLoadingScenes] = useState(true);
   const [scenesError, setScenesError] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(() => readUrlParam("search", ""));
+  const [debouncedSearch, setDebouncedSearch] = useState(() => readUrlParam("search", ""));
 
   const [scene, setScene] = useState<Scene | null>(null);
   const [loadingScene, setLoadingScene] = useState(false);
@@ -50,18 +71,45 @@ function ScenePageInner() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
-  // Guards against a slow, now-stale search response overwriting a faster,
-  // more recent one -- see the identical guard on the concept contribute page.
+  // Guards against a slow, now-stale response overwriting a faster, more
+  // recent one -- see the identical guard on the concept contribute page.
   const scenesRequestId = useRef(0);
+  // search and debouncedSearch start equal (both read from the URL on
+  // mount) -- skip this effect's first run so it doesn't reset a
+  // just-restored offset back to 0 before anything's actually changed.
+  const isFirstSearchRun = useRef(true);
 
-  function loadScenes(searchText: string) {
+  useEffect(() => {
+    api.categories
+      .getAll()
+      .then(setCategories)
+      .catch((err) => setCategoriesError(getErrorMessage(err, "Failed to load categories")))
+      .finally(() => setLoadingCategories(false));
+  }, []);
+
+  // Keeps the URL in sync with the open category/search/page, so a reload
+  // (or a shared link) lands back on the same spot instead of resetting to
+  // the category tiles -- only meaningful once a category (or "All scenes")
+  // is open, so the tiles step clears all of these from the URL.
+  useUrlStateSync({
+    view: step === "category" ? "list" : undefined,
+    categoryId: step === "category" ? (activeCategory?.id ?? undefined) : undefined,
+    categoryName: step === "category" ? (activeCategory?.name ?? undefined) : undefined,
+    search: step === "category" ? debouncedSearch : undefined,
+    offset: step === "category" ? offset : undefined,
+    limit: step === "category" ? limit : undefined,
+  });
+
+  function loadScenes() {
     const requestId = ++scenesRequestId.current;
     setLoadingScenes(true);
     setScenesError(null);
     api.scenes
-      .getAll({ search: searchText.trim() || undefined, limit: 100 })
+      .getAll({ categoryId: activeCategory?.id, search: debouncedSearch.trim() || undefined, limit, offset })
       .then((res) => {
-        if (requestId === scenesRequestId.current) setScenes(userId ? seededShuffle(res.items, userId) : res.items);
+        if (requestId !== scenesRequestId.current) return;
+        setScenes(userId ? seededShuffle(res.items, userId) : res.items);
+        setTotal(res.total);
       })
       .catch((err) => {
         if (requestId === scenesRequestId.current) setScenesError(getErrorMessage(err, "Failed to load scenes"));
@@ -72,17 +120,34 @@ function ScenePageInner() {
   }
 
   useEffect(() => {
-    loadScenes("");
+    if (step !== "category") return;
+    loadScenes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
+  }, [step, activeCategory, limit, offset, debouncedSearch, userId]);
 
-  // Re-query as the admin types, rather than filtering the already-fetched
-  // page client-side, since a search can match scenes outside the first 100.
+  // Re-query as the user types, rather than filtering the already-fetched
+  // page client-side, since a search can match scenes outside the current page.
   useEffect(() => {
-    const timeout = setTimeout(() => loadScenes(search), 250);
+    if (isFirstSearchRun.current) {
+      isFirstSearchRun.current = false;
+      return;
+    }
+    const timeout = setTimeout(() => {
+      setDebouncedSearch(search);
+      setOffset(0);
+    }, 250);
     return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
+
+  function openCategoryList(category: ActiveCategory) {
+    setActiveCategory(category);
+    setSearch("");
+    setDebouncedSearch("");
+    setOffset(0);
+    setScenes([]);
+    setTotal(0);
+    setStep("category");
+  }
 
   function openScene(s: Scene) {
     setScene(s);
@@ -165,7 +230,12 @@ function ScenePageInner() {
     if (nextItem) openScene(nextItem);
   }
 
-  if (step === "browse") {
+  function backFromRecord() {
+    setStep(activeCategory !== null || scenes.length > 0 ? "category" : "categories");
+  }
+
+  /* ------------------------------- categories ------------------------------- */
+  if (step === "categories") {
     return (
       <div className="mx-auto max-w-4xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -179,13 +249,6 @@ function ScenePageInner() {
           <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">Describe a Scene</h1>
         </div>
 
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search scenes..."
-          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
-        />
-
         <button
           onClick={() => loadDifferentScene().then(() => setStep("record"))}
           disabled={loadingScene}
@@ -193,6 +256,58 @@ function ScenePageInner() {
         >
           🎲 Pick a Random Scene
         </button>
+
+        {sceneError ? <p className="text-center text-red-600">{sceneError}</p> : null}
+
+        {loadingCategories ? (
+          <p className="text-ink-muted">Loading...</p>
+        ) : categoriesError ? (
+          <p className="text-red-600">{categoriesError}</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+            <button
+              onClick={() => openCategoryList(null)}
+              className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
+            >
+              <span className="text-4xl">🗂️</span>
+              <span className="font-semibold text-ink">All scenes</span>
+            </button>
+            {categories.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => openCategoryList({ id: c.id, name: c.nameEnglish })}
+                className="card-duo flex flex-col items-center gap-2 rounded-2xl bg-surface p-6 text-center shadow-sm transition hover:shadow-md"
+              >
+                <span className="text-4xl">{c.icon ?? "📦"}</span>
+                <span className="font-semibold text-ink">{c.nameEnglish}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  /* ------------------------------- one category ------------------------------- */
+  if (step === "category") {
+    return (
+      <div className="mx-auto max-w-4xl space-y-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+          <button
+            onClick={() => setStep("categories")}
+            className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
+          >
+            ← All categories
+          </button>
+          <h1 className="sm:min-w-0 sm:flex-1 sm:truncate text-2xl font-bold text-ink">{activeCategory?.name ?? "All scenes"}</h1>
+        </div>
+
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search scenes..."
+          className="w-full rounded-lg bg-surface-card px-4 py-3 text-ink placeholder:text-gray-400 ring-1 ring-border focus:ring-2 focus:ring-brand"
+        />
 
         {loadingScenes ? (
           <p className="text-ink-muted">Loading...</p>
@@ -223,14 +338,27 @@ function ScenePageInner() {
             ))}
           </div>
         )}
+
+        <Pagination
+          offset={offset}
+          limit={limit}
+          total={total}
+          onChange={setOffset}
+          onLimitChange={(n) => {
+            setLimit(n);
+            setOffset(0);
+          }}
+          showPageNumbers
+        />
       </div>
     );
   }
 
+  /* ---------------------------------- record ---------------------------------- */
   return (
     <div className="mx-auto max-w-2xl space-y-4">
       <button
-        onClick={() => setStep("browse")}
+        onClick={backFromRecord}
         className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
       >
         ← Back to scenes

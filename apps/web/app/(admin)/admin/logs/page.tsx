@@ -3,17 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, getErrorMessage, type AuditLog } from "@/lib/api";
 import { Pagination } from "@/components/admin-pagination";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 const DEFAULT_PAGE_SIZE = 50;
 
 export default function AdminLogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
-  const [search, setSearch] = useState("");
-  const [action, setAction] = useState("");
-  const [resourceType, setResourceType] = useState("");
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", DEFAULT_PAGE_SIZE));
+  const [search, setSearch] = useState(() => readUrlParam("search", ""));
+  const [action, setAction] = useState(() => readUrlParam("action", ""));
+  const [resourceType, setResourceType] = useState(() => readUrlParam("resourceType", ""));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -46,6 +47,8 @@ export default function AdminLogsPage() {
     const timeout = setTimeout(load, 250);
     return () => clearTimeout(timeout);
   }, [load]);
+
+  useUrlStateSync({ offset, limit, search, action, resourceType });
 
   return (
     <div className="space-y-6">

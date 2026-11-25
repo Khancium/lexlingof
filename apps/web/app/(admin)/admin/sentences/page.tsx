@@ -7,6 +7,7 @@ import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 const DEFAULT_PAGE_SIZE = 50;
 
@@ -31,18 +32,18 @@ export default function AdminSentencesPage() {
   const [categories, setCategories] = useState<AdminSentenceCategory[]>([]);
   const [sentences, setSentences] = useState<AdminSentence[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", DEFAULT_PAGE_SIZE));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [filterCategoryId, setFilterCategoryId] = useState("");
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [createdFrom, setCreatedFrom] = useState("");
-  const [createdTo, setCreatedTo] = useState("");
+  const [filterCategoryId, setFilterCategoryId] = useState(() => readUrlParam("categoryId", ""));
+  const [search, setSearch] = useState(() => readUrlParam("search", ""));
+  const [debouncedSearch, setDebouncedSearch] = useState(() => readUrlParam("search", ""));
+  const [createdFrom, setCreatedFrom] = useState(() => readUrlParam("createdFrom", ""));
+  const [createdTo, setCreatedTo] = useState(() => readUrlParam("createdTo", ""));
   // Volunteer-only "my own additions" filter -- also unlocks their per-row edit/delete buttons.
-  const [onlyMine, setOnlyMine] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(() => readUrlParam("mine", false));
 
   // Add one sentence: a category and all three languages.
   const [newCategoryId, setNewCategoryId] = useState("");
@@ -88,6 +89,8 @@ export default function AdminSentencesPage() {
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  useUrlStateSync({ offset, limit, categoryId: filterCategoryId, search: debouncedSearch, createdFrom, createdTo, mine: onlyMine });
 
   async function loadCategories() {
     try {
