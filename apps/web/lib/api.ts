@@ -212,6 +212,7 @@ export type UserProfile = {
   email: string;
   displayName: string;
   role: string;
+  createdAt: string;
   avatarUrl: string | null;
   level: ContributorLevel;
   totalPoints: number;

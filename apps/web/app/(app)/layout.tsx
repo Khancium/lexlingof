@@ -6,6 +6,14 @@ import { useAuthStore } from "@/lib/store";
 import { loadLevelThresholds } from "@/lib/level";
 import Nav from "@/components/nav";
 
+// Registration only ever asked for email/password -- onboarding (the real
+// name, demographics, primary language) was a separate step a user could
+// always abandon (browser Back, closing the tab) and still end up fully
+// inside the app with none of it ever submitted. Accounts created before
+// this gate existed are grandfathered in rather than retroactively locked
+// out of an app they were already using.
+const ONBOARDING_REQUIRED_SINCE = new Date("2026-11-25T10:41:20.000Z");
+
 // The root layout's AuthProvider already blocks rendering (full-screen
 // spinner) until the initial loadUser() call resolves, so by the time this
 // layout runs, isLoading is already false -- this only needs to redirect
@@ -14,17 +22,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const user = useAuthStore((state) => state.user);
   const router = useRouter();
 
+  const needsOnboarding =
+    !!user && !user.language && new Date(user.createdAt) >= ONBOARDING_REQUIRED_SINCE;
+
   useEffect(() => {
     if (!user) {
       router.replace("/login");
+    } else if (needsOnboarding) {
+      router.replace("/onboarding");
     }
-  }, [user, router]);
+  }, [user, needsOnboarding, router]);
 
   useEffect(() => {
     loadLevelThresholds();
   }, []);
 
-  if (!user) {
+  if (!user || needsOnboarding) {
     return null;
   }
 
