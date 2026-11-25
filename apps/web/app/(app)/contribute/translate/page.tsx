@@ -8,6 +8,7 @@ import { useContributorLanguage } from "@/lib/useContributorLanguage";
 import { useAuthStore } from "@/lib/store";
 import { Pagination } from "@/components/admin-pagination";
 import AudioRecorder from "@/components/audio-recorder";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 type Recording = { file: File; durationMs: number; checksum: string };
 type Draft = { transcription: string; romanization: string; ipa: string; recording: Recording | null };
@@ -58,7 +59,12 @@ function TranslatePageInner() {
   const { languageId, dialectId, isLoading: languageLoading } = useContributorLanguage();
   const autoLoadNext = useAuthStore((state) => state.user?.autoLoadNext ?? true);
 
-  const [step, setStep] = useState<Step>("categories");
+  // Reload-restore: a saved categoryId means the user was browsing a category's
+  // sentences -- "record" never survives a reload (the in-progress audio can't),
+  // so the nearest meaningful "same spot" to return to is that category's list.
+  const [initialCategoryId] = useState(() => readUrlParam("categoryId", ""));
+  const [initialCategoryName] = useState(() => readUrlParam("categoryName", ""));
+  const [step, setStep] = useState<Step>(() => (initialCategoryId ? "category" : "categories"));
 
   // Which of the three languages to read the sentences in. Remembered between visits.
   const [promptLanguage, setPromptLanguage] = useState<SentenceLanguage>("english");
@@ -85,14 +91,16 @@ function TranslatePageInner() {
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
   // The open category's sentences, in the admin's order. Searched / filtered / paged by the server.
-  const [activeCategory, setActiveCategory] = useState<ActiveCategory | null>(null);
+  const [activeCategory, setActiveCategory] = useState<ActiveCategory | null>(() =>
+    initialCategoryId ? { id: initialCategoryId, name: initialCategoryName } : null,
+  );
   const [items, setItems] = useState<SentenceItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(LIST_PAGE_SIZE);
-  const [search, setSearch] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [filter, setFilter] = useState<TranslatedFilter>("");
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", LIST_PAGE_SIZE));
+  const [search, setSearch] = useState(() => readUrlParam("search", ""));
+  const [debouncedSearch, setDebouncedSearch] = useState(() => readUrlParam("search", ""));
+  const [filter, setFilter] = useState<TranslatedFilter>(() => readUrlParam("filter", "") as TranslatedFilter);
   const [loadingList, setLoadingList] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -146,6 +154,15 @@ function TranslatePageInner() {
     }, 300);
     return () => clearTimeout(t);
   }, [search]);
+
+  useUrlStateSync({
+    categoryId: activeCategory?.id,
+    categoryName: activeCategory?.name,
+    offset,
+    limit,
+    search: debouncedSearch,
+    filter,
+  });
 
   useEffect(() => {
     if (step !== "category" || !activeCategory) return;
@@ -411,7 +428,10 @@ function TranslatePageInner() {
       <div className="mx-auto max-w-2xl space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <button
-            onClick={() => setStep("categories")}
+            onClick={() => {
+              setActiveCategory(null);
+              setStep("categories");
+            }}
             className="btn-duo btn-duo-secondary shrink-0 bg-surface-card px-3 py-1.5 text-xs font-medium text-ink hover:bg-border"
           >
             ← All topics

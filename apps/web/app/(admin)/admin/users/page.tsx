@@ -24,6 +24,7 @@ import { AdminMultiSelect } from "@/components/admin-multi-select";
 import { AdminUserActionModal } from "@/components/admin-user-action-modal";
 import { AdminUserDetailsModal } from "@/components/admin-user-details-modal";
 import { AdminUserCredentialsModal } from "@/components/admin-user-credentials-modal";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -137,13 +138,49 @@ function dedupeById<T extends { id: string }>(lists: T[][]): T[] {
   return Array.from(map.values());
 }
 
+function readUrlArray(key: string): string[] {
+  const raw = readUrlParam(key, "");
+  return raw ? raw.split(",").filter(Boolean) : [];
+}
+
+function readInitialFilters(): Filters {
+  return {
+    search: readUrlParam("search", ""),
+    role: readUrlArray("role"),
+    status: readUrlArray("status") as UserStatusFilter[],
+    gender: readUrlArray("gender") as GenderOption[],
+    educationLevel: readUrlArray("educationLevel") as EducationLevel[],
+    tribeId: readUrlArray("tribeId"),
+    subTribeId: readUrlArray("subTribeId"),
+    villageId: readUrlArray("villageId"),
+    quarterId: readUrlArray("quarterId"),
+    country: readUrlParam("country", ""),
+    city: readUrlParam("city", ""),
+    motherTongue: readUrlParam("motherTongue", ""),
+    profession: readUrlParam("profession", ""),
+    minAge: readUrlParam("minAge", ""),
+    maxAge: readUrlParam("maxAge", ""),
+    level: readUrlArray("level") as ContributorLevel[],
+    minContributions: readUrlParam("minContributions", ""),
+    maxContributions: readUrlParam("maxContributions", ""),
+    minVerified: readUrlParam("minVerified", ""),
+    minPoints: readUrlParam("minPoints", ""),
+    maxPoints: readUrlParam("maxPoints", ""),
+    minReviews: readUrlParam("minReviews", ""),
+    activity: readUrlParam("activity", "") as Filters["activity"],
+    joinedFrom: readUrlParam("joinedFrom", ""),
+    joinedTo: readUrlParam("joinedTo", ""),
+    sort: readUrlParam("sort", "created_desc") as UserSortOption,
+  };
+}
+
 export default function AdminUsersPage() {
   const currentUser = useAuthStore((s) => s.user);
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<Filters>(readInitialFilters);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", DEFAULT_PAGE_SIZE));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -220,6 +257,37 @@ export default function AdminUsersPage() {
     const timeout = setTimeout(load, 250);
     return () => clearTimeout(timeout);
   }, [load]);
+
+  useUrlStateSync({
+    offset,
+    limit,
+    search: filters.search,
+    role: filters.role.join(","),
+    status: filters.status.join(","),
+    gender: filters.gender.join(","),
+    educationLevel: filters.educationLevel.join(","),
+    tribeId: filters.tribeId.join(","),
+    subTribeId: filters.subTribeId.join(","),
+    villageId: filters.villageId.join(","),
+    quarterId: filters.quarterId.join(","),
+    country: filters.country,
+    city: filters.city,
+    motherTongue: filters.motherTongue,
+    profession: filters.profession,
+    minAge: filters.minAge,
+    maxAge: filters.maxAge,
+    level: filters.level.join(","),
+    minContributions: filters.minContributions,
+    maxContributions: filters.maxContributions,
+    minVerified: filters.minVerified,
+    minPoints: filters.minPoints,
+    maxPoints: filters.maxPoints,
+    minReviews: filters.minReviews,
+    activity: filters.activity,
+    joinedFrom: filters.joinedFrom,
+    joinedTo: filters.joinedTo,
+    sort: filters.sort,
+  });
 
   useEffect(() => {
     api.demographics.getTribes().then(setTribes).catch(() => setTribes([]));

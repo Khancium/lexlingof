@@ -22,6 +22,7 @@ import {
 import { EDUCATION_LEVEL_OPTIONS, GENDER_OPTIONS } from "@/lib/demographics-constants";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminMultiSelect as MultiSelect } from "@/components/admin-multi-select";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 const PAGE_SIZE = 20;
 
@@ -421,10 +422,34 @@ function RecordingRow({
   );
 }
 
+function readUrlArray(key: string): string[] {
+  const raw = readUrlParam(key, "");
+  return raw ? raw.split(",").filter(Boolean) : [];
+}
+
+function readInitialFilters(): Filters {
+  return {
+    search: readUrlParam("search", ""),
+    status: readUrlArray("status") as ContributionStatusValue[],
+    userId: readUrlParam("userId", ""),
+    languageId: readUrlArray("languageId"),
+    dialectId: readUrlArray("dialectId"),
+    tribeId: readUrlArray("tribeId"),
+    subTribeId: readUrlArray("subTribeId"),
+    country: readUrlParam("country", ""),
+    city: readUrlParam("city", ""),
+    villageId: readUrlArray("villageId"),
+    quarterId: readUrlArray("quarterId"),
+    gender: readUrlArray("gender") as GenderOption[],
+    educationLevel: readUrlArray("educationLevel") as EducationLevel[],
+    profession: readUrlParam("profession", ""),
+  };
+}
+
 export default function AdminPublishingPage() {
-  const [tab, setTab] = useState<Tab>("words");
-  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
-  const [offset, setOffset] = useState(0);
+  const [tab, setTab] = useState<Tab>(() => readUrlParam("tab", "words") as Tab);
+  const [filters, setFilters] = useState<Filters>(readInitialFilters);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
 
   const [conceptItems, setConceptItems] = useState<PublishingConceptItem[]>([]);
   const [sentenceItems, setSentenceItems] = useState<PublishingSentenceItem[]>([]);
@@ -482,6 +507,25 @@ export default function AdminPublishingPage() {
     const timer = setTimeout(load, 300);
     return () => clearTimeout(timer);
   }, [load]);
+
+  useUrlStateSync({
+    tab,
+    offset,
+    search: filters.search,
+    status: filters.status.join(","),
+    userId: filters.userId,
+    languageId: filters.languageId.join(","),
+    dialectId: filters.dialectId.join(","),
+    tribeId: filters.tribeId.join(","),
+    subTribeId: filters.subTribeId.join(","),
+    country: filters.country,
+    city: filters.city,
+    villageId: filters.villageId.join(","),
+    quarterId: filters.quarterId.join(","),
+    gender: filters.gender.join(","),
+    educationLevel: filters.educationLevel.join(","),
+    profession: filters.profession,
+  });
 
   useEffect(() => {
     api.admin.getUserOptions().then(setUsers).catch(() => setUsers([]));

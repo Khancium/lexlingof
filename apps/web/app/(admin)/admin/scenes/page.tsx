@@ -23,6 +23,7 @@ import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 // Loaded on demand only -- see the identical note on the concepts admin page.
 const ImageCropper = dynamic(() => import("@/components/image-cropper").then((m) => m.ImageCropper), { ssr: false });
@@ -99,19 +100,21 @@ export default function AdminScenesPage() {
   // Unpaginated, used only to resolve titles typed into the bulk-by-URL textarea.
   const [allScenes, setAllScenes] = useState<Scene[]>([]);
   const [total, setTotal] = useState(0);
-  const [offset, setOffset] = useState(0);
-  const [limit, setLimit] = useState(DEFAULT_PAGE_SIZE);
+  const [offset, setOffset] = useState(() => readUrlParam("offset", 0));
+  const [limit, setLimit] = useState(() => readUrlParam("limit", DEFAULT_PAGE_SIZE));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [createdFrom, setCreatedFrom] = useState("");
-  const [createdTo, setCreatedTo] = useState("");
-  const [filterCategoryId, setFilterCategoryId] = useState("");
-  const [filterHasImage, setFilterHasImage] = useState<"" | "yes" | "no">("");
+  const [createdFrom, setCreatedFrom] = useState(() => readUrlParam("createdFrom", ""));
+  const [createdTo, setCreatedTo] = useState(() => readUrlParam("createdTo", ""));
+  const [filterCategoryId, setFilterCategoryId] = useState(() => readUrlParam("categoryId", ""));
+  const [filterHasImage, setFilterHasImage] = useState<"" | "yes" | "no">(() => readUrlParam("hasImage", "") as "" | "yes" | "no");
   const [categories, setCategories] = useState<Category[]>([]);
+  const [search, setSearch] = useState(() => readUrlParam("search", ""));
+  const [debouncedSearch, setDebouncedSearch] = useState(() => readUrlParam("search", ""));
   // Volunteer-only "my own additions" filter -- also unlocks their per-row
   // Delete button (see the delete-visibility rule near the list below).
-  const [onlyMine, setOnlyMine] = useState(false);
+  const [onlyMine, setOnlyMine] = useState(() => readUrlParam("mine", false));
 
   const [slug, setSlug] = useState("");
   const [title, setTitle] = useState("");
@@ -162,6 +165,25 @@ export default function AdminScenesPage() {
   const [isBulkHiding, setIsBulkHiding] = useState(false);
   const [togglingActiveId, setTogglingActiveId] = useState<string | null>(null);
 
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setDebouncedSearch(search.trim());
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  useUrlStateSync({
+    offset,
+    limit,
+    search: debouncedSearch,
+    categoryId: filterCategoryId,
+    hasImage: filterHasImage,
+    createdFrom,
+    createdTo,
+    mine: onlyMine,
+  });
+
   // `silent` skips the loading-state swap for a refresh that follows an
   // action already taken on this page -- see the identical note on the
   // concepts admin page's load().
@@ -182,6 +204,7 @@ export default function AdminScenesPage() {
           categoryId: filterCategoryId || undefined,
           hasImage: filterHasImage || undefined,
           mine: isVolunteer && onlyMine ? true : undefined,
+          search: debouncedSearch || undefined,
           // Volunteers don't hold scenes.manage, so this is silently ignored
           // for them server-side and they only ever see active rows.
           includeHidden: true,
@@ -210,7 +233,7 @@ export default function AdminScenesPage() {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, limit, createdFrom, createdTo, filterCategoryId, filterHasImage, onlyMine]);
+  }, [offset, limit, createdFrom, createdTo, filterCategoryId, filterHasImage, onlyMine, debouncedSearch]);
 
   function handleLimitChange(newLimit: number) {
     setLimit(newLimit);
@@ -881,6 +904,12 @@ export default function AdminScenesPage() {
           <option value="yes">Has image</option>
           <option value="no">No image</option>
         </select>
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search title..."
+          className="min-w-[12rem] rounded-lg bg-surface-card px-3 py-2 text-sm text-ink placeholder:text-gray-400 ring-1 ring-border"
+        />
         <label className="flex items-center gap-2 text-sm text-ink-muted">
           Added
           <input
@@ -903,7 +932,7 @@ export default function AdminScenesPage() {
             className="rounded-lg bg-surface-card px-3 py-2 text-sm text-ink ring-1 ring-border"
           />
         </label>
-        {createdFrom || createdTo || filterCategoryId || filterHasImage ? (
+        {createdFrom || createdTo || filterCategoryId || filterHasImage || search ? (
           <button
             type="button"
             onClick={() => {
@@ -911,6 +940,7 @@ export default function AdminScenesPage() {
               setCreatedTo("");
               setFilterCategoryId("");
               setFilterHasImage("");
+              setSearch("");
               setOffset(0);
             }}
             className="text-sm font-semibold text-brand hover:underline"
