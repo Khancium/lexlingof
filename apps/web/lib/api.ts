@@ -1403,7 +1403,9 @@ export const api = {
   },
 
   categories: {
-    getAll: () => apiClient.get<Category[]>("/api/v1/categories").then((r) => r.data),
+    // Pass `module: "scenes"` to get only categories at least one scene is actually tagged with
+    // (scenes have no category of their own -- see loadActiveCategoriesForScenes on the backend).
+    getAll: (params?: { module?: "scenes" }) => apiClient.get<Category[]>("/api/v1/categories", { params }).then((r) => r.data),
     // id can originate from a URL query param a victim didn't type themselves
     // (a shared link) -- encodeURIComponent so a crafted value like "../x"
     // can't redirect this authenticated call to a different API path.
@@ -1690,6 +1692,7 @@ export const api = {
     /** One category name per line -- slug auto-generated, same as the single-create form above. */
     bulkCreateCategoriesText: (names: string[]) =>
       apiClient.post<BulkUploadResult>("/api/v1/admin/categories/bulk-text", { names }).then((r) => r.data),
+    deleteCategory: (id: string) => apiClient.delete(`/api/v1/admin/categories/${encodeURIComponent(id)}`).then((r) => r.data),
     createConcept: (data: AdminConceptInput) =>
       apiClient.post<ConceptDetail | PendingResult>("/api/v1/admin/concepts", data).then((r) => r.data),
     updateConcept: (id: string, data: AdminConceptUpdateInput) =>

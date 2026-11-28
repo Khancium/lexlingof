@@ -3,7 +3,7 @@ import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "../../db/index.js";
-import { categories, conceptMedia, concepts, wordRecordings } from "../../db/schema.js";
+import { categories, conceptMedia, concepts, sceneConcepts, scenes, wordRecordings } from "../../db/schema.js";
 import { hasPermission, verifyToken } from "../../middleware/auth.js";
 import { HttpError } from "../../utils/http-error.js";
 
@@ -86,9 +86,46 @@ async function loadContributedCountsByCategory(userId: string): Promise<Map<stri
 }
 
 const idParamSchema = z.object({ id: z.string().uuid() });
+const categoriesQuerySchema = z.object({ module: z.enum(["scenes"]).optional() });
+
+/**
+ * Categories are a single shared taxonomy, but Scenes don't have any
+ * category of their own -- a scene is only ever linked to one via
+ * scene_concepts (an admin annotation of which concepts/categories appear in
+ * it). Reusing the full concept-category list here meant every scenes
+ * category picker (admin filter, /contribute/scene tiles) showed every
+ * concept category verbatim, including ones with zero scenes -- i.e. word
+ * categories bleeding into scene browsing. This filters down to only
+ * categories that at least one non-deleted, active scene is actually tagged
+ * with.
+ */
+async function loadActiveCategoriesForScenes() {
+  const categoryRows = await db
+    .select()
+    .from(categories)
+    .where(eq(categories.isActive, true))
+    .orderBy(asc(categories.sortOrder));
+
+  const sceneCategoryRows = await db
+    .selectDistinct({ categoryId: sceneConcepts.categoryId })
+    .from(sceneConcepts)
+    .innerJoin(scenes, eq(scenes.id, sceneConcepts.sceneId))
+    .where(and(eq(scenes.isActive, true), isNull(scenes.deletedAt)));
+
+  const categoryIdsWithScenes = new Set(sceneCategoryRows.map((r) => r.categoryId));
+
+  return categoryRows
+    .filter((c) => categoryIdsWithScenes.has(c.id))
+    .map((c) => ({ ...c, conceptCount: 0, contributedCount: 0 }));
+}
 
 export default async function categoriesRoutes(fastify: FastifyInstance) {
   fastify.get("/categories", { preHandler: verifyToken }, async (request) => {
+    const { module: moduleParam } = categoriesQuerySchema.parse(request.query);
+    if (moduleParam === "scenes") {
+      return loadActiveCategoriesForScenes();
+    }
+
     if (!listCache || listCache.expiresAt <= Date.now()) {
       listCache = { data: await loadActiveCategoriesWithCounts(), expiresAt: Date.now() + LIST_CACHE_TTL_MS };
     }

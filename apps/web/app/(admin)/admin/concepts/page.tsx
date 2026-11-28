@@ -485,7 +485,15 @@ export default function AdminConceptsPage() {
         {createInfo ? <p className="text-sm text-emerald-600">{createInfo}</p> : null}
       </div>
 
-      <AdminCreateCategory onCreated={(c) => setCategories((prev) => [...prev, c])} />
+      <AdminCreateCategory
+        onCreated={(c) => setCategories((prev) => [...prev, c])}
+        categories={categories}
+        canDelete={!isVolunteer}
+        onDeleted={(id) => {
+          setCategories((prev) => prev.filter((c) => c.id !== id));
+          if (filterCategoryId === id) setFilterCategoryId("");
+        }}
+      />
 
       {/* Bulk CSV/paste-a-list create and bulk-delete are admin-only -- a
          volunteer's access is single-item create/delete only, per the
