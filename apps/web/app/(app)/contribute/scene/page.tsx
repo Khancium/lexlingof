@@ -81,7 +81,7 @@ function ScenePageInner() {
 
   useEffect(() => {
     api.categories
-      .getAll()
+      .getAll({ module: "scenes" })
       .then(setCategories)
       .catch((err) => setCategoriesError(getErrorMessage(err, "Failed to load categories")))
       .finally(() => setLoadingCategories(false));

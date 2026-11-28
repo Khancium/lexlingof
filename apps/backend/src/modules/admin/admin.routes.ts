@@ -2662,6 +2662,38 @@ export default async function adminRoutes(fastify: FastifyInstance) {
     return result;
   });
 
+  // Shared by Concepts and Scenes (via scene_concepts coverage annotations) --
+  // same not-empty guard as /admin/sentence-categories: a constraint would
+  // refuse the delete anyway, but naming both reference counts up front is a
+  // clearer answer than a raw FK violation.
+  fastify.delete("/admin/categories/:id", { preHandler: [requirePermission("concepts.manage"), forbidVolunteers] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params);
+
+    const [existing] = await db.select().from(categories).where(eq(categories.id, id)).limit(1);
+    if (!existing) throw new HttpError(404, "NOT_FOUND", "Category not found");
+
+    const [[{ n: conceptN } = { n: 0 }], [{ n: sceneN } = { n: 0 }]] = await Promise.all([
+      db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(concepts).where(eq(concepts.categoryId, id)),
+      db.select({ n: sql<number>`count(distinct ${sceneConcepts.sceneId})`.mapWith(Number) }).from(sceneConcepts).where(eq(sceneConcepts.categoryId, id)),
+    ]);
+    if (conceptN > 0 || sceneN > 0) {
+      const parts = [conceptN > 0 ? `${conceptN} concept(s)` : null, sceneN > 0 ? `${sceneN} scene(s)` : null].filter(Boolean);
+      throw new HttpError(409, "CATEGORY_NOT_EMPTY", `This category still has ${parts.join(" and ")} -- move or remove them first`);
+    }
+
+    await db.delete(categories).where(eq(categories.id, id));
+    invalidateCategoriesCache();
+    await writeAuditLog({
+      actorId: request.user!.id,
+      actorRole: request.user!.role,
+      action: "admin_category_delete",
+      resourceType: "category",
+      resourceId: id,
+      beforeState: { nameEnglish: existing.nameEnglish, slug: existing.slug },
+    });
+    reply.code(204).send();
+  });
+
   /* ------------------------------- Concepts ------------------------------- */
 
   fastify.post("/admin/concepts", { preHandler: requirePermission("concepts.manage") }, async (request, reply) => {

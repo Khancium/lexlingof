@@ -23,6 +23,7 @@ import { AdminBulkBar } from "@/components/admin-bulk-bar";
 import { AdminPermanentDeleteButton } from "@/components/admin-permanent-delete-button";
 import { Pagination } from "@/components/admin-pagination";
 import { AdminUndoButton } from "@/components/admin-undo-button";
+import { AdminCreateCategory } from "@/components/admin-create-category";
 import { readUrlParam, useUrlStateSync } from "@/lib/url-state";
 
 // Loaded on demand only -- see the identical note on the concepts admin page.
@@ -209,7 +210,7 @@ export default function AdminScenesPage() {
           // for them server-side and they only ever see active rows.
           includeHidden: true,
         }),
-        api.categories.getAll(),
+        api.categories.getAll({ module: "scenes" }),
       ]);
       setScenes(sceneRes.items);
       setTotal(sceneRes.total);
@@ -776,6 +777,19 @@ export default function AdminScenesPage() {
         {createError ? <p className="text-sm text-red-600">{createError}</p> : null}
         {createInfo ? <p className="text-sm text-emerald-600">{createInfo}</p> : null}
       </div>
+
+      {!isVolunteer ? (
+        <AdminCreateCategory
+          onCreated={() => {}}
+          categories={categories}
+          canDelete
+          hideCreate
+          onDeleted={(id) => {
+            setCategories((prev) => prev.filter((c) => c.id !== id));
+            if (filterCategoryId === id) setFilterCategoryId("");
+          }}
+        />
+      ) : null}
 
       {/* Bulk CSV/paste-a-list create and bulk-delete are admin-only -- a
          volunteer's access is single-item create/delete only, per the
